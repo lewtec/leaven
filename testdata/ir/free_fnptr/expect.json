@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "var current_free func(*byte) = libc.Free",
+        "func release(p *byte)",
+        "func set_free(fn func(*byte))",
+        "cond = libc.Free"
+      ],
+      "not_contains": [
+        "= free",
+        "cond = free"
+      ]
+    }
+  ]
+}

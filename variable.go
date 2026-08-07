@@ -70,6 +70,10 @@ func FormatValue(v value.Value) (string, error) {
 	case *ir.Global:
 		name := VariableName(v)
 		if types.IsFunc(v.ContentType) {
+			// Function used as a value (initializer / assignment), not a call.
+			if renamed, ok := libraryFunctions[name]; ok {
+				return renamed, nil
+			}
 			return name, nil
 		}
 		if renamed, ok := libraryGlobals[name]; ok {
@@ -78,7 +82,12 @@ func FormatValue(v value.Value) (string, error) {
 		return "&" + name, nil
 
 	case value.Named:
-		return VariableName(v), nil
+		name := VariableName(v)
+		// Declarations like @free used as fn values (e.g. current_free = free).
+		if renamed, ok := libraryFunctions[name]; ok {
+			return renamed, nil
+		}
+		return name, nil
 
 	case *ir.Arg:
 		return FormatValue(v.Value)
