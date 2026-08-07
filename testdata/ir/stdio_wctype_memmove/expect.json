@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "func write_bits",
+        "func space_p",
+        "func move_buf",
+        "libc.Fputs",
+        "libc.Fputc",
+        "libc.Iswspace",
+        "libc.Memmove"
+      ],
+      "not_contains": [
+        "llvm_memmove",
+        " = fputs(",
+        " = fputc(",
+        " = iswspace("
+      ]
+    }
+  ]
+}

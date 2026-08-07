@@ -3,6 +3,7 @@ package libc
 import (
 	"fmt"
 	"os"
+	"unicode"
 	"unsafe"
 )
 
@@ -35,6 +36,31 @@ func Fprintf(stream *os.File, format *byte, args ...any) int32 {
 		return -1
 	}
 	return int32(n)
+}
+
+// Fputs is C fputs(s, stream).
+func Fputs(s *byte, stream *os.File) int32 {
+	if stream == nil {
+		return -1
+	}
+	_, err := stream.Write(unsafe.Slice(s, Strlen(s)))
+	if err != nil {
+		return -1
+	}
+	return 0
+}
+
+// Fputc is C fputc(c, stream).
+func Fputc(c int32, stream *os.File) int32 {
+	return Putc(c, stream)
+}
+
+// Iswspace is C iswspace(c) from <wctype.h>.
+func Iswspace(c int32) int32 {
+	if unicode.IsSpace(rune(uint32(c))) {
+		return 1
+	}
+	return 0
 }
 
 // Snprintf is C snprintf(buf, n, format, ...).
