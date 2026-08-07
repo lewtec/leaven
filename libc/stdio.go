@@ -72,6 +72,22 @@ func Iswalnum(c int32) int32 {
 	return 0
 }
 
+// Iswalpha is C iswalpha(c) from <wctype.h>.
+func Iswalpha(c int32) int32 {
+	if unicode.IsLetter(rune(uint32(c))) {
+		return 1
+	}
+	return 0
+}
+
+// Iswdigit is C iswdigit(c) from <wctype.h>.
+func Iswdigit(c int32) int32 {
+	if unicode.IsDigit(rune(uint32(c))) {
+		return 1
+	}
+	return 0
+}
+
 // Dup is C dup(fd). Pure-Go: only maps 0/1/2 to themselves; other FDs
 // return -1 (tree-sitter uses this for print-dot-graph on std FDs).
 func Dup(fd int32) int32 {

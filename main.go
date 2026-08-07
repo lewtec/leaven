@@ -305,6 +305,7 @@ func writeModule(out io.Writer, m *ir.Module, packageName string) error {
 						continue
 					}
 					fmt.Fprintln(out, "\treturn")
+					continue
 				}
 				retVal, err := FormatValue(term.X)
 				if err != nil {
