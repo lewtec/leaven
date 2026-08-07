@@ -5,8 +5,89 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/types"
 )
+
+// taggedPointerTypes are LLVM pointer types that appear as the sole field of a
+// C union (e.g. tree-sitter Subtree = union { InlineData; HeapData * }).
+// Clang collapses those unions to { T* } in IR, but the bit pattern may be a
+// non-pointer tagged value (LSB set). In Go we emit them as uintptr so the GC
+// does not chase tags and accidental deref paths stay explicit.
+var taggedPointerTypes []types.Type
+
+// collectTaggedPointerTypes finds pointer types used as the only field of a
+// union typedef (name starts with "union.").
+func collectTaggedPointerTypes(m *ir.Module) {
+	taggedPointerTypes = nil
+	for _, t := range m.TypeDefs {
+		name := t.Name()
+		if !strings.HasPrefix(name, "union.") {
+			continue
+		}
+		st, ok := t.(*types.StructType)
+		if !ok || len(st.Fields) != 1 {
+			continue
+		}
+		pt, ok := st.Fields[0].(*types.PointerType)
+		if !ok {
+			continue
+		}
+		// Skip function pointers.
+		if _, ok := pt.ElemType.(*types.FuncType); ok {
+			continue
+		}
+		taggedPointerTypes = append(taggedPointerTypes, pt)
+	}
+}
+
+// isTaggedPointerType reports whether t is a pointer type that may hold a
+// tagged non-pointer bit pattern (union field).
+func isTaggedPointerType(t types.Type) bool {
+	for _, tp := range taggedPointerTypes {
+		if types.Equal(t, tp) {
+			return true
+		}
+	}
+	return false
+}
+
+// taggedPointerElemName returns the Go type name of the pointee for casts
+// from uintptr back to a real pointer (e.g. SubtreeHeapData).
+func taggedPointerElemName(t types.Type) (string, error) {
+	pt, ok := t.(*types.PointerType)
+	if !ok {
+		return "", fmt.Errorf("not a pointer type: %v", t)
+	}
+	// Temporarily ignore tagged map so we get the real struct name / def.
+	return typeSpecIgnoringTagged(pt.ElemType)
+}
+
+// typeSpecIgnoringTagged is TypeSpec without rewriting tagged pointers to
+// uintptr (used when we need the real pointee type for a cast).
+func typeSpecIgnoringTagged(t types.Type) (string, error) {
+	if name := TypeName(t); name != "" {
+		return name, nil
+	}
+	return typeDefinitionIgnoringTagged(t)
+}
+
+func typeDefinitionIgnoringTagged(t types.Type) (string, error) {
+	// Only need struct/int/pointer names for pointee of tagged types.
+	switch t := t.(type) {
+	case *types.PointerType:
+		if _, ok := t.ElemType.(*types.FuncType); ok {
+			return TypeDefinition(t.ElemType)
+		}
+		elem, err := typeSpecIgnoringTagged(t.ElemType)
+		if err != nil {
+			return "", err
+		}
+		return "*" + elem, nil
+	default:
+		return TypeDefinition(t)
+	}
+}
 
 // TypeDefinition returns the definition (not just the name) of t.
 func TypeDefinition(t types.Type) (string, error) {
@@ -78,6 +159,10 @@ func TypeDefinition(t types.Type) (string, error) {
 		if _, ok := t.ElemType.(*types.FuncType); ok {
 			// Translate a C function pointer type as a Go function type.
 			return TypeDefinition(t.ElemType)
+		}
+		// Tagged union pointer field: bag-of-bits, not a GC pointer.
+		if isTaggedPointerType(t) {
+			return "uintptr", nil
 		}
 		elemType, err := TypeSpec(t.ElemType)
 		if err != nil {

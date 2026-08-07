@@ -197,6 +197,12 @@ func FormatValue(v value.Value) (string, error) {
 		if isFuncPointerType(v.To) || isFuncPointerType(v.From.Type()) {
 			return fmt.Sprintf("func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", to, from, to), nil
 		}
+		if isTaggedPointerType(v.To) {
+			return fmt.Sprintf("uintptr(unsafe.Pointer(%s))", from), nil
+		}
+		if isTaggedPointerType(v.From.Type()) {
+			return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
+		}
 		return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
 
 	case *constant.ExprIntToPtr:
@@ -304,6 +310,10 @@ func FormatValue(v value.Value) (string, error) {
 		}
 
 	case *constant.Null:
+		// Tagged union pointers are uintptr; use 0 not nil.
+		if isTaggedPointerType(v.Typ) {
+			return "0", nil
+		}
 		return "nil", nil
 
 	case *constant.Struct:

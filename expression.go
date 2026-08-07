@@ -38,6 +38,16 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	}
 	result := source
 
+	// Tagged union pointers are uintptr in Go; cast to real pointer before GEP.
+	if pt, ok := src.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
+		elemName, err := taggedPointerElemName(pt)
+		if err != nil {
+			return "", err
+		}
+		result = fmt.Sprintf("(*%s)(unsafe.Pointer(%s))", elemName, result)
+		source = result
+	}
+
 	if !zeroFirstIndex {
 		firstIndex, err := FormatValue(indices[0])
 		if err != nil {
