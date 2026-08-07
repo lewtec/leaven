@@ -70,7 +70,18 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 				// If it's an array, allocate an extra byte to allow indexing off the end.
 				return fmt.Sprintf("%s = &new(struct{v %s; b byte}).v", VariableName(inst), t), nil
 			}
-			return fmt.Sprintf("%s = new(%s)", VariableName(inst), t), nil
+			expr := fmt.Sprintf("new(%s)", t)
+			// Alloca of T yields *T; if *T is a tagged union pointer, store as uintptr.
+			// Retain so GC won't free when only a uintptr handle remains.
+			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
+				return fmt.Sprintf("%s = uintptr(unsafe.Pointer(libc.Retain(%s)))", VariableName(inst), expr), nil
+			}
+			// If T itself is a tagged pointer type (alloca of the pointer slot).
+			if isTaggedPointerType(inst.ElemType) {
+				// t is "uintptr"; new(uintptr) is *uintptr — slot for a pointer-sized bag of bits.
+				return fmt.Sprintf("%s = new(uintptr)", VariableName(inst)), nil
+			}
+			return fmt.Sprintf("%s = %s", VariableName(inst), expr), nil
 		}
 		nElems, err := FormatValue(inst.NElems)
 		if err != nil {
@@ -124,6 +135,13 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
 		if isFuncPointerType(inst.To) || isFuncPointerType(inst.From.Type()) {
 			return fmt.Sprintf("%s = func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", VariableName(inst), to, from, to), nil
+		}
+		// Tagged union pointer (uintptr) ↔ ordinary pointer.
+		if isTaggedPointerType(inst.To) {
+			return fmt.Sprintf("%s = uintptr(unsafe.Pointer(%s))", VariableName(inst), from), nil
+		}
+		if isTaggedPointerType(inst.From.Type()) {
+			return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
 		}
 		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
 
@@ -202,7 +220,13 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if types.Equal(inst.Type(), types.Void) {
 			return fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", ")), nil
 		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), callee, strings.Join(args, ", ")), nil
+		callExpr := fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", "))
+		// libc malloc/calloc return real *T; convert to uintptr for tagged-union ABI.
+		// Do not wrap calls that already return uintptr (other leaven funcs).
+		if isTaggedPointerType(inst.Type()) && (strings.HasPrefix(callee, "libc.Malloc") || strings.HasPrefix(callee, "libc.Calloc") || strings.HasPrefix(callee, "libc.Realloc")) {
+			callExpr = fmt.Sprintf("uintptr(unsafe.Pointer(%s))", callExpr)
+		}
+		return fmt.Sprintf("%s = %s", VariableName(inst), callExpr), nil
 
 	case *ir.InstExtractElement:
 		x, err := FormatValue(inst.X)
