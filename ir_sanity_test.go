@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/llir/llvm/asm"
 )
 
 // expectTable is the JSON table in each fixture folder (expect.json).
@@ -41,7 +40,7 @@ func TestIRSanity(t *testing.T) {
 			llPath := filepath.Join(dir, "input.ll")
 			tablePath := filepath.Join(dir, "expect.json")
 
-			m, err := asm.ParseFile(llPath)
+			m, err := parseIRFile(llPath)
 			if err != nil {
 				t.Fatalf("parse %s: %v", llPath, err)
 			}

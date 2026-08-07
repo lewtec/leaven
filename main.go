@@ -12,7 +12,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/llir/llvm/asm"
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
@@ -34,7 +33,7 @@ func main() {
 	}
 
 	inFile := flag.Arg(0)
-	m, err := asm.ParseFile(inFile)
+	m, err := parseIRFile(inFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -93,6 +92,7 @@ func writeImports(out io.Writer, body string) {
 		{`"unsafe"`, "unsafe."},
 		{`"math"`, "math."},
 		{`"os"`, "os."},
+		{`"sync/atomic"`, "atomic."},
 		{`"github.com/andybalholm/leaven/libc"`, "libc."},
 	}
 	var paths []string
