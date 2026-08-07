@@ -830,6 +830,7 @@ var libraryFunctions = map[string]string{
 	"strcmp":           "libc.Strcmp",
 	"strcpy":           "libc.Strcpy",
 	"strcspn":          "libc.Strcspn",
+	"strlen":           "libc.Strlen",
 	"strncat":          "libc.Strncat",
 	"strncmp":          "libc.Strncmp",
 	"strncpy":          "libc.Strncpy",
