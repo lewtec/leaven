@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/llir/llvm/ir"
@@ -195,6 +196,9 @@ func FormatValue(v value.Value) (string, error) {
 		return FormatValue(v.Constant)
 
 	case *constant.Int:
+		if v.Typ.BitSize > 64 {
+			return "", fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
+		}
 		var value int64
 		switch {
 		case v.X.IsInt64():
@@ -204,15 +208,21 @@ func FormatValue(v value.Value) (string, error) {
 			// (e.g. i64 all-ones → -1, not 18446744073709551615).
 			value = int64(v.X.Uint64())
 		default:
-			return "", fmt.Errorf("%w: %v", errIntConstTooLarge, v.X)
+			// Truncate wide math/big values into the declared bit width (≤64).
+			truncated, err := intFromBig(v.X, v.Typ.BitSize)
+			if err != nil {
+				return "", err
+			}
+			value = truncated
 		}
 
-		switch v.Typ.BitSize {
-		case 1:
+		if v.Typ.BitSize == 1 {
 			if value != 0 {
 				return "true", nil
 			}
 			return "false", nil
+		}
+		switch goIntBits(v.Typ.BitSize) {
 		case 8:
 			return fmt.Sprint(byte(value)), nil
 		case 16:
@@ -305,6 +315,24 @@ var libraryGlobals = map[string]string{
 	"stderr": "os.Stderr",
 }
 
+// intFromBig truncates x to bitSize bits and returns it as int64 (two's complement).
+func intFromBig(x *big.Int, bitSize uint64) (int64, error) {
+	if bitSize == 0 || bitSize > 64 {
+		return 0, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, bitSize)
+	}
+	mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bitSize)), big.NewInt(1))
+	t := new(big.Int).And(x, mask)
+	// Sign-extend if the high bit of the field is set.
+	sign := new(big.Int).Lsh(big.NewInt(1), uint(bitSize-1))
+	if t.Cmp(sign) >= 0 {
+		t.Sub(t, new(big.Int).Lsh(big.NewInt(1), uint(bitSize)))
+	}
+	if !t.IsInt64() {
+		return 0, fmt.Errorf("%w: %v", errIntConstTooLarge, x)
+	}
+	return t.Int64(), nil
+}
+
 // formatICmp translates an icmp predicate and operands to a Go comparison expr.
 func formatICmp(pred enum.IPred, xVal, yVal value.Value) (string, error) {
 	var op string
@@ -362,11 +390,12 @@ func formatZExt(from value.Value, to types.Type) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error translating source (%v): %w", from, err)
 	}
+	w := goIntBits(toType.BitSize)
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 		// bool → int expression (no statements in constant-expr context).
-		return fmt.Sprintf("map[bool]int%d{true: 1, false: 0}[%s]", toType.BitSize, src), nil
+		return fmt.Sprintf("map[bool]int%d{true: 1, false: 0}[%s]", w, src), nil
 	}
-	return fmt.Sprintf("int%d(uint%d(%s))", toType.BitSize, toType.BitSize, src), nil
+	return fmt.Sprintf("int%d(uint%d(%s))", w, w, src), nil
 }
 
 // formatSExt is the expression form of sext.
@@ -379,7 +408,7 @@ func formatSExt(from value.Value, to types.Type) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	return fmt.Sprintf("int%d(%s)", toType.BitSize, src), nil
+	return fmt.Sprintf("int%d(%s)", goIntBits(toType.BitSize), src), nil
 }
 
 // formatTrunc is the expression form of trunc.
@@ -427,34 +456,42 @@ func FormatUnsigned(v value.Value) (string, error) {
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
+		if ci.Typ.BitSize > 64 {
+			return "", fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, ci.Typ.BitSize, ci.X)
+		}
 		var value uint64
 		switch {
 		case ci.X.IsUint64():
 			value = ci.X.Uint64()
 		case ci.X.IsInt64():
 			value = uint64(ci.X.Int64())
-			switch ci.Typ.BitSize {
+			switch goIntBits(ci.Typ.BitSize) {
 			case 8:
 				return fmt.Sprintf("byte(%d)", byte(value)), nil
 			case 16:
 				return fmt.Sprintf("uint16(%d)", uint16(value)), nil
 			case 32:
 				return fmt.Sprintf("uint32(%d)", uint32(value)), nil
-			case 64:
-				return fmt.Sprintf("uint64(%d)", value), nil
 			default:
 				return fmt.Sprintf("uint64(%d)", value), nil
 			}
 		default:
-			return "", fmt.Errorf("%w: %v", errIntConstTooLarge, ci.X)
+			// Low bitSize bits as unsigned.
+			mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(ci.Typ.BitSize)), big.NewInt(1))
+			t := new(big.Int).And(ci.X, mask)
+			if !t.IsUint64() {
+				return "", fmt.Errorf("%w: %v", errIntConstTooLarge, ci.X)
+			}
+			value = t.Uint64()
 		}
 
-		switch ci.Typ.BitSize {
-		case 1:
+		if ci.Typ.BitSize == 1 {
 			if value != 0 {
 				return "true", nil
 			}
 			return "false", nil
+		}
+		switch goIntBits(ci.Typ.BitSize) {
 		case 8:
 			return fmt.Sprint(byte(value)), nil
 		case 16:
@@ -472,7 +509,7 @@ func FormatUnsigned(v value.Value) (string, error) {
 	switch t := v.Type().(type) {
 	case *types.IntType:
 		if t.BitSize > 8 {
-			return fmt.Sprintf("uint%d(%s)", t.BitSize, result), nil
+			return fmt.Sprintf("uint%d(%s)", goIntBits(t.BitSize), result), nil
 		}
 	case *types.PointerType:
 		return fmt.Sprintf("uintptr(unsafe.Pointer(%s))", result), nil

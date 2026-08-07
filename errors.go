@@ -29,6 +29,7 @@ var (
 	errUnsupportedType      = errors.New("unsupported type")
 
 	errIntConstTooLarge     = errors.New("integer constant too large")
+	errUnsupportedIntWidth  = errors.New("unsupported integer bit width")
 	errUnsupportedUndefType = errors.New("unsupported type for undefined constant")
 	errUnsupportedValueType = errors.New("unsupported type of value to translate")
 )
