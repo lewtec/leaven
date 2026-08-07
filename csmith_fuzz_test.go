@@ -281,6 +281,10 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 
 	nativeOut, err := runWithTimeout(nativeBin, tools.timeout)
 	if err != nil {
+		// Infinite/very long loops in csmith programs are not leaven bugs.
+		if strings.Contains(err.Error(), "timeout") {
+			t.Skipf("native run seed=%d: %v (skip; not a leaven failure)", seed, err)
+		}
 		t.Fatalf("native run seed=%d: %v\n%s", seed, err, nativeOut)
 	}
 
