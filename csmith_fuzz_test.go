@@ -18,22 +18,19 @@ import (
 //
 // Build tag: csmith (normal `go test` skips this file).
 //
-//	mise install   # clang 14 + go + goimports
+//	mise install   # clang 14, prebuilt csmith, go, goimports
 //	go install .
-//	export CSMITH_HOME=/path/to/csmith/prefix   # or CSMITH=/path/to/csmith
 //	go test -tags=csmith -run TestCsmithFixedSeeds -v -count=1
 //	go test -tags=csmith -fuzz=FuzzCsmith -fuzztime=30s
 //
-// Required tools (resolved at runtime — no install paths in code):
+// Required tools on PATH (via mise.toml; overrides optional):
 //
-//	CSMITH       – absolute path to the csmith binary, or
-//	CSMITH_HOME  – install prefix ($CSMITH_HOME/bin/csmith + …/include)
-//	clang        – on PATH (mise: conda:clang@14)
-//	leaven       – on PATH (go install .)
-//	goimports    – on PATH
+//	csmith / clang / leaven / goimports / go
 //
-// Optional:
+// Optional env:
 //
+//	CSMITH            – absolute path to the csmith binary
+//	CSMITH_HOME       – install prefix (bin/csmith + include…/csmith.h)
 //	CSMITH_ITERS      – random seeds for TestCsmithRandom (default 5)
 //	CSMITH_TIMEOUT    – per-binary run timeout (default 5s)
 //	CSMITH_EXTRA_ARGS – extra csmith flags (space-separated)
@@ -83,7 +80,7 @@ func TestCsmithRandom(t *testing.T) {
 
 // FuzzCsmith feeds seeds into the same pipeline. Run with:
 //
-//	CSMITH_HOME=... go test -fuzz=FuzzCsmith -fuzztime=30s
+//	go test -tags=csmith -fuzz=FuzzCsmith -fuzztime=30s
 func FuzzCsmith(f *testing.F) {
 	for _, s := range []uint64{1, 2, 3, 7, 42, 99} {
 		f.Add(s)
@@ -147,8 +144,9 @@ func requireCsmithTools(t *testing.T) csmithTools {
 	}
 }
 
-// resolveCsmith finds the binary and runtime include dir from the environment.
-// Prefer CSMITH (absolute path to the binary). CSMITH_HOME is the install prefix.
+// resolveCsmith finds the binary and the directory that contains csmith.h.
+// Order: CSMITH, CSMITH_HOME, then PATH (mise puts github:…/csmith-bin there).
+// Include layouts vary: plain include/ vs include/csmith-<ver>/.
 func resolveCsmith() (csmithBin, includeDir string, err error) {
 	if p := os.Getenv("CSMITH"); p != "" {
 		if !filepath.IsAbs(p) {
@@ -157,14 +155,13 @@ func resolveCsmith() (csmithBin, includeDir string, err error) {
 		if st, e := os.Stat(p); e != nil || st.IsDir() {
 			return "", "", fmt.Errorf("CSMITH=%q is not a usable binary: %v", p, e)
 		}
-		// Default include: ../include next to bin/
 		home := filepath.Dir(filepath.Dir(p))
-		inc := filepath.Join(home, "include")
 		if envHome := os.Getenv("CSMITH_HOME"); envHome != "" {
-			inc = filepath.Join(envHome, "include")
+			home = envHome
 		}
-		if st, e := os.Stat(filepath.Join(inc, "csmith.h")); e != nil || st.IsDir() {
-			return "", "", fmt.Errorf("csmith.h not found under %s (set CSMITH_HOME)", inc)
+		inc, e := findCsmithInclude(home)
+		if e != nil {
+			return "", "", e
 		}
 		return p, inc, nil
 	}
@@ -174,28 +171,57 @@ func resolveCsmith() (csmithBin, includeDir string, err error) {
 			return "", "", fmt.Errorf("CSMITH_HOME must be an absolute path, got %q", home)
 		}
 		bin := filepath.Join(home, "bin", "csmith")
-		inc := filepath.Join(home, "include")
 		if st, e := os.Stat(bin); e != nil || st.IsDir() {
 			return "", "", fmt.Errorf("csmith binary not found at %s: %v", bin, e)
 		}
-		if st, e := os.Stat(filepath.Join(inc, "csmith.h")); e != nil || st.IsDir() {
-			return "", "", fmt.Errorf("csmith.h not found under %s", inc)
+		inc, e := findCsmithInclude(home)
+		if e != nil {
+			return "", "", e
 		}
 		return bin, inc, nil
 	}
 
-	// Last resort: PATH (still no hard-coded install locations).
-	if p, e := exec.LookPath("csmith"); e == nil {
-		abs, _ := filepath.Abs(p)
-		home := filepath.Dir(filepath.Dir(abs))
-		inc := filepath.Join(home, "include")
-		if _, e := os.Stat(filepath.Join(inc, "csmith.h")); e == nil {
-			return abs, inc, nil
-		}
-		return "", "", fmt.Errorf("csmith is on PATH (%s) but csmith.h was not found next to it; set CSMITH_HOME", abs)
+	p, e := exec.LookPath("csmith")
+	if e != nil {
+		return "", "", fmt.Errorf("csmith not on PATH (run: mise install)")
 	}
+	abs, _ := filepath.Abs(p)
+	home := filepath.Dir(filepath.Dir(abs))
+	inc, e := findCsmithInclude(home)
+	if e != nil {
+		return "", "", fmt.Errorf("csmith on PATH (%s) but %w", abs, e)
+	}
+	return abs, inc, nil
+}
 
-	return "", "", fmt.Errorf("set CSMITH (absolute path to binary) or CSMITH_HOME (install prefix)")
+// findCsmithInclude locates the directory containing csmith.h under prefix.
+func findCsmithInclude(prefix string) (string, error) {
+	candidates := []string{
+		filepath.Join(prefix, "include"),
+	}
+	if matches, _ := filepath.Glob(filepath.Join(prefix, "include", "csmith*")); len(matches) > 0 {
+		candidates = append(candidates, matches...)
+	}
+	for _, dir := range candidates {
+		if st, err := os.Stat(filepath.Join(dir, "csmith.h")); err == nil && !st.IsDir() {
+			return dir, nil
+		}
+	}
+	// One-level walk under include/ for versioned layouts.
+	incRoot := filepath.Join(prefix, "include")
+	entries, err := os.ReadDir(incRoot)
+	if err == nil {
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				continue
+			}
+			dir := filepath.Join(incRoot, ent.Name())
+			if st, err := os.Stat(filepath.Join(dir, "csmith.h")); err == nil && !st.IsDir() {
+				return dir, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("csmith.h not found under %s/include", prefix)
 }
 
 // defaultCsmithArgs keeps programs smaller / closer to what leaven can handle.
