@@ -129,12 +129,15 @@ func goIntBits(bits uint64) uint64 {
 }
 
 // TypeName returns t's name, or the empty string if t is not a named type.
+// Clang anonymous structs become names like "anon.1"; those are sanitized to
+// legal Go identifiers (anon_1). Library renames (e.g. FILE → os.File) are
+// returned as-is so callers can detect the package-qualified form.
 func TypeName(t types.Type) string {
 	name := t.Name()
 	name = strings.TrimPrefix(name, "struct.")
 	name = strings.TrimPrefix(name, "union.")
 
-	if name == "anon" {
+	if name == "" || name == "anon" {
 		return ""
 	}
 
@@ -142,6 +145,18 @@ func TypeName(t types.Type) string {
 		return renamed
 	}
 
+	// Sanitize remaining punctuation from LLVM/clang type names.
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, "-", "_")
+	if name == "" {
+		return ""
+	}
+	if c := name[0]; '0' <= c && c <= '9' {
+		name = "T" + name
+	}
+	if invalidNames[name] {
+		name = "_" + name
+	}
 	return name
 }
 
