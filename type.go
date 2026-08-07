@@ -161,7 +161,8 @@ func TypeName(t types.Type) string {
 }
 
 var libraryTypes = map[string]string{
-	"FILE": "os.File",
+	"FILE":     "os.File",
+	"_IO_FILE": "os.File", // glibc / clang struct name for FILE
 }
 
 // compatiblePointerTypes returns whether casting t1 to t2 is allowed.

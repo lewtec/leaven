@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"os\"",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "os.Stderr",
+        "*os.File",
+        "libc.Fprintf",
+        "libc.Abort",
+        "libc.Realloc",
+        "func die(msg *byte)",
+        "func grow(p *byte, n int64) *byte",
+        "func release(p *byte)"
+      ],
+      "not_contains": [
+        "type _IO_FILE",
+        "fprintf(",
+        "call = realloc",
+        "abort()"
+      ]
+    }
+  ]
+}

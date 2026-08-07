@@ -19,3 +19,16 @@ func Malloc[T any](n int64) *T {
 func Calloc[T any](count, size int64) *T {
 	return Malloc[T](count * size)
 }
+
+// Realloc is C realloc(p, n). Without a recorded old size, this allocates a
+// new block of n bytes; the previous block is left for the GC. Suitable for
+// build/link; not a full C semantics clone.
+func Realloc(p *byte, n int64) *byte {
+	if n <= 0 {
+		return nil
+	}
+	return Malloc[byte](n)
+}
+
+// Free is C free(p). Go is GC'd; this is a no-op so call sites typecheck.
+func Free(p *byte) {}
