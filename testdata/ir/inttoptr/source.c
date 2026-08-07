@@ -1,3 +1,4 @@
+/* inttoptr — inttoptr/ptrtoint for tagged-pointer patterns */
 #include <stdint.h>
 
 void *int_to_ptr(uint64_t x) {

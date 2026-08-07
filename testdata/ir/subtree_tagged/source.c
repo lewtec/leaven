@@ -1,3 +1,7 @@
+/* subtree_tagged — tree-sitter Subtree tagged union (inline LSB vs heap ptr)
+ * clang-14 -S -emit-llvm -fno-discard-value-names -std=gnu11 -O0 -o input.ll source.c
+ * Expect: inline depends=0, heap depends=1 (and no GC crash).
+ */
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

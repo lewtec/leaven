@@ -1,3 +1,4 @@
+/* libc_miss — fprintf, abort, realloc, FILE/_IO_FILE → *os.File */
 #include <stdio.h>
 #include <stdlib.h>
 

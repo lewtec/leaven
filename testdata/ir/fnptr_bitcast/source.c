@@ -1,3 +1,4 @@
+/* fnptr_bitcast — bitcast between function pointer types (Payload* vs void*) */
 typedef struct TSLexer TSLexer;
 typedef struct { int d; } Payload;
 void *create(void) { return 0; }
