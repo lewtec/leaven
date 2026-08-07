@@ -3,6 +3,8 @@
 *.go
 *_c
 
-# Curated IR fixtures for ir_sanity_test.go
+# Curated IR fixtures: one folder per case (input.ll + expect.json)
 !ir/
-!ir/*.ll
+!ir/*/
+!ir/*/input.ll
+!ir/*/expect.json
