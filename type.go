@@ -58,8 +58,13 @@ func TypeDefinition(t types.Type) (string, error) {
 			return "bool", nil
 		case t.BitSize <= 8:
 			return "byte", nil
+		case t.BitSize <= 64:
+			// Bitfields and other non-power-of-two widths (e.g. i24) map to the
+			// next wider Go integer type (int16/int32/int64).
+			return fmt.Sprintf("int%d", goIntBits(t.BitSize)), nil
 		default:
-			return fmt.Sprintf("int%d", t.BitSize), nil
+			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
+			return "", fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
 		}
 
 	case *types.PointerType:
@@ -104,6 +109,23 @@ func TypeSpec(t types.Type) (string, error) {
 		return name, nil
 	}
 	return TypeDefinition(t)
+}
+
+// goIntBits rounds an LLVM integer width up to a Go integer width
+// (8, 16, 32, or 64). Widths above 64 stay as-is for the caller to reject.
+func goIntBits(bits uint64) uint64 {
+	switch {
+	case bits <= 8:
+		return 8
+	case bits <= 16:
+		return 16
+	case bits <= 32:
+		return 32
+	case bits <= 64:
+		return 64
+	default:
+		return bits
+	}
 }
 
 // TypeName returns t's name, or the empty string if t is not a named type.

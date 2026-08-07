@@ -382,7 +382,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s >> %s)", VariableName(inst), t.BitSize, x, y), nil
+			return fmt.Sprintf("%s = int%d(%s >> %s)", VariableName(inst), goIntBits(t.BitSize), x, y), nil
 		}
 		return fmt.Sprintf("%s = %s >> %s", VariableName(inst), x, y), nil
 
@@ -452,7 +452,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s / %s)", VariableName(inst), intType.BitSize, x, y), nil
+			return fmt.Sprintf("%s = int%d(%s / %s)", VariableName(inst), goIntBits(intType.BitSize), x, y), nil
 		}
 		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
 
@@ -481,7 +481,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
-		return fmt.Sprintf("%s = int%d(%s)", VariableName(inst), toType.BitSize, from), nil
+		return fmt.Sprintf("%s = int%d(%s)", VariableName(inst), goIntBits(toType.BitSize), from), nil
 
 	case *ir.InstShl:
 		x, err := FormatValue(inst.X)
@@ -548,7 +548,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s %% %s)", VariableName(inst), intType.BitSize, x, y), nil
+			return fmt.Sprintf("%s = int%d(%s %% %s)", VariableName(inst), goIntBits(intType.BitSize), x, y), nil
 		}
 		return fmt.Sprintf("%s = %s %% %s", VariableName(inst), x, y), nil
 
@@ -652,7 +652,8 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 			}
-			return fmt.Sprintf("for i, v := range %s { %s[i] = int%d(uint%d(uint%d(v))) }", from, VariableName(inst), toType.BitSize, toType.BitSize, fromType.BitSize), nil
+			tw, fw := goIntBits(toType.BitSize), goIntBits(fromType.BitSize)
+			return fmt.Sprintf("for i, v := range %s { %s[i] = int%d(uint%d(uint%d(v))) }", from, VariableName(inst), tw, tw, fw), nil
 		}
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
@@ -665,7 +666,8 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return fmt.Sprintf("if %s { %s = 1 } else { %s = 0 }", from, VariableName(inst), VariableName(inst)), nil
 		}
-		return fmt.Sprintf("%s = int%d(uint%d(%s))", VariableName(inst), toType.BitSize, toType.BitSize, from), nil
+		w := goIntBits(toType.BitSize)
+		return fmt.Sprintf("%s = int%d(uint%d(%s))", VariableName(inst), w, w, from), nil
 
 	default:
 		return "", fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
