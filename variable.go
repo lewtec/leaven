@@ -22,7 +22,9 @@ func VariableName(v value.Named) string {
 	if c := name[0]; '0' <= c && c <= '9' {
 		name = "v" + name
 	}
-	name = strings.Replace(name, ".", "_", -1)
+	name = strings.ReplaceAll(name, ".", "_")
+	// Clang/LLVM names like "byval-temp" are not valid Go identifiers.
+	name = strings.ReplaceAll(name, "-", "_")
 	if invalidNames[name] {
 		name = "_" + name
 	}
