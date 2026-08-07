@@ -390,7 +390,17 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		return fmt.Sprintf("%s = %s; %s[%s] = %s", VariableName(inst), x, VariableName(inst), index, elem), nil
 
 	case *ir.InstIntToPtr:
-		return "", errIntToPtr
+		// Needed for tagged pointers (e.g. tree-sitter heap/subtree bits).
+		// Go allows uintptr ↔ unsafe.Pointer conversion for this pattern.
+		from, err := FormatValue(inst.From)
+		if err != nil {
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+		}
+		to, err := TypeSpec(inst.To)
+		if err != nil {
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+		}
+		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(uintptr(%s)))", VariableName(inst), to, from), nil
 
 	case *ir.InstLoad:
 		src, err := FormatValue(inst.Src)

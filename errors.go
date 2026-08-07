@@ -21,8 +21,6 @@ var (
 	errUnsupportedInstruction = errors.New("unsupported instruction type")
 	errStructIndexRange       = errors.New("struct index out of range")
 	errUnsupportedAggregate   = errors.New("unsupported aggregate type for index")
-	errIntToPtr               = errors.New("converting an integer to a pointer violates Go's unsafe.Pointer rules")
-
 	errUnsupportedTerminator = errors.New("unsupported block terminator type")
 
 	errUnsupportedFloatType = errors.New("unsupported floating-point type")

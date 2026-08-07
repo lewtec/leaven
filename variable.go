@@ -168,6 +168,28 @@ func FormatValue(v value.Value) (string, error) {
 		}
 		return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
 
+	case *constant.ExprIntToPtr:
+		from, err := FormatValue(v.From)
+		if err != nil {
+			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
+		}
+		to, err := TypeSpec(v.To)
+		if err != nil {
+			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
+		}
+		return fmt.Sprintf("(%s)(unsafe.Pointer(uintptr(%s)))", to, from), nil
+
+	case *constant.ExprPtrToInt:
+		from, err := FormatValue(v.From)
+		if err != nil {
+			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
+		}
+		to, err := TypeSpec(v.To)
+		if err != nil {
+			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
+		}
+		return fmt.Sprintf("%s(uintptr(unsafe.Pointer(%s)))", to, from), nil
+
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
 		for i, index := range v.Indices {
