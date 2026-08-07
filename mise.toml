@@ -1,6 +1,8 @@
 [tools]
-# Clang 14 for C → LLVM IR (and native reference binaries).
 # Install: mise install
+# Clang 14 for C → LLVM IR and native reference binaries.
 "conda:clang" = "14.0.6"
+# Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
+"github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
