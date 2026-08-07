@@ -182,6 +182,17 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 	return ok1 && ok2
 }
 
+// isFuncPointerType reports whether t is an LLVM pointer-to-function
+// (emitted as a Go func type).
+func isFuncPointerType(t types.Type) bool {
+	pt, ok := t.(*types.PointerType)
+	if !ok {
+		return false
+	}
+	_, ok = pt.ElemType.(*types.FuncType)
+	return ok
+}
+
 // hasPointers returns whether t contains pointers.
 func hasPointers(t types.Type) bool {
 	switch t := t.(type) {
