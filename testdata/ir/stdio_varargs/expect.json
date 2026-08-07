@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "func logf(fmt *byte, varargs ...interface{})",
+        "func file_bits(path *byte)",
+        "libc.Vsnprintf",
+        "libc.Snprintf",
+        "libc.Fdopen",
+        "libc.Fclose",
+        "unsafe.Pointer(&varargs)"
+      ],
+      "not_contains": [
+        "llvm_va_start",
+        "llvm_va_end",
+        " = vsnprintf(",
+        " = snprintf(",
+        " = fdopen(",
+        " = fclose("
+      ]
+    }
+  ]
+}

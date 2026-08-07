@@ -150,6 +150,19 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			if len(args) == 1 {
 				return fmt.Sprintf("*%s = (*byte)(unsafe.Pointer(&varargs))", args[0]), nil
 			}
+		case "llvm_va_start":
+			// System stdarg: va_list is __va_list_tag; store &varargs in
+			// overflow_arg_area (pointer field at offset 8 on amd64).
+			if len(args) == 1 {
+				return fmt.Sprintf("*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(%s), 8)) = unsafe.Pointer(&varargs)", args[0]), nil
+			}
+		case "llvm_va_end":
+			return ";", nil
+		case "vsnprintf":
+			// ap is *__va_list_tag; libc.Vsnprintf takes *byte.
+			if len(args) == 4 {
+				return fmt.Sprintf("%s = libc.Vsnprintf(%s, %s, %s, (*byte)(unsafe.Pointer(%s)))", VariableName(inst), args[0], args[1], args[2], args[3]), nil
+			}
 		case "ldexp":
 			if len(args) == 2 {
 				return fmt.Sprintf("%s = math.Ldexp(%s, int(%s))", VariableName(inst), args[0], args[1]), nil
@@ -780,6 +793,8 @@ var libraryFunctions = map[string]string{
 	"abort":            "libc.Abort",
 	"__assert_fail":    "libc.AssertFail",
 	"fabs":             "math.Abs",
+	"fclose":           "libc.Fclose",
+	"fdopen":           "libc.Fdopen",
 	"fprintf":          "libc.Fprintf",
 	"free":             "libc.Free",
 	"getchar":          "libc.Getchar",
@@ -798,6 +813,7 @@ var libraryFunctions = map[string]string{
 	"puts":             "libc.Puts",
 	"realloc":          "libc.Realloc",
 	"scanf":            "libc.Scanf",
+	"snprintf":         "libc.Snprintf",
 	"sqrt":             "math.Sqrt",
 	"__strcat_chk":     "libc.StrcatChk",
 	"strchr":           "libc.Strchr",
