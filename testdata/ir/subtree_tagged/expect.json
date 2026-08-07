@@ -14,5 +14,11 @@
         "F0 *SubtreeHeapData"
       ]
     }
-  ]
+  ],
+  "run": {
+    "stdout_contains": [
+      "inline depends=0",
+      "heap   depends=1"
+    ]
+  }
 }

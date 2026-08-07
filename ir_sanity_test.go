@@ -3,17 +3,22 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"go/format"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/llir/llvm/ir"
 )
 
 // expectTable is the JSON table in each fixture folder (expect.json).
 type expectTable struct {
 	Cases []expectCase `json:"cases"`
+	// Run, if set, go-builds and runs the generated program as package main.
+	Run *expectRun `json:"run"`
 }
 
 type expectCase struct {
@@ -21,6 +26,12 @@ type expectCase struct {
 	Package     string   `json:"package"`
 	Contains    []string `json:"contains"`
 	NotContains []string `json:"not_contains"`
+}
+
+// expectRun executes generated Go and checks stdout/stderr substrings.
+type expectRun struct {
+	StdoutContains []string `json:"stdout_contains"`
+	StderrContains []string `json:"stderr_contains"`
 }
 
 // TestIRSanity walks testdata/ir/<fixture>/{input.ll,expect.json}.
@@ -93,7 +104,64 @@ func TestIRSanity(t *testing.T) {
 					}
 				})
 			}
+
+			if table.Run != nil {
+				t.Run("run", func(t *testing.T) {
+					runFixtureProgram(t, m, table.Run)
+				})
+			}
 		})
+	}
+}
+
+// runFixtureProgram generates package main, builds in a temp module with a
+// replace to this repo, and checks output (catches panics / wrong runtime).
+func runFixtureProgram(t *testing.T, m *ir.Module, run *expectRun) {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := compile(&buf, m, "main"); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	src, err := format.Source(buf.Bytes())
+	if err != nil {
+		t.Fatalf("go/format: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), src, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Module path of this checkout (for replace).
+	modRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod := fmt.Sprintf("module leavenfixture\n\ngo 1.22\n\nrequire github.com/andybalholm/leaven v0.0.0\n\nreplace github.com/andybalholm/leaven => %s\n", modRoot)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run: %v\n---- output ----\n%s", err, out)
+	}
+	text := string(out)
+	for _, s := range run.StdoutContains {
+		if !strings.Contains(text, s) {
+			t.Errorf("output missing %q\n---- output ----\n%s", s, text)
+		}
+	}
+	for _, s := range run.StderrContains {
+		if !strings.Contains(text, s) {
+			t.Errorf("output missing stderr %q\n---- output ----\n%s", s, text)
+		}
 	}
 }
 
