@@ -121,6 +121,10 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
+		// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
+		if isFuncPointerType(inst.To) || isFuncPointerType(inst.From.Type()) {
+			return fmt.Sprintf("%s = func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", VariableName(inst), to, from, to), nil
+		}
 		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
 
 	case *ir.InstCall:
@@ -806,7 +810,9 @@ var libraryFunctions = map[string]string{
 	"iswalnum":         "libc.Iswalnum",
 	"iswalpha":         "libc.Iswalpha",
 	"iswdigit":         "libc.Iswdigit",
+	"iswlower":         "libc.Iswlower",
 	"iswspace":         "libc.Iswspace",
+	"iswupper":         "libc.Iswupper",
 	"leaven_va_arg":    "libc.VAArg",
 	"llvm_fabs_f64":    "math.Abs",
 	"llvm_fabs_f80":    "math.Abs",

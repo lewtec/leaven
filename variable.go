@@ -193,6 +193,10 @@ func FormatValue(v value.Value) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
+		// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
+		if isFuncPointerType(v.To) || isFuncPointerType(v.From.Type()) {
+			return fmt.Sprintf("func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", to, from, to), nil
+		}
 		return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
 
 	case *constant.ExprIntToPtr:
