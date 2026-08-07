@@ -181,7 +181,8 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			}
 		case "llvm_lifetime_start", "llvm_lifetime_end":
 			return ";", nil
-		case "llvm_memcpy_p0i8_p0i8_i64":
+		case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64":
+			// Intrinsic last arg is isvolatile; ignore it.
 			return fmt.Sprintf("libc.Memmove(%s, %s, %s)", args[0], args[1], args[2]), nil
 		case "llvm_memset_p0i8_i64":
 			return fmt.Sprintf("libc.Memset(%s, %s, %s)", args[0], args[1], args[2]), nil
@@ -796,8 +797,11 @@ var libraryFunctions = map[string]string{
 	"fclose":           "libc.Fclose",
 	"fdopen":           "libc.Fdopen",
 	"fprintf":          "libc.Fprintf",
+	"fputc":            "libc.Fputc",
+	"fputs":            "libc.Fputs",
 	"free":             "libc.Free",
 	"getchar":          "libc.Getchar",
+	"iswspace":         "libc.Iswspace",
 	"leaven_va_arg":    "libc.VAArg",
 	"llvm_fabs_f64":    "math.Abs",
 	"llvm_fabs_f80":    "math.Abs",
@@ -805,6 +809,7 @@ var libraryFunctions = map[string]string{
 	"memchr":           "libc.Memchr",
 	"memcmp":           "libc.Memcmp",
 	"__memcpy_chk":     "libc.MemcpyChk",
+	"memmove":          "libc.Memmove",
 	"memset_pattern16": "libc.MemsetPattern16",
 	"__memset_chk":     "libc.MemsetChk",
 	"printf":           "libc.Printf",
