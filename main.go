@@ -1,12 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/llir/llvm/asm"
 	"github.com/llir/llvm/ir"
@@ -15,12 +18,21 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: leaven input-file.ll")
+	packageName := flag.String("package", "main", "Go package name for generated code")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: leaven [flags] input-file.ll\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+	if flag.NArg() != 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
+	if err := validatePackageName(*packageName); err != nil {
+		log.Fatal(err)
+	}
 
-	inFile := os.Args[1]
+	inFile := flag.Arg(0)
 	m, err := asm.ParseFile(inFile)
 	if err != nil {
 		log.Fatal(err)
@@ -33,14 +45,34 @@ func main() {
 	}
 	defer out.Close()
 
-	err = compile(out, m)
+	err = compile(out, m, *packageName)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func compile(out io.Writer, m *ir.Module) error {
-	fmt.Fprint(out, "package main\n\n")
+// validatePackageName checks that name is a legal Go package identifier.
+func validatePackageName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: empty package name", errInvalidPackage)
+	}
+	r, size := utf8.DecodeRuneInString(name)
+	if r == utf8.RuneError && size == 1 {
+		return fmt.Errorf("%w: %q", errInvalidPackage, name)
+	}
+	if !unicode.IsLetter(r) && r != '_' {
+		return fmt.Errorf("%w: %q", errInvalidPackage, name)
+	}
+	for _, r := range name[size:] {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return fmt.Errorf("%w: %q", errInvalidPackage, name)
+		}
+	}
+	return nil
+}
+
+func compile(out io.Writer, m *ir.Module, packageName string) error {
+	fmt.Fprintf(out, "package %s\n\n", packageName)
 
 	for _, t := range m.TypeDefs {
 		name := TypeName(t)
@@ -85,8 +117,10 @@ func compile(out io.Writer, m *ir.Module) error {
 		fixMalloc(f)
 
 		name := VariableName(f)
+		// Only package main gets a Go program entry point from C main.
+		isGoMain := name == "main" && packageName == "main"
 
-		if name == "main" {
+		if isGoMain {
 			fmt.Fprintln(out, "func main() {")
 		} else {
 			fmt.Fprintf(out, "func %s(", name)
@@ -234,7 +268,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				if err != nil {
 					return fmt.Errorf("error translating return value (%v): %w", term.X, err)
 				}
-				if f.Name() == "main" {
+				if isGoMain {
 					fmt.Fprintf(out, "\tos.Exit(int(%s))\n", retVal)
 				} else {
 					fmt.Fprintf(out, "\treturn %s\n", retVal)
