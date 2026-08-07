@@ -7,6 +7,7 @@ import (
 
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
@@ -159,6 +160,18 @@ func FormatValue(v value.Value) (string, error) {
 		}
 		return GetElementPtr(v.ElemType, v.Src, indices)
 
+	case *constant.ExprICmp:
+		return formatICmp(v.Pred, v.X, v.Y)
+
+	case *constant.ExprZExt:
+		return formatZExt(v.From, v.To)
+
+	case *constant.ExprSExt:
+		return formatSExt(v.From, v.To)
+
+	case *constant.ExprTrunc:
+		return formatTrunc(v.From, v.To)
+
 	case *constant.Float:
 		result := v.X.String()
 		special := false
@@ -290,6 +303,99 @@ var libraryGlobals = map[string]string{
 	"stdin":  "os.Stdin",
 	"stdout": "os.Stdout",
 	"stderr": "os.Stderr",
+}
+
+// formatICmp translates an icmp predicate and operands to a Go comparison expr.
+func formatICmp(pred enum.IPred, xVal, yVal value.Value) (string, error) {
+	var op string
+	format := FormatValue
+	switch pred {
+	case enum.IPredEQ:
+		op = "=="
+	case enum.IPredNE:
+		op = "!="
+	case enum.IPredSGE:
+		op = ">="
+		format = FormatSigned
+	case enum.IPredSGT:
+		op = ">"
+		format = FormatSigned
+	case enum.IPredSLE:
+		op = "<="
+		format = FormatSigned
+	case enum.IPredSLT:
+		op = "<"
+		format = FormatSigned
+	case enum.IPredUGE:
+		op = ">="
+		format = FormatUnsigned
+	case enum.IPredUGT:
+		op = ">"
+		format = FormatUnsigned
+	case enum.IPredULE:
+		op = "<="
+		format = FormatUnsigned
+	case enum.IPredULT:
+		op = "<"
+		format = FormatUnsigned
+	default:
+		return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
+	}
+	x, err := format(xVal)
+	if err != nil {
+		return "", fmt.Errorf("error translating left operand (%v): %w", xVal, err)
+	}
+	y, err := format(yVal)
+	if err != nil {
+		return "", fmt.Errorf("error translating right operand (%v): %w", yVal, err)
+	}
+	return fmt.Sprintf("%s %s %s", x, op, y), nil
+}
+
+// formatZExt is the expression form of zext (usable in constant expressions).
+func formatZExt(from value.Value, to types.Type) (string, error) {
+	toType, ok := to.(*types.IntType)
+	if !ok {
+		return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
+	}
+	src, err := FormatUnsigned(from)
+	if err != nil {
+		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+		// bool → int expression (no statements in constant-expr context).
+		return fmt.Sprintf("map[bool]int%d{true: 1, false: 0}[%s]", toType.BitSize, src), nil
+	}
+	return fmt.Sprintf("int%d(uint%d(%s))", toType.BitSize, toType.BitSize, src), nil
+}
+
+// formatSExt is the expression form of sext.
+func formatSExt(from value.Value, to types.Type) (string, error) {
+	toType, ok := to.(*types.IntType)
+	if !ok {
+		return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
+	}
+	src, err := FormatSigned(from)
+	if err != nil {
+		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	return fmt.Sprintf("int%d(%s)", toType.BitSize, src), nil
+}
+
+// formatTrunc is the expression form of trunc.
+func formatTrunc(from value.Value, to types.Type) (string, error) {
+	toSpec, err := TypeSpec(to)
+	if err != nil {
+		return "", fmt.Errorf("error translating To type (%v): %w", to, err)
+	}
+	src, err := FormatValue(from)
+	if err != nil {
+		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	if intType, ok := to.(*types.IntType); ok && intType.BitSize < 8 {
+		return fmt.Sprintf("byte(%s & %d)", src, 255>>(8-intType.BitSize)), nil
+	}
+	return fmt.Sprintf("%s(%s)", toSpec, src), nil
 }
 
 // FormatSigned is like FormatValue, except that it converts "byte" to "int8".
