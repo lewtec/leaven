@@ -146,7 +146,18 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 		return true
 	}
 
+	// i8* is the usual stand-in for C void* / char* opaque casts (e.g. array
+	// of pointers → i8* for checksum/memcpy). Allow either side.
+	if isI8Type(e1) || isI8Type(e2) {
+		return true
+	}
+
 	return !hasPointers(e1) && !hasPointers(e2)
+}
+
+func isI8Type(t types.Type) bool {
+	it, ok := t.(*types.IntType)
+	return ok && it.BitSize == 8
 }
 
 // hasPointers returns whether t contains pointers.

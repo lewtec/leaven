@@ -187,6 +187,8 @@ func FormatValue(v value.Value) (string, error) {
 		case v.X.IsInt64():
 			value = v.X.Int64()
 		case v.X.IsUint64():
+			// Reinterpret as two's-complement signed for this bit width
+			// (e.g. i64 all-ones → -1, not 18446744073709551615).
 			value = int64(v.X.Uint64())
 		default:
 			return "", fmt.Errorf("integer constant too large: %v", v.X)
@@ -204,6 +206,9 @@ func FormatValue(v value.Value) (string, error) {
 			return fmt.Sprint(int16(value)), nil
 		case 32:
 			return fmt.Sprint(int32(value)), nil
+		case 64:
+			// Typed so large bit patterns never appear as untyped ints.
+			return fmt.Sprintf("int64(%d)", value), nil
 		default:
 			return fmt.Sprint(value), nil
 		}
@@ -329,8 +334,10 @@ func FormatUnsigned(v value.Value) (string, error) {
 				return fmt.Sprintf("uint16(%d)", uint16(value)), nil
 			case 32:
 				return fmt.Sprintf("uint32(%d)", uint32(value)), nil
+			case 64:
+				return fmt.Sprintf("uint64(%d)", value), nil
 			default:
-				return fmt.Sprint(value), nil
+				return fmt.Sprintf("uint64(%d)", value), nil
 			}
 		default:
 			return "", fmt.Errorf("integer constant too large: %v", ci.X)
@@ -348,6 +355,9 @@ func FormatUnsigned(v value.Value) (string, error) {
 			return fmt.Sprint(uint16(value)), nil
 		case 32:
 			return fmt.Sprint(uint32(value)), nil
+		case 64:
+			// Untyped 18446744073709551615 overflows int64 in Go source.
+			return fmt.Sprintf("uint64(%d)", value), nil
 		default:
 			return fmt.Sprint(value), nil
 		}

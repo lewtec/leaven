@@ -9,6 +9,25 @@ import (
 	"unsafe"
 )
 
+// asUnsigned reinterprets a signed integer arg as unsigned for C-style
+// %x/%X/%o/%u formatting (Go's fmt would otherwise print a leading '-').
+func asUnsigned(a any) any {
+	switch v := a.(type) {
+	case int8:
+		return uint8(v)
+	case int16:
+		return uint16(v)
+	case int32:
+		return uint32(v)
+	case int64:
+		return uint64(v)
+	case int:
+		return uint(v)
+	default:
+		return a
+	}
+}
+
 // fixPrintfFormat converts a printf format string from C-style to Go-style,
 // and makes needed changes to the other arguments as well.
 //
@@ -88,22 +107,18 @@ func fixPrintfFormat(f *byte, args []any) string {
 			if verb == 'i' {
 				verb = 'd'
 			}
+			// C %x/%X/%o print unsigned; Go's fmt signs int32/int64. Match C.
+			if (verb == 'x' || verb == 'X' || verb == 'o') && narg < len(args) {
+				args[narg] = asUnsigned(args[narg])
+			}
 			buf.WriteString(flags)
 			buf.WriteString(string(verb))
 
 		case 'u':
 			buf.WriteString(flags)
 			buf.WriteString("d")
-			if narg >= len(args) {
-				break
-			}
-			switch a := args[narg].(type) {
-			case int16:
-				args[narg] = uint16(a)
-			case int32:
-				args[narg] = uint32(a)
-			case int64:
-				args[narg] = uint64(a)
+			if narg < len(args) {
+				args[narg] = asUnsigned(args[narg])
 			}
 		}
 
