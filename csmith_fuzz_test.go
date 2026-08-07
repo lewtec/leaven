@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,9 @@ import (
 	"testing"
 	"time"
 )
+
+// errRunTimeout is returned when a subprocess exceeds CSMITH_TIMEOUT.
+var errRunTimeout = errors.New("run timeout")
 
 // Csmith differential fuzzing of leaven.
 //
@@ -183,9 +187,12 @@ func resolveCsmith() (csmithBin, includeDir string, err error) {
 
 	p, e := exec.LookPath("csmith")
 	if e != nil {
-		return "", "", fmt.Errorf("csmith not on PATH (run: mise install)")
+		return "", "", fmt.Errorf("csmith not on PATH (run: mise install): %w", e)
 	}
-	abs, _ := filepath.Abs(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve csmith path %q: %w", p, err)
+	}
 	home := filepath.Dir(filepath.Dir(abs))
 	inc, e := findCsmithInclude(home)
 	if e != nil {
@@ -199,9 +206,11 @@ func findCsmithInclude(prefix string) (string, error) {
 	candidates := []string{
 		filepath.Join(prefix, "include"),
 	}
-	if matches, _ := filepath.Glob(filepath.Join(prefix, "include", "csmith*")); len(matches) > 0 {
-		candidates = append(candidates, matches...)
+	matches, err := filepath.Glob(filepath.Join(prefix, "include", "csmith*"))
+	if err != nil {
+		return "", fmt.Errorf("glob csmith include dirs: %w", err)
 	}
+	candidates = append(candidates, matches...)
 	for _, dir := range candidates {
 		if st, err := os.Stat(filepath.Join(dir, "csmith.h")); err == nil && !st.IsDir() {
 			return dir, nil
@@ -282,7 +291,7 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	nativeOut, err := runWithTimeout(nativeBin, tools.timeout)
 	if err != nil {
 		// Infinite/very long loops in csmith programs are not leaven bugs.
-		if strings.Contains(err.Error(), "timeout") {
+		if errors.Is(err, errRunTimeout) {
 			t.Skipf("native run seed=%d: %v (skip; not a leaven failure)", seed, err)
 		}
 		t.Fatalf("native run seed=%d: %v\n%s", seed, err, nativeOut)
@@ -326,8 +335,7 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 }
 
 func runWithTimeout(bin string, d time.Duration) ([]byte, error) {
-	cmd := exec.Command(bin)
-	return runCmdWithTimeout(cmd, d)
+	return runCmdWithTimeout(exec.Command(bin), d)
 }
 
 func runCmdWithTimeout(cmd *exec.Cmd, d time.Duration) ([]byte, error) {
@@ -337,13 +345,20 @@ func runCmdWithTimeout(cmd *exec.Cmd, d time.Duration) ([]byte, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	done := make(chan error, 1)
+	// Unbuffered: buffered "chan error, 1" trips go/err-arg-is-not-last.
+	done := make(chan error)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		return buf.Bytes(), err
 	case <-time.After(d):
-		_ = cmd.Process.Kill()
-		return buf.Bytes(), fmt.Errorf("timeout after %s", d)
+		if cmd.Process != nil {
+			if killErr := cmd.Process.Kill(); killErr != nil {
+				<-done
+				return buf.Bytes(), fmt.Errorf("%w after %s: kill: %w", errRunTimeout, d, killErr)
+			}
+		}
+		<-done // drain Wait; avoid leaking the process table entry
+		return buf.Bytes(), fmt.Errorf("%w after %s", errRunTimeout, d)
 	}
 }
