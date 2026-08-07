@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Realloc",
+        "F0 uintptr",
+        "func new_node",
+        "func depends_on_column"
+      ],
+      "not_contains": []
+    }
+  ],
+  "run": {
+    "stdout_contains": [
+      "inline=1",
+      "ok child_count=1"
+    ]
+  }
+}
