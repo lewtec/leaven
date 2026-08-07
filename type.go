@@ -127,37 +127,14 @@ var libraryTypes = map[string]string{
 	"FILE": "os.File",
 }
 
-// compatiblePointerTypes returns whether casting t1 to t2 can be allowed without
-// causing too many problems for the garbage collector.
+// compatiblePointerTypes returns whether casting t1 to t2 is allowed.
+// Any pointer→pointer bitcast is accepted: C (and csmith) freely reinterprets
+// unions, arrays, and structs via void*/typed pointers; leaven already models
+// those as unsafe.Pointer.
 func compatiblePointerTypes(t1, t2 types.Type) bool {
-	var e1, e2 types.Type
-	if t1, ok := t1.(*types.PointerType); ok {
-		e1 = t1.ElemType
-	} else {
-		return false
-	}
-	if t2, ok := t2.(*types.PointerType); ok {
-		e2 = t2.ElemType
-	} else {
-		return false
-	}
-
-	if types.Equal(e1, e2) {
-		return true
-	}
-
-	// i8* is the usual stand-in for C void* / char* opaque casts (e.g. array
-	// of pointers → i8* for checksum/memcpy). Allow either side.
-	if isI8Type(e1) || isI8Type(e2) {
-		return true
-	}
-
-	return !hasPointers(e1) && !hasPointers(e2)
-}
-
-func isI8Type(t types.Type) bool {
-	it, ok := t.(*types.IntType)
-	return ok && it.BitSize == 8
+	_, ok1 := t1.(*types.PointerType)
+	_, ok2 := t2.(*types.PointerType)
+	return ok1 && ok2
 }
 
 // hasPointers returns whether t contains pointers.
