@@ -25,7 +25,7 @@ func TypeDefinition(t types.Type) (string, error) {
 		case types.FloatKindDouble, types.FloatKindX86_FP80:
 			return "float64", nil
 		default:
-			return "", fmt.Errorf("unsupported floating-point type: %v", t.Kind)
+			return "", fmt.Errorf("%w: %v", errUnsupportedFloatType, t.Kind)
 		}
 
 	case *types.FuncType:
@@ -37,7 +37,7 @@ func TypeDefinition(t types.Type) (string, error) {
 			}
 			pt, err := TypeSpec(p)
 			if err != nil {
-				return "", fmt.Errorf("error converting type of parameter %d (%v): %v", i, p, err)
+				return "", fmt.Errorf("error converting type of parameter %d (%v): %w", i, p, err)
 			}
 			b.WriteString(pt)
 		}
@@ -46,7 +46,7 @@ func TypeDefinition(t types.Type) (string, error) {
 			b.WriteString(" ")
 			rt, err := TypeSpec(t.RetType)
 			if err != nil {
-				return "", fmt.Errorf("error converting return type (%v): %v", t.RetType, err)
+				return "", fmt.Errorf("error converting return type (%v): %w", t.RetType, err)
 			}
 			b.WriteString(rt)
 		}
@@ -79,7 +79,7 @@ func TypeDefinition(t types.Type) (string, error) {
 		for i, field := range t.Fields {
 			fieldType, err := TypeSpec(field)
 			if err != nil {
-				return "", fmt.Errorf("error converting type of field %d: %v", i, err)
+				return "", fmt.Errorf("error converting type of field %d: %w", i, err)
 			}
 			fmt.Fprintf(b, "\tF%d %s\n", i, fieldType)
 		}
@@ -94,7 +94,7 @@ func TypeDefinition(t types.Type) (string, error) {
 		return fmt.Sprintf("[%d]%s", t.Len, elemType), nil
 
 	default:
-		return "", fmt.Errorf("unsupported type %T", t)
+		return "", fmt.Errorf("%w: %T", errUnsupportedType, t)
 	}
 }
 

@@ -70,7 +70,7 @@ func FormatValue(v value.Value) (string, error) {
 	case *constant.Array:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
 		b := new(bytes.Buffer)
 		if len(v.Elems) < 16 {
@@ -82,7 +82,7 @@ func FormatValue(v value.Value) (string, error) {
 				}
 				e, err := FormatValue(c)
 				if err != nil {
-					return "", fmt.Errorf("error translating element %d (%v): %v", i, c, err)
+					return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 				}
 				fmt.Fprint(b, e)
 			}
@@ -100,7 +100,7 @@ func FormatValue(v value.Value) (string, error) {
 				}
 				e, err := FormatValue(c)
 				if err != nil {
-					return "", fmt.Errorf("error translating element %d (%v): %v", i, c, err)
+					return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 				}
 				fmt.Fprint(b, e)
 			}
@@ -111,7 +111,7 @@ func FormatValue(v value.Value) (string, error) {
 	case *constant.CharArray:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
 		b := new(bytes.Buffer)
 		if len(v.X) < 16 {
@@ -144,11 +144,11 @@ func FormatValue(v value.Value) (string, error) {
 	case *constant.ExprBitCast:
 		from, err := FormatValue(v.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", v.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
 		to, err := TypeSpec(v.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
 		return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
 
@@ -191,7 +191,7 @@ func FormatValue(v value.Value) (string, error) {
 			// (e.g. i64 all-ones → -1, not 18446744073709551615).
 			value = int64(v.X.Uint64())
 		default:
-			return "", fmt.Errorf("integer constant too large: %v", v.X)
+			return "", fmt.Errorf("%w: %v", errIntConstTooLarge, v.X)
 		}
 
 		switch v.Typ.BitSize {
@@ -219,7 +219,7 @@ func FormatValue(v value.Value) (string, error) {
 	case *constant.Struct:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
 		b := new(bytes.Buffer)
 		b.WriteString(t)
@@ -230,7 +230,7 @@ func FormatValue(v value.Value) (string, error) {
 			}
 			e, err := FormatValue(c)
 			if err != nil {
-				return "", fmt.Errorf("error translating field %d (%v): %v", i, c, err)
+				return "", fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}
 			fmt.Fprint(b, e)
 		}
@@ -242,7 +242,7 @@ func FormatValue(v value.Value) (string, error) {
 		case *types.ArrayType, *types.StructType, *types.VectorType:
 			t, err := TypeSpec(v.Typ)
 			if err != nil {
-				return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+				return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 			}
 			return t + "{}", nil
 		case *types.IntType, *types.FloatType:
@@ -250,13 +250,13 @@ func FormatValue(v value.Value) (string, error) {
 		case *types.PointerType:
 			return "nil", nil
 		default:
-			return "", fmt.Errorf("unsupported type for undefined constant: %v", v.Typ)
+			return "", fmt.Errorf("%w: %v", errUnsupportedUndefType, v.Typ)
 		}
 
 	case *constant.Vector:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
 		b := new(bytes.Buffer)
 		b.WriteString(t)
@@ -267,7 +267,7 @@ func FormatValue(v value.Value) (string, error) {
 			}
 			e, err := FormatValue(c)
 			if err != nil {
-				return "", fmt.Errorf("error translating element %d (%v): %v", i, c, err)
+				return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 			}
 			fmt.Fprint(b, e)
 		}
@@ -277,12 +277,12 @@ func FormatValue(v value.Value) (string, error) {
 	case *constant.ZeroInitializer:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", v.Typ, err)
+			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
 		return t + "{}", nil
 
 	default:
-		return "", fmt.Errorf("unsupported type of value to translate: %T", v)
+		return "", fmt.Errorf("%w: %T", errUnsupportedValueType, v)
 	}
 }
 
@@ -340,7 +340,7 @@ func FormatUnsigned(v value.Value) (string, error) {
 				return fmt.Sprintf("uint64(%d)", value), nil
 			}
 		default:
-			return "", fmt.Errorf("integer constant too large: %v", ci.X)
+			return "", fmt.Errorf("%w: %v", errIntConstTooLarge, ci.X)
 		}
 
 		switch ci.Typ.BitSize {

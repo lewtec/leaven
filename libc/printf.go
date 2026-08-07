@@ -78,7 +78,10 @@ func fixPrintfFormat(f *byte, args []any) string {
 			for k < len(flags) && '0' <= flags[k] && flags[k] <= '9' {
 				k++
 			}
-			n, _ := strconv.Atoi(flags[j+2 : k])
+			n, err := strconv.Atoi(flags[j+2 : k])
+			if err != nil {
+				n = 0
+			}
 			flags = flags[:j+2] + fmt.Sprint(n-2) + flags[k:]
 		}
 
@@ -194,7 +197,10 @@ func fixScanfFormat(f *byte, args []any) string {
 			for k < len(flags) && '0' <= flags[k] && flags[k] <= '9' {
 				k++
 			}
-			n, _ := strconv.Atoi(flags[j+2 : k])
+			n, err := strconv.Atoi(flags[j+2 : k])
+			if err != nil {
+				n = 0
+			}
 			flags = flags[:j+2] + fmt.Sprint(n-2) + flags[k:]
 		}
 
@@ -279,6 +285,9 @@ func (s *stringScanner) Scan(state fmt.ScanState, verb rune) error {
 
 func Scanf(format *byte, args ...any) int32 {
 	f := fixScanfFormat(format, args)
-	n, _ := fmt.Scanf(f, args...)
+	n, err := fmt.Scanf(f, args...)
+	if err != nil && n == 0 {
+		return -1
+	}
 	return int32(n)
 }
