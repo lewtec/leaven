@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": ["libc.Strlen", "func n"],
+      "not_contains": [" = strlen("]
+    }
+  ]
+}
