@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": [
+        "type anon_1 struct",
+        "var g anon_1 = anon_1{1, 2}",
+        "func get() byte",
+        "v0 = g.F0"
+      ],
+      "not_contains": [
+        "anon.1"
+      ]
+    },
+    {
+      "name": "package-flag",
+      "package": "tslib",
+      "contains": [
+        "package tslib",
+        "type anon_1 struct"
+      ]
+    }
+  ]
+}
