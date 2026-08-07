@@ -1,0 +1,16 @@
+{
+  "cases": [{
+    "name": "package-p",
+    "package": "p",
+    "contains": [
+      "func advance(lexer *TSLexer)",
+      "local_advance",
+      "v1 = *local_advance",
+      "v1(v2, 0)"
+    ],
+    "not_contains": [
+      "local_advance(v2"
+    ]
+  }],
+  "run": { "stdout_contains": [] }
+}

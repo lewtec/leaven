@@ -13,8 +13,29 @@ import (
 	"github.com/llir/llvm/ir/value"
 )
 
-// VariableName returns the name to use for a local variable or parameter.
-func VariableName(v value.Named) string {
+// moduleFuncNames / moduleTypeNames are filled by collectModuleNames so locals
+// can be renamed when they would shadow a function or type in Go.
+var (
+	moduleFuncNames map[string]bool
+	moduleTypeNames map[string]bool
+)
+
+// collectModuleNames records function and type identifiers used in the module.
+func collectModuleNames(m *ir.Module) {
+	moduleFuncNames = make(map[string]bool)
+	moduleTypeNames = make(map[string]bool)
+	for _, f := range m.Funcs {
+		moduleFuncNames[rawIdentName(f)] = true
+	}
+	for _, t := range m.TypeDefs {
+		if n := TypeName(t); n != "" && !strings.Contains(n, ".") {
+			moduleTypeNames[n] = true
+		}
+	}
+}
+
+// rawIdentName sanitizes an LLVM name to a Go identifier without clash renames.
+func rawIdentName(v value.Named) string {
 	name := v.Name()
 	if name == "" {
 		return "v" + strings.TrimPrefix(v.Ident(), "%")
@@ -23,17 +44,38 @@ func VariableName(v value.Named) string {
 		name = "v" + name
 	}
 	name = strings.ReplaceAll(name, ".", "_")
-	// Clang/LLVM names like "byval-temp" are not valid Go identifiers.
 	name = strings.ReplaceAll(name, "-", "_")
 	if invalidNames[name] {
 		name = "_" + name
 	}
+	return name
+}
+
+// VariableName returns the name to use for a local variable or parameter.
+func VariableName(v value.Named) string {
+	name := rawIdentName(v)
 	// Params named like SSA temps (v0, v1, …) collide with anonymous
 	// instructions ("%1" → "v1"). Prefix params so both can coexist.
 	if _, ok := v.(*ir.Param); ok && ssaTempName(name) {
-		return "arg_" + name
+		name = "arg_" + name
+	}
+	// Locals/params must not reuse function or type names (Go forbids
+	// `var state *state` and `call = is_verbatim(x)` when is_verbatim is *int32).
+	if isLocalNamed(v) && (moduleFuncNames[name] || moduleTypeNames[name]) {
+		name = "local_" + name
 	}
 	return name
+}
+
+// isLocalNamed reports whether v is a function parameter or instruction result
+// (not a global/function/block label).
+func isLocalNamed(v value.Named) bool {
+	switch v.(type) {
+	case *ir.Func, *ir.Global, *ir.Block:
+		return false
+	default:
+		return true
+	}
 }
 
 // ssaTempName reports whether name looks like an anonymous SSA temp (v0, v12).

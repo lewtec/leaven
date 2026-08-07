@@ -117,6 +117,7 @@ func writeImports(out io.Writer, body string) {
 
 func writeModule(out io.Writer, m *ir.Module, packageName string) error {
 	collectTaggedPointerTypes(m)
+	collectModuleNames(m)
 
 	for _, t := range m.TypeDefs {
 		name := TypeName(t)

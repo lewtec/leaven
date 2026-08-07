@@ -1,0 +1,16 @@
+{
+  "cases": [{
+    "name": "package-p",
+    "package": "p",
+    "contains": [
+      "type state struct",
+      "local_state",
+      "func state_new() *state",
+      "local_state = new(*state)"
+    ],
+    "not_contains": [
+      "var state **state"
+    ]
+  }],
+  "run": { "stdout_contains": [] }
+}
