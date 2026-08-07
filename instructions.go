@@ -804,6 +804,8 @@ var libraryFunctions = map[string]string{
 	"free":             "libc.Free",
 	"getchar":          "libc.Getchar",
 	"iswalnum":         "libc.Iswalnum",
+	"iswalpha":         "libc.Iswalpha",
+	"iswdigit":         "libc.Iswdigit",
 	"iswspace":         "libc.Iswspace",
 	"leaven_va_arg":    "libc.VAArg",
 	"llvm_fabs_f64":    "math.Abs",

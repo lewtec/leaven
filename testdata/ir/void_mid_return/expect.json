@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "func f(x int32)",
+        "return",
+        "add = x + 1"
+      ],
+      "not_contains": []
+    }
+  ]
+}
