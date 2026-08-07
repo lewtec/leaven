@@ -30,6 +30,36 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		}
 		return fmt.Sprintf("%s = %s + %s", VariableName(inst), x, y), nil
 
+	case *ir.InstAtomicRMW:
+		dst, err := FormatValue(inst.Dst)
+		if err != nil {
+			return "", fmt.Errorf("error translating destination (%v): %w", inst.Dst, err)
+		}
+		x, err := FormatValue(inst.X)
+		if err != nil {
+			return "", fmt.Errorf("error translating operand (%v): %w", inst.X, err)
+		}
+		name := VariableName(inst)
+		addFn, ok := atomicAddFunc(inst.Type())
+		if !ok {
+			return "", fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
+		}
+		switch inst.Op {
+		case enum.AtomicOpAdd:
+			// atomicrmw returns the old value; Add* returns the new value.
+			return fmt.Sprintf("%s = %s(%s, %s) - %s", name, addFn, dst, x, x), nil
+		case enum.AtomicOpSub:
+			return fmt.Sprintf("%s = %s(%s, -(%s)) + %s", name, addFn, dst, x, x), nil
+		case enum.AtomicOpXChg:
+			swapFn, ok := atomicSwapFunc(inst.Type())
+			if !ok {
+				return "", fmt.Errorf("%w: atomicrmw xchg on %v", errUnsupportedInstruction, inst.Type())
+			}
+			return fmt.Sprintf("%s = %s(%s, %s)", name, swapFn, dst, x), nil
+		default:
+			return "", fmt.Errorf("%w: atomicrmw %v", errUnsupportedInstruction, inst.Op)
+		}
+
 	case *ir.InstAlloca:
 		t, err := TypeSpec(inst.ElemType)
 		if err != nil {
@@ -675,6 +705,38 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 
 	default:
 		return "", fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
+	}
+}
+
+// atomicAddFunc returns sync/atomic Add* for the LLVM integer type.
+func atomicAddFunc(t types.Type) (string, bool) {
+	it, ok := t.(*types.IntType)
+	if !ok {
+		return "", false
+	}
+	switch goIntBits(it.BitSize) {
+	case 32:
+		return "atomic.AddInt32", true
+	case 64:
+		return "atomic.AddInt64", true
+	default:
+		return "", false
+	}
+}
+
+// atomicSwapFunc returns sync/atomic Swap* for the LLVM integer type.
+func atomicSwapFunc(t types.Type) (string, bool) {
+	it, ok := t.(*types.IntType)
+	if !ok {
+		return "", false
+	}
+	switch goIntBits(it.BitSize) {
+	case 32:
+		return "atomic.SwapInt32", true
+	case 64:
+		return "atomic.SwapInt64", true
+	default:
+		return "", false
 	}
 }
 
