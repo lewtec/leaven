@@ -335,50 +335,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		return fmt.Sprintf("%s = %s", VariableName(inst), result), nil
 
 	case *ir.InstICmp:
-		var op string
-		format := FormatValue
-		switch inst.Pred {
-		case enum.IPredEQ:
-			op = "=="
-		case enum.IPredNE:
-			op = "!="
-		case enum.IPredSGE:
-			op = ">="
-			format = FormatSigned
-		case enum.IPredSGT:
-			op = ">"
-			format = FormatSigned
-		case enum.IPredSLE:
-			op = "<="
-			format = FormatSigned
-		case enum.IPredSLT:
-			op = "<"
-			format = FormatSigned
-		case enum.IPredUGE:
-			op = ">="
-			format = FormatUnsigned
-		case enum.IPredUGT:
-			op = ">"
-			format = FormatUnsigned
-		case enum.IPredULE:
-			op = "<="
-			format = FormatUnsigned
-		case enum.IPredULT:
-			op = "<"
-			format = FormatUnsigned
-		default:
-			return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
-		}
-
-		x, err := format(inst.X)
+		cmp, err := formatICmp(inst.Pred, inst.X, inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return "", err
 		}
-		y, err := format(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s %s %s", VariableName(inst), x, op, y), nil
+		return fmt.Sprintf("%s = %s", VariableName(inst), cmp), nil
 
 	case *ir.InstInsertElement:
 		x, err := FormatValue(inst.X)
