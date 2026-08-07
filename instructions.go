@@ -601,6 +601,10 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
+		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize == 1 {
+			// trunc … to i1 → bool (not byte(x & 1))
+			return fmt.Sprintf("%s = (%s & 1) != 0", VariableName(inst), from), nil
+		}
 		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize < 8 {
 			return fmt.Sprintf("%s = byte(%s & %d)", VariableName(inst), from, 255>>(8-intType.BitSize)), nil
 		}

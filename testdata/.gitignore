@@ -3,8 +3,9 @@
 *.go
 *_c
 
-# Curated IR fixtures: one folder per case (input.ll + expect.json)
+# Curated IR fixtures: one folder per case (input.ll + expect.json [+ optional source.c])
 !ir/
 !ir/*/
 !ir/*/input.ll
 !ir/*/expect.json
+!ir/*/source.c

@@ -47,9 +47,21 @@ func BlockName(v value.Value) string {
 	return name
 }
 
+// invalidNames are Go keywords and predeclared ids that cannot be used as names.
+// https://go.dev/ref/spec#Keywords
 var invalidNames = map[string]bool{
-	"return": true,
-	"init":   true,
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+	// Common predeclared / special
+	"init": true, "true": true, "false": true, "iota": true, "nil": true,
+	"bool": true, "byte": true, "error": true, "int": true, "int8": true,
+	"int16": true, "int32": true, "int64": true, "rune": true, "string": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"uintptr": true, "float32": true, "float64": true, "complex64": true,
+	"complex128": true, "any": true, "comparable": true,
 }
 
 // FormatValue formats a constant or variable as it should appear in an expression.
@@ -422,6 +434,9 @@ func formatTrunc(from value.Value, to types.Type) (string, error) {
 	src, err := FormatValue(from)
 	if err != nil {
 		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {
+		return fmt.Sprintf("(%s & 1) != 0", src), nil
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize < 8 {
 		return fmt.Sprintf("byte(%s & %d)", src, 255>>(8-intType.BitSize)), nil

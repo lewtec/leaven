@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -72,8 +73,49 @@ func validatePackageName(name string) error {
 }
 
 func compile(out io.Writer, m *ir.Module, packageName string) error {
+	var body bytes.Buffer
+	if err := writeModule(&body, m, packageName); err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "package %s\n\n", packageName)
+	writeImports(out, body.String())
+	_, err := io.WriteString(out, body.String())
+	return err
+}
 
+// writeImports emits import declarations for packages referenced in body.
+func writeImports(out io.Writer, body string) {
+	type imp struct {
+		path string
+		hit  string // substring that indicates the package is needed
+	}
+	needed := []imp{
+		{`"unsafe"`, "unsafe."},
+		{`"math"`, "math."},
+		{`"os"`, "os."},
+		{`"github.com/andybalholm/leaven/libc"`, "libc."},
+	}
+	var paths []string
+	for _, n := range needed {
+		if strings.Contains(body, n.hit) {
+			paths = append(paths, n.path)
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	if len(paths) == 1 {
+		fmt.Fprintf(out, "import %s\n\n", paths[0])
+		return
+	}
+	fmt.Fprintln(out, "import (")
+	for _, p := range paths {
+		fmt.Fprintf(out, "\t%s\n", p)
+	}
+	fmt.Fprint(out, ")\n\n")
+}
+
+func writeModule(out io.Writer, m *ir.Module, packageName string) error {
 	for _, t := range m.TypeDefs {
 		name := TypeName(t)
 		if name == "" {

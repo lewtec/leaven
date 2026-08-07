@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "import \"github.com/andybalholm/leaven/libc\"",
+        "type Outer struct",
+        "var _range int32",
+        "func use_bool(x int32) bool",
+        "tobool = (v1 & 1) != 0",
+        "tobool3 = (v4 & 1) != 0",
+        "func use_ptr(o *Outer, i int32) int32",
+        "libc.AddPointer",
+        "func use_range(_range int32) int32",
+        "func set_range(v int32)"
+      ],
+      "not_contains": [
+        "var range ",
+        "func use_range(range ",
+        "tobool = byte(",
+        "tobool3 = byte("
+      ]
+    }
+  ]
+}
