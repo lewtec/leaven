@@ -1,0 +1,6 @@
+[tools]
+# Clang 14 for C → LLVM IR (and native reference binaries).
+# Install: mise install
+"conda:clang" = "14.0.6"
+go = "1.26.5"
+"go:golang.org/x/tools/cmd/goimports" = "0.30.0"

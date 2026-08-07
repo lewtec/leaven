@@ -1,0 +1,319 @@
+//go:build csmith
+
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Csmith differential fuzzing of leaven.
+//
+// Build tag: csmith (normal `go test` skips this file).
+//
+//	mise install   # clang 14 + go + goimports
+//	go install .
+//	export CSMITH_HOME=/path/to/csmith/prefix   # or CSMITH=/path/to/csmith
+//	go test -tags=csmith -run TestCsmithFixedSeeds -v -count=1
+//	go test -tags=csmith -fuzz=FuzzCsmith -fuzztime=30s
+//
+// Required tools (resolved at runtime — no install paths in code):
+//
+//	CSMITH       – absolute path to the csmith binary, or
+//	CSMITH_HOME  – install prefix ($CSMITH_HOME/bin/csmith + …/include)
+//	clang        – on PATH (mise: conda:clang@14)
+//	leaven       – on PATH (go install .)
+//	goimports    – on PATH
+//
+// Optional:
+//
+//	CSMITH_ITERS      – random seeds for TestCsmithRandom (default 5)
+//	CSMITH_TIMEOUT    – per-binary run timeout (default 5s)
+//	CSMITH_EXTRA_ARGS – extra csmith flags (space-separated)
+//	CLANG             – clang binary (default "clang")
+
+func TestCsmithFixedSeeds(t *testing.T) {
+	tools := requireCsmithTools(t)
+
+	// Small fixed corpus for regression / smoke. Seeds are just numbers;
+	// failures are expected until leaven covers more LLVM.
+	// Known interesting seeds. seed=1 currently passes end-to-end; others are
+	// retained as regressions when leaven grows. -run uses regex: prefer
+	// -run 'TestCsmithFixedSeeds/seed=1$' for a single case.
+	seeds := []uint64{1, 42, 100, 12345}
+	for _, seed := range seeds {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			runCsmithCase(t, tools, seed)
+		})
+	}
+}
+
+func TestCsmithRandom(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping random csmith under -short")
+	}
+	tools := requireCsmithTools(t)
+
+	iters := 5
+	if v := os.Getenv("CSMITH_ITERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			t.Fatalf("CSMITH_ITERS must be a positive integer, got %q", v)
+		}
+		iters = n
+	}
+
+	// Deterministic-ish base from time so re-runs cover new ground,
+	// while each subtest is still reproducible from its seed name.
+	base := uint64(time.Now().UnixNano())
+	for i := 0; i < iters; i++ {
+		seed := base + uint64(i)*0x9E3779B97F4A7C15
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			runCsmithCase(t, tools, seed)
+		})
+	}
+}
+
+// FuzzCsmith feeds seeds into the same pipeline. Run with:
+//
+//	CSMITH_HOME=... go test -fuzz=FuzzCsmith -fuzztime=30s
+func FuzzCsmith(f *testing.F) {
+	for _, s := range []uint64{1, 2, 3, 7, 42, 99} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, seed uint64) {
+		tools := requireCsmithTools(t)
+		runCsmithCase(t, tools, seed)
+	})
+}
+
+type csmithTools struct {
+	csmith  string
+	include string
+	clang   string
+	leaven  string
+	timeout time.Duration
+}
+
+func requireCsmithTools(t *testing.T) csmithTools {
+	t.Helper()
+
+	csmith, include, err := resolveCsmith()
+	if err != nil {
+		t.Skip(err.Error())
+	}
+
+	clang := os.Getenv("CLANG")
+	if clang == "" {
+		clang = "clang"
+	}
+	if _, err := exec.LookPath(clang); err != nil {
+		t.Skipf("%s not on PATH (install via mise: conda:clang@14): %v", clang, err)
+	}
+
+	leaven, err := exec.LookPath("leaven")
+	if err != nil {
+		t.Skip("leaven not on PATH (run: go install .)")
+	}
+	if _, err := exec.LookPath("goimports"); err != nil {
+		t.Skip("goimports not on PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+
+	timeout := 5 * time.Second
+	if v := os.Getenv("CSMITH_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			t.Fatalf("CSMITH_TIMEOUT: %v", err)
+		}
+		timeout = d
+	}
+
+	return csmithTools{
+		csmith:  csmith,
+		include: include,
+		clang:   clang,
+		leaven:  leaven,
+		timeout: timeout,
+	}
+}
+
+// resolveCsmith finds the binary and runtime include dir from the environment.
+// Prefer CSMITH (absolute path to the binary). CSMITH_HOME is the install prefix.
+func resolveCsmith() (csmithBin, includeDir string, err error) {
+	if p := os.Getenv("CSMITH"); p != "" {
+		if !filepath.IsAbs(p) {
+			return "", "", fmt.Errorf("CSMITH must be an absolute path, got %q", p)
+		}
+		if st, e := os.Stat(p); e != nil || st.IsDir() {
+			return "", "", fmt.Errorf("CSMITH=%q is not a usable binary: %v", p, e)
+		}
+		// Default include: ../include next to bin/
+		home := filepath.Dir(filepath.Dir(p))
+		inc := filepath.Join(home, "include")
+		if envHome := os.Getenv("CSMITH_HOME"); envHome != "" {
+			inc = filepath.Join(envHome, "include")
+		}
+		if st, e := os.Stat(filepath.Join(inc, "csmith.h")); e != nil || st.IsDir() {
+			return "", "", fmt.Errorf("csmith.h not found under %s (set CSMITH_HOME)", inc)
+		}
+		return p, inc, nil
+	}
+
+	if home := os.Getenv("CSMITH_HOME"); home != "" {
+		if !filepath.IsAbs(home) {
+			return "", "", fmt.Errorf("CSMITH_HOME must be an absolute path, got %q", home)
+		}
+		bin := filepath.Join(home, "bin", "csmith")
+		inc := filepath.Join(home, "include")
+		if st, e := os.Stat(bin); e != nil || st.IsDir() {
+			return "", "", fmt.Errorf("csmith binary not found at %s: %v", bin, e)
+		}
+		if st, e := os.Stat(filepath.Join(inc, "csmith.h")); e != nil || st.IsDir() {
+			return "", "", fmt.Errorf("csmith.h not found under %s", inc)
+		}
+		return bin, inc, nil
+	}
+
+	// Last resort: PATH (still no hard-coded install locations).
+	if p, e := exec.LookPath("csmith"); e == nil {
+		abs, _ := filepath.Abs(p)
+		home := filepath.Dir(filepath.Dir(abs))
+		inc := filepath.Join(home, "include")
+		if _, e := os.Stat(filepath.Join(inc, "csmith.h")); e == nil {
+			return abs, inc, nil
+		}
+		return "", "", fmt.Errorf("csmith is on PATH (%s) but csmith.h was not found next to it; set CSMITH_HOME", abs)
+	}
+
+	return "", "", fmt.Errorf("set CSMITH (absolute path to binary) or CSMITH_HOME (install prefix)")
+}
+
+// defaultCsmithArgs keeps programs smaller / closer to what leaven can handle.
+// Full-featured csmith is still reachable via CSMITH_EXTRA_ARGS (space-separated).
+func defaultCsmithArgs(seed uint64, outFile string) []string {
+	args := []string{
+		"--seed", strconv.FormatUint(seed, 10),
+		"--output", outFile,
+		// Size caps
+		"--max-funcs", "3",
+		"--max-block-depth", "3",
+		"--max-block-size", "3",
+		"--max-expr-complexity", "4",
+		"--max-array-dim", "2",
+		"--max-array-len-per-dim", "4",
+		"--max-struct-fields", "4",
+		"--max-union-fields", "3",
+		// Features that tend to blow up IR or hit missing leaven ops early
+		"--no-bitfields",
+		"--no-volatiles",
+		"--no-volatile-pointers",
+		"--no-packed-struct",
+		"--no-builtins",
+		"--no-argc",
+	}
+	if extra := strings.TrimSpace(os.Getenv("CSMITH_EXTRA_ARGS")); extra != "" {
+		args = append(args, strings.Fields(extra)...)
+	}
+	return args
+}
+
+func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
+	t.Helper()
+
+	dir := t.TempDir()
+	cFile := filepath.Join(dir, "prog.c")
+	nativeBin := filepath.Join(dir, "prog_c")
+	llFile := filepath.Join(dir, "prog.ll")
+	goFile := filepath.Join(dir, "prog.go")
+
+	// 1. Generate
+	gen := exec.Command(tools.csmith, defaultCsmithArgs(seed, cFile)...)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("csmith seed=%d: %v\n%s", seed, err, out)
+	}
+
+	// 2. Native reference binary
+	clangNative := exec.Command(tools.clang,
+		"-O0",
+		"-I"+tools.include,
+		"-o", nativeBin,
+		cFile,
+	)
+	if out, err := clangNative.CombinedOutput(); err != nil {
+		t.Fatalf("clang native seed=%d: %v\n%s", seed, err, out)
+	}
+
+	nativeOut, err := runWithTimeout(nativeBin, tools.timeout)
+	if err != nil {
+		t.Fatalf("native run seed=%d: %v\n%s", seed, err, nativeOut)
+	}
+
+	// 3. Emit LLVM IR
+	clangLL := exec.Command(tools.clang,
+		"-O0",
+		"-S", "-emit-llvm",
+		"-fno-discard-value-names",
+		"-I"+tools.include,
+		"-o", llFile,
+		cFile,
+	)
+	if out, err := clangLL.CombinedOutput(); err != nil {
+		t.Fatalf("clang -emit-llvm seed=%d: %v\n%s", seed, err, out)
+	}
+
+	// 4. Transpile with leaven
+	leaven := exec.Command(tools.leaven, llFile)
+	if out, err := leaven.CombinedOutput(); err != nil {
+		t.Fatalf("leaven seed=%d: %v\n%s\n(source kept under temp dir; re-run with -count=1 -v)", seed, err, out)
+	}
+
+	// 5. Format and run Go
+	goimports := exec.Command("goimports", "-w", goFile)
+	if out, err := goimports.CombinedOutput(); err != nil {
+		t.Fatalf("goimports seed=%d: %v\n%s", seed, err, out)
+	}
+
+	// Run from module root so imports like github.com/andybalholm/leaven/libc resolve.
+	goRun := exec.Command("go", "run", goFile)
+	goOut, err := runCmdWithTimeout(goRun, tools.timeout)
+	if err != nil {
+		t.Fatalf("go run seed=%d: %v\n%s", seed, err, goOut)
+	}
+
+	if !bytes.Equal(goOut, nativeOut) {
+		t.Fatalf("output mismatch seed=%d\nC:  %q\nGo: %q", seed, nativeOut, goOut)
+	}
+}
+
+func runWithTimeout(bin string, d time.Duration) ([]byte, error) {
+	cmd := exec.Command(bin)
+	return runCmdWithTimeout(cmd, d)
+}
+
+func runCmdWithTimeout(cmd *exec.Cmd, d time.Duration) ([]byte, error) {
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return buf.Bytes(), err
+	case <-time.After(d):
+		_ = cmd.Process.Kill()
+		return buf.Bytes(), fmt.Errorf("timeout after %s", d)
+	}
+}
