@@ -28,7 +28,25 @@ func VariableName(v value.Named) string {
 	if invalidNames[name] {
 		name = "_" + name
 	}
+	// Params named like SSA temps (v0, v1, …) collide with anonymous
+	// instructions ("%1" → "v1"). Prefix params so both can coexist.
+	if _, ok := v.(*ir.Param); ok && ssaTempName(name) {
+		return "arg_" + name
+	}
 	return name
+}
+
+// ssaTempName reports whether name looks like an anonymous SSA temp (v0, v12).
+func ssaTempName(name string) bool {
+	if len(name) < 2 || name[0] != 'v' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if name[i] < '0' || name[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func BlockName(v value.Value) string {

@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "func(*L, *byte, ...interface{})",
+        "func logf(self *L, fmt *byte, varargs ...interface{})",
+        "*log = logf"
+      ],
+      "not_contains": [
+        "func(*L, *byte)"
+      ]
+    }
+  ]
+}

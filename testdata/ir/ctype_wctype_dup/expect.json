@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "libc.CtypeBLoc",
+        "libc.Iswalnum",
+        "libc.Dup",
+        "func print_p",
+        "func alnum_p",
+        "func copy_fd"
+      ],
+      "not_contains": [
+        "__ctype_b_loc",
+        " = iswalnum(",
+        " = dup("
+      ]
+    }
+  ]
+}
