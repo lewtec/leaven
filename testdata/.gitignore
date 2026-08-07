@@ -1,3 +1,8 @@
+# Integration-test build artifacts (from testdata/*.c)
 *.ll
 *.go
 *_c
+
+# Curated IR fixtures for ir_sanity_test.go
+!ir/
+!ir/*.ll
