@@ -6,7 +6,7 @@ Each folder is one regression case for `TestIRSanity`.
 |------|------|
 | `source.c` | Human-readable C repro (when possible). Document intent + clang flags. |
 | `input.ll` | **Oracle** IR fed to leaven (clang-14 typed pointers). May be hand-curated when clang will not emit the pattern. |
-| `expect.json` | Table of `contains` / `not_contains` on generated Go (`package` optional). |
+| `expect.json` | Table of `contains` / `not_contains` on generated Go; optional `run` builds+executes package main. |
 
 ## Regenerate IR (when source.c is authoritative)
 

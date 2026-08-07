@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "F0 uintptr",
+        "func children_of(self_coerce uintptr) *Subtree",
+        "libc.AddPointer",
+        "func new_node_with_children",
+        "func depends_on_column"
+      ],
+      "not_contains": [
+        "F0 *SubtreeHeapData"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [
+      "parent child_count=1 depends=0"
+    ],
+    "stderr_contains": [
+      "is_inline=1"
+    ]
+  }
+}
