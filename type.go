@@ -41,6 +41,13 @@ func TypeDefinition(t types.Type) (string, error) {
 			}
 			b.WriteString(pt)
 		}
+		if t.Variadic {
+			if len(t.Params) > 0 {
+				b.WriteString(", ")
+			}
+			// Match function definitions (varargs ...interface{}).
+			b.WriteString("...interface{}")
+		}
 		b.WriteString(")")
 		if !types.Equal(t.RetType, types.Void) {
 			b.WriteString(" ")

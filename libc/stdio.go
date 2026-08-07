@@ -63,6 +63,52 @@ func Iswspace(c int32) int32 {
 	return 0
 }
 
+// Iswalnum is C iswalnum(c) from <wctype.h>.
+func Iswalnum(c int32) int32 {
+	r := rune(uint32(c))
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return 1
+	}
+	return 0
+}
+
+// Dup is C dup(fd). Pure-Go: only maps 0/1/2 to themselves; other FDs
+// return -1 (tree-sitter uses this for print-dot-graph on std FDs).
+func Dup(fd int32) int32 {
+	switch fd {
+	case 0, 1, 2:
+		return fd
+	}
+	return -1
+}
+
+// glibc _ISprint bit on little-endian (see bits/ctype.h _ISbit(6)).
+const ctypeBPrint int16 = 16384
+
+// ctypeB is a minimal glibc-style __ctype_b table for ASCII.
+// Indexed 0..127; only the print flag is populated (tree-sitter core needs it).
+var ctypeB [128]int16
+
+var (
+	ctypeBPtr *int16
+	ctypeBLoc **int16
+)
+
+func init() {
+	for i := 1; i < 128; i++ {
+		if unicode.IsPrint(rune(i)) {
+			ctypeB[i] = ctypeBPrint
+		}
+	}
+	ctypeBPtr = &ctypeB[0]
+	ctypeBLoc = &ctypeBPtr
+}
+
+// CtypeBLoc is glibc __ctype_b_loc(): returns a pointer to the ctype bitmask table.
+func CtypeBLoc() **int16 {
+	return ctypeBLoc
+}
+
 // Snprintf is C snprintf(buf, n, format, ...).
 func Snprintf(buf *byte, n int64, format *byte, args ...any) int32 {
 	f := fixPrintfFormat(format, args)

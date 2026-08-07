@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "func renumber(self *int32, arg_v1 int32, arg_v2 int32)",
+        "*v1_addr = arg_v1",
+        "*v2_addr = arg_v2"
+      ],
+      "not_contains": [
+        "func renumber(self *int32, v1 int32, v2 int32)"
+      ]
+    }
+  ]
+}
