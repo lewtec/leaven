@@ -778,8 +778,10 @@ func formatAggregateIndex(base string, t types.Type, indices []uint64) (string, 
 
 var libraryFunctions = map[string]string{
 	"abort":            "libc.Abort",
+	"__assert_fail":    "libc.AssertFail",
 	"fabs":             "math.Abs",
 	"fprintf":          "libc.Fprintf",
+	"free":             "libc.Free",
 	"getchar":          "libc.Getchar",
 	"leaven_va_arg":    "libc.VAArg",
 	"llvm_fabs_f64":    "math.Abs",

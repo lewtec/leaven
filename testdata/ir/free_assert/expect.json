@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "\"github.com/andybalholm/leaven/libc\"",
+        "func release(p *byte)",
+        "libc.Free(v0)",
+        "func need(x int32) int32",
+        "libc.AssertFail("
+      ],
+      "not_contains": [
+        "__assert_fail(",
+        "free(v0)"
+      ]
+    }
+  ]
+}
