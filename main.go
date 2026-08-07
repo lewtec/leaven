@@ -309,7 +309,7 @@ func compile(out io.Writer, m *ir.Module, packageName string) error {
 			case *ir.TermUnreachable:
 				// LLVM unreachable: UB if executed. panic is a no-return so Go
 				// typechecks functions that end only on this path.
-				fmt.Fprintln(out, `\tpanic("unreachable")`)
+				fmt.Fprintln(out, "\tpanic(\"unreachable\")")
 
 			default:
 				return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
