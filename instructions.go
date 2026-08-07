@@ -168,6 +168,33 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		}
 		return fmt.Sprintf("%s = %s[%s]", VariableName(inst), x, index), nil
 
+	case *ir.InstExtractValue:
+		x, err := FormatValue(inst.X)
+		if err != nil {
+			return "", fmt.Errorf("error translating aggregate (%v): %v", inst.X, err)
+		}
+		expr, err := formatAggregateIndex(x, inst.X.Type(), inst.Indices)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s = %s", VariableName(inst), expr), nil
+
+	case *ir.InstInsertValue:
+		x, err := FormatValue(inst.X)
+		if err != nil {
+			return "", fmt.Errorf("error translating aggregate (%v): %v", inst.X, err)
+		}
+		elem, err := FormatValue(inst.Elem)
+		if err != nil {
+			return "", fmt.Errorf("error translating element (%v): %v", inst.Elem, err)
+		}
+		dest, err := formatAggregateIndex(VariableName(inst), inst.Typ, inst.Indices)
+		if err != nil {
+			return "", err
+		}
+		// Copy aggregate then assign the field/element.
+		return fmt.Sprintf("%s = %s; %s = %s", VariableName(inst), x, dest, elem), nil
+
 	case *ir.InstFAdd:
 		x, err := FormatValue(inst.X)
 		if err != nil {
@@ -683,6 +710,32 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported instruction type: %T", inst)
 	}
+}
+
+// formatAggregateIndex builds a Go selector/index chain for extractvalue/insertvalue.
+// Struct fields are F0, F1, … (see TypeDefinition); arrays use [i].
+func formatAggregateIndex(base string, t types.Type, indices []uint64) (string, error) {
+	expr := base
+	cur := t
+	for _, idx := range indices {
+		switch ct := cur.(type) {
+		case *types.StructType:
+			if int(idx) >= len(ct.Fields) {
+				return "", fmt.Errorf("struct index %d out of range (len %d)", idx, len(ct.Fields))
+			}
+			expr = fmt.Sprintf("%s.F%d", expr, idx)
+			cur = ct.Fields[idx]
+		case *types.ArrayType:
+			expr = fmt.Sprintf("%s[%d]", expr, idx)
+			cur = ct.ElemType
+		case *types.VectorType:
+			expr = fmt.Sprintf("%s[%d]", expr, idx)
+			cur = ct.ElemType
+		default:
+			return "", fmt.Errorf("unsupported aggregate type for index: %T", cur)
+		}
+	}
+	return expr, nil
 }
 
 var libraryFunctions = map[string]string{
