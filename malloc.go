@@ -28,14 +28,14 @@ func fixMalloc(f *ir.Func) {
 					}
 
 				case "free":
+					// Leave free in the IR so codegen emits libc.Free (GC no-op).
+					// Still drop a sole bitcast to *byte on the argument.
 					if len(inst.Args) == 1 {
 						if bc, ok := inst.Args[0].(*ir.InstBitCast); ok && len(idx.Users(bc)) == 1 {
-							// If the parameter needed a cast to *byte before calling free,
-							// delete the cast too.
+							idx.ReplaceValue(bc, bc.From)
 							idx.DeleteInstruction(bc)
 						}
 					}
-					idx.DeleteInstruction(inst)
 				}
 			}
 		}
