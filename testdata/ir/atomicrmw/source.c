@@ -1,3 +1,4 @@
+/* atomicrmw — clang atomicrmw with align; strip align before llir parse */
 #include <stdatomic.h>
 
 int atomic_inc(int *p) {

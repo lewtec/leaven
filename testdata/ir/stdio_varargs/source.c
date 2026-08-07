@@ -1,3 +1,4 @@
+/* stdio_varargs — va_start/end, vsnprintf, snprintf, fdopen, fclose */
 #include <stdarg.h>
 #include <stdio.h>
 

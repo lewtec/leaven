@@ -1,3 +1,4 @@
+/* ctype_wctype_dup — __ctype_b_loc, iswalnum, dup */
 #include <ctype.h>
 #include <unistd.h>
 #include <wctype.h>

@@ -1,3 +1,4 @@
+/* free_fnptr — free used as a function value, not only as a call */
 #include <stdlib.h>
 
 void (*current_free)(void *) = free;

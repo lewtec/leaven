@@ -107,13 +107,16 @@ func TestIRFixturesLayout(t *testing.T) {
 	var found int
 	for _, e := range entries {
 		if !e.IsDir() {
-			// No loose files at the ir root.
+			// Allow a top-level README; everything else is a fixture folder.
+			if e.Name() == "README.md" {
+				continue
+			}
 			t.Errorf("unexpected file at testdata/ir/%s (use one folder per fixture)", e.Name())
 			continue
 		}
 		found++
 		dir := filepath.Join(root, e.Name())
-		for _, need := range []string{"input.ll", "expect.json"} {
+		for _, need := range []string{"input.ll", "expect.json", "source.c"} {
 			if _, err := os.Stat(filepath.Join(dir, need)); err != nil {
 				t.Errorf("%s: missing %s", e.Name(), need)
 			}
