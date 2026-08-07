@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -17,11 +16,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstAdd:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return fmt.Sprintf("for i, v := range %s { %s[i] = v + %s[i] }", x, VariableName(inst), y), nil
@@ -34,7 +33,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstAlloca:
 		t, err := TypeSpec(inst.ElemType)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.ElemType, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.ElemType, err)
 		}
 		if inst.NElems == nil {
 			if _, ok := inst.ElemType.(*types.ArrayType); ok {
@@ -45,18 +44,18 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		}
 		nElems, err := FormatValue(inst.NElems)
 		if err != nil {
-			return "", fmt.Errorf("error translating NElems (%v): %v", inst.NElems, err)
+			return "", fmt.Errorf("error translating NElems (%v): %w", inst.NElems, err)
 		}
 		return fmt.Sprintf("%s = &make([]%s, %s + 1)[0]", VariableName(inst), t, nElems), nil
 
 	case *ir.InstAnd:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return fmt.Sprintf("for i, v := range %s { %s[i] = v & %s[i] }", x, VariableName(inst), y), nil
@@ -69,11 +68,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstAShr:
 		x, err := FormatSigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s >> %s)", VariableName(inst), x, y), nil
@@ -82,28 +81,28 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 
 	case *ir.InstBitCast:
 		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
-			return "", fmt.Errorf("incompatible pointer types %v and %v", inst.From.Type(), inst.To)
+			return "", fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
 		}
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
 
 	case *ir.InstCall:
 		callee, err := FormatValue(inst.Callee)
 		if err != nil {
-			return "", fmt.Errorf("error translating callee (%v): %v", inst.Callee, err)
+			return "", fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
 		}
 		args := make([]string, len(inst.Args))
 		for i, a := range inst.Args {
 			v, err := FormatValue(a)
 			if err != nil {
-				return "", fmt.Errorf("error translating argument %d (%v): %v", i, a, err)
+				return "", fmt.Errorf("error translating argument %d (%v): %w", i, a, err)
 			}
 			args[i] = v
 		}
@@ -160,18 +159,18 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstExtractElement:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating vector (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating vector (%v): %w", inst.X, err)
 		}
 		index, err := FormatValue(inst.Index)
 		if err != nil {
-			return "", fmt.Errorf("error translating index (%v): %v", inst.Index, err)
+			return "", fmt.Errorf("error translating index (%v): %w", inst.Index, err)
 		}
 		return fmt.Sprintf("%s = %s[%s]", VariableName(inst), x, index), nil
 
 	case *ir.InstExtractValue:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating aggregate (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating aggregate (%v): %w", inst.X, err)
 		}
 		expr, err := formatAggregateIndex(x, inst.X.Type(), inst.Indices)
 		if err != nil {
@@ -182,11 +181,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstInsertValue:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating aggregate (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating aggregate (%v): %w", inst.X, err)
 		}
 		elem, err := FormatValue(inst.Elem)
 		if err != nil {
-			return "", fmt.Errorf("error translating element (%v): %v", inst.Elem, err)
+			return "", fmt.Errorf("error translating element (%v): %w", inst.Elem, err)
 		}
 		dest, err := formatAggregateIndex(VariableName(inst), inst.Typ, inst.Indices)
 		if err != nil {
@@ -198,22 +197,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstFAdd:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s + %s", VariableName(inst), x, y), nil
 
 	case *ir.InstFCmp:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 
 		var op string
@@ -247,7 +246,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		case enum.FPredONE:
 			return fmt.Sprintf("%s = %s == %s && %s == %s && %s != %s", VariableName(inst), x, x, y, y, x, y), nil
 		default:
-			return "", fmt.Errorf("unsupported comparison predicate: %v", inst.Pred)
+			return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
 		}
 
 		return fmt.Sprintf("%s = %s %s %s", VariableName(inst), x, op, y), nil
@@ -255,51 +254,51 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstFDiv:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
 
 	case *ir.InstFMul:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s * %s", VariableName(inst), x, y), nil
 
 	case *ir.InstFNeg:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating operand (%v): %w", inst.X, err)
 		}
 		return fmt.Sprintf("%s = - %s", VariableName(inst), x), nil
 
 	case *ir.InstFPExt:
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
 
 	case *ir.InstFPToSI:
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		if to == "byte" {
 			return fmt.Sprintf("%s = byte(int8(%s))", VariableName(inst), from), nil
@@ -309,22 +308,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstFPTrunc:
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
 
 	case *ir.InstFSub:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s - %s", VariableName(inst), x, y), nil
 
@@ -368,31 +367,31 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			op = "<"
 			format = FormatUnsigned
 		default:
-			return "", fmt.Errorf("unsupported comparison predicate: %v", inst.Pred)
+			return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
 		}
 
 		x, err := format(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := format(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s %s %s", VariableName(inst), x, op, y), nil
 
 	case *ir.InstInsertElement:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating initial vector (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating initial vector (%v): %w", inst.X, err)
 		}
 		elem, err := FormatValue(inst.Elem)
 		if err != nil {
-			return "", fmt.Errorf("error translating new element (%v): %v", inst.Elem, err)
+			return "", fmt.Errorf("error translating new element (%v): %w", inst.Elem, err)
 		}
 		index, err := FormatValue(inst.Index)
 		if err != nil {
-			return "", fmt.Errorf("error translating index (%v): %v", inst.Index, err)
+			return "", fmt.Errorf("error translating index (%v): %w", inst.Index, err)
 		}
 		if _, ok := inst.X.(*constant.Undef); ok {
 			return fmt.Sprintf("%s[%s] = %s", VariableName(inst), index, elem), nil
@@ -400,12 +399,12 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		return fmt.Sprintf("%s = %s; %s[%s] = %s", VariableName(inst), x, VariableName(inst), index, elem), nil
 
 	case *ir.InstIntToPtr:
-		return "", errors.New("converting an integer to a pointer violates Go's unsafe.Pointer rules")
+		return "", errIntToPtr
 
 	case *ir.InstLoad:
 		src, err := FormatValue(inst.Src)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.Src, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
 		if strings.HasPrefix(src, "&") {
 			return fmt.Sprintf("%s = %s", VariableName(inst), strings.TrimPrefix(src, "&")), nil
@@ -415,11 +414,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstLShr:
 		x, err := FormatUnsigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
 			return fmt.Sprintf("%s = int%d(%s >> %s)", VariableName(inst), t.BitSize, x, y), nil
@@ -429,22 +428,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstMul:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s * %s", VariableName(inst), x, y), nil
 
 	case *ir.InstOr:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return fmt.Sprintf("for i, v := range %s { %s[i] = v | %s[i] }", x, VariableName(inst), y), nil
@@ -457,22 +456,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstPtrToInt:
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = %s(uintptr(unsafe.Pointer(%s)))", VariableName(inst), to, from), nil
 
 	case *ir.InstSDiv:
 		x, err := FormatSigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatSigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
@@ -482,11 +481,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstUDiv:
 		x, err := FormatUnsigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
@@ -499,15 +498,15 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstSelect:
 		cond, err := FormatValue(inst.Cond)
 		if err != nil {
-			return "", fmt.Errorf("error translating condition (%v): %v", inst.Cond, err)
+			return "", fmt.Errorf("error translating condition (%v): %w", inst.Cond, err)
 		}
 		valueTrue, err := FormatValue(inst.ValueTrue)
 		if err != nil {
-			return "", fmt.Errorf("error translating first operand (%v): %v", inst.ValueTrue, err)
+			return "", fmt.Errorf("error translating first operand (%v): %w", inst.ValueTrue, err)
 		}
 		valueFalse, err := FormatValue(inst.ValueFalse)
 		if err != nil {
-			return "", fmt.Errorf("error translating second operand (%v): %v", inst.ValueFalse, err)
+			return "", fmt.Errorf("error translating second operand (%v): %w", inst.ValueFalse, err)
 		}
 		name := VariableName(inst)
 		return fmt.Sprintf("if %s { %s = %s } else { %s = %s }", cond, name, valueTrue, name, valueFalse), nil
@@ -515,37 +514,37 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstSExt:
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
-			return "", fmt.Errorf("unsupported To type for zext: %T", inst.To)
+			return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
 		}
 		from, err := FormatSigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		return fmt.Sprintf("%s = int%d(%s)", VariableName(inst), toType.BitSize, from), nil
 
 	case *ir.InstShl:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s << %s", VariableName(inst), x, y), nil
 
 	case *ir.InstShuffleVector:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		mask, err := FormatValue(inst.Mask)
 		if err != nil {
-			return "", fmt.Errorf("error translating mask (%v): %v", inst.Mask, err)
+			return "", fmt.Errorf("error translating mask (%v): %w", inst.Mask, err)
 		}
 		length := inst.Typ.Len
 		return fmt.Sprintf("for i, m := range %s { if m < %d { %s[i] = %s[m] } else { %s[i] = %s[m - %d] } }", mask, length, VariableName(inst), x, VariableName(inst), y, length), nil
@@ -553,22 +552,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstSIToFP:
 		from, err := FormatSigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
 
 	case *ir.InstSRem:
 		x, err := FormatSigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatSigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
@@ -578,11 +577,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstURem:
 		x, err := FormatUnsigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
@@ -595,11 +594,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstStore:
 		dest, err := FormatValue(inst.Dst)
 		if err != nil {
-			return "", fmt.Errorf("error translating destination (%v): %v", inst.Dst, err)
+			return "", fmt.Errorf("error translating destination (%v): %w", inst.Dst, err)
 		}
 		src, err := FormatValue(inst.Src)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.Src, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
 		if strings.HasPrefix(dest, "&") {
 			return fmt.Sprintf("%s = %s", strings.TrimPrefix(dest, "&"), src), nil
@@ -609,11 +608,11 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstSub:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		return fmt.Sprintf("%s = %s - %s", VariableName(inst), x, y), nil
 
@@ -621,25 +620,25 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if vt, ok := inst.To.(*types.VectorType); ok {
 			toType, ok := vt.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("unsupported To type for zext: %v", inst.To)
+				return "", fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
 			}
 			to, err := TypeSpec(toType)
 			if err != nil {
-				return "", fmt.Errorf("error translating To type (%v): %v", toType, err)
+				return "", fmt.Errorf("error translating To type (%v): %w", toType, err)
 			}
 			from, err := FormatValue(inst.From)
 			if err != nil {
-				return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+				return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 			}
 			return fmt.Sprintf("for i, v := range %s { %s[i] = %s(v) }", from, VariableName(inst), to), nil
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating To type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating To type (%v): %w", inst.To, err)
 		}
 		from, err := FormatValue(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize < 8 {
 			return fmt.Sprintf("%s = byte(%s & %d)", VariableName(inst), from, 255>>(8-intType.BitSize)), nil
@@ -649,22 +648,22 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 	case *ir.InstUIToFP:
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		to, err := TypeSpec(inst.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %v", inst.To, err)
+			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
 		}
 		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
 
 	case *ir.InstXor:
 		x, err := FormatValue(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatValue(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return fmt.Sprintf("for i, v := range %s { %s[i] = v ^ %s[i] }", x, VariableName(inst), y), nil
@@ -678,29 +677,29 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		if vt, ok := inst.To.(*types.VectorType); ok {
 			toType, ok := vt.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("unsupported To type for zext: %v", inst.To)
+				return "", fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
 			}
 			ft, ok := inst.From.Type().(*types.VectorType)
 			if !ok {
-				return "", fmt.Errorf("mismatched types for zext: %v and %v", inst.To, inst.From.Type())
+				return "", fmt.Errorf("%w: %v and %v", errMismatchedZextTypes, inst.To, inst.From.Type())
 			}
 			fromType, ok := ft.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("unsupported From type for zext: %v", inst.From.Type())
+				return "", fmt.Errorf("%w: %v", errUnsupportedZextFrom, inst.From.Type())
 			}
 			from, err := FormatValue(inst.From)
 			if err != nil {
-				return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+				return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 			}
 			return fmt.Sprintf("for i, v := range %s { %s[i] = int%d(uint%d(uint%d(v))) }", from, VariableName(inst), toType.BitSize, toType.BitSize, fromType.BitSize), nil
 		}
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
-			return "", fmt.Errorf("unsupported To type for zext: %T", inst.To)
+			return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
 		}
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %v", inst.From, err)
+			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return fmt.Sprintf("if %s { %s = 1 } else { %s = 0 }", from, VariableName(inst), VariableName(inst)), nil
@@ -708,7 +707,7 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		return fmt.Sprintf("%s = int%d(uint%d(%s))", VariableName(inst), toType.BitSize, toType.BitSize, from), nil
 
 	default:
-		return "", fmt.Errorf("unsupported instruction type: %T", inst)
+		return "", fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
 	}
 }
 
@@ -721,7 +720,7 @@ func formatAggregateIndex(base string, t types.Type, indices []uint64) (string, 
 		switch ct := cur.(type) {
 		case *types.StructType:
 			if int(idx) >= len(ct.Fields) {
-				return "", fmt.Errorf("struct index %d out of range (len %d)", idx, len(ct.Fields))
+				return "", fmt.Errorf("%w: index %d (len %d)", errStructIndexRange, idx, len(ct.Fields))
 			}
 			expr = fmt.Sprintf("%s.F%d", expr, idx)
 			cur = ct.Fields[idx]
@@ -732,7 +731,7 @@ func formatAggregateIndex(base string, t types.Type, indices []uint64) (string, 
 			expr = fmt.Sprintf("%s[%d]", expr, idx)
 			cur = ct.ElemType
 		default:
-			return "", fmt.Errorf("unsupported aggregate type for index: %T", cur)
+			return "", fmt.Errorf("%w: %T", errUnsupportedAggregate, cur)
 		}
 	}
 	return expr, nil

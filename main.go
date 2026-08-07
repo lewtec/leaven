@@ -54,7 +54,7 @@ func compile(out io.Writer, m *ir.Module) error {
 
 		def, err := TypeDefinition(t)
 		if err != nil {
-			return fmt.Errorf("error generating type definition for %v: %v", t, err)
+			return fmt.Errorf("error generating type definition for %v: %w", t, err)
 		}
 
 		fmt.Fprintf(out, "type %s %s\n\n", name, def)
@@ -67,11 +67,11 @@ func compile(out io.Writer, m *ir.Module) error {
 		}
 		t, err := TypeSpec(g.ContentType)
 		if err != nil {
-			return fmt.Errorf("error translating type (%v): %v", g.ContentType, err)
+			return fmt.Errorf("error translating type (%v): %w", g.ContentType, err)
 		}
 		val, err := FormatValue(g.Init)
 		if err != nil {
-			return fmt.Errorf("error translating initializer (%v): %v", g.Init, err)
+			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
 		fmt.Fprintf(out, "var %s %s = %s\n\n", VariableName(g), t, val)
 	}
@@ -96,7 +96,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				}
 				pt, err := TypeSpec(p.Typ)
 				if err != nil {
-					return fmt.Errorf("error translating type for parameter %d of %s: %v", i, f.Name(), err)
+					return fmt.Errorf("error translating type for parameter %d of %s: %w", i, f.Name(), err)
 				}
 				fmt.Fprintf(out, "%s %s", VariableName(p), pt)
 			}
@@ -111,7 +111,7 @@ func compile(out io.Writer, m *ir.Module) error {
 			if !types.Equal(rt, types.Void) {
 				retType, err := TypeSpec(rt)
 				if err != nil {
-					return fmt.Errorf("error translating return type for %s: %v", f.Name(), err)
+					return fmt.Errorf("error translating return type for %s: %w", f.Name(), err)
 				}
 				fmt.Fprintf(out, "%s ", retType)
 			}
@@ -129,7 +129,7 @@ func compile(out io.Writer, m *ir.Module) error {
 					}
 					t, err := TypeSpec(inst.Type())
 					if err != nil {
-						return fmt.Errorf("error translating type of %s in %s: %v", inst.Ident(), f.Name(), err)
+						return fmt.Errorf("error translating type of %s in %s: %w", inst.Ident(), f.Name(), err)
 					}
 					vars[t] = append(vars[t], VariableName(inst))
 					allVars = append(allVars, VariableName(inst))
@@ -179,7 +179,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				}
 				translated, err := TranslateInstruction(inst)
 				if err != nil {
-					return fmt.Errorf("error translating %q: %v", inst.LLString(), err)
+					return fmt.Errorf("error translating %q: %w", inst.LLString(), err)
 				}
 				if translated != "" {
 					fmt.Fprintf(out, "\t%s\n", translated)
@@ -189,7 +189,7 @@ func compile(out io.Writer, m *ir.Module) error {
 			case *ir.TermBr:
 				phis, err := PhiAssignments(b, term.Target)
 				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %v", err)
+					return fmt.Errorf("error translating phi nodes: %w", err)
 				}
 				if phis != "" {
 					fmt.Fprintf(out, "\t%s\n", phis)
@@ -199,12 +199,12 @@ func compile(out io.Writer, m *ir.Module) error {
 			case *ir.TermCondBr:
 				cond, err := FormatValue(term.Cond)
 				if err != nil {
-					return fmt.Errorf("error translating condition (%v): %v", term.Cond, err)
+					return fmt.Errorf("error translating condition (%v): %w", term.Cond, err)
 				}
 				fmt.Fprintf(out, "\tif %s {\n", cond)
 				phis, err := PhiAssignments(b, term.TargetTrue)
 				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %v", err)
+					return fmt.Errorf("error translating phi nodes: %w", err)
 				}
 				if phis != "" {
 					fmt.Fprintf(out, "\t\t%s\n", phis)
@@ -213,7 +213,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				fmt.Fprintln(out, "\t} else {")
 				phis, err = PhiAssignments(b, term.TargetFalse)
 				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %v", err)
+					return fmt.Errorf("error translating phi nodes: %w", err)
 				}
 				if phis != "" {
 					fmt.Fprintf(out, "\t\t%s\n", phis)
@@ -232,7 +232,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				}
 				retVal, err := FormatValue(term.X)
 				if err != nil {
-					return fmt.Errorf("error translating return value (%v): %v", term.X, err)
+					return fmt.Errorf("error translating return value (%v): %w", term.X, err)
 				}
 				if f.Name() == "main" {
 					fmt.Fprintf(out, "\tos.Exit(int(%s))\n", retVal)
@@ -243,18 +243,18 @@ func compile(out io.Writer, m *ir.Module) error {
 			case *ir.TermSwitch:
 				x, err := FormatValue(term.X)
 				if err != nil {
-					return fmt.Errorf("error translating control value (%v): %v", term.X, err)
+					return fmt.Errorf("error translating control value (%v): %w", term.X, err)
 				}
 				fmt.Fprintf(out, "\tswitch %s {\n", x)
 				for _, c := range term.Cases {
 					x, err := FormatValue(c.X)
 					if err != nil {
-						return fmt.Errorf("error translating case value (%v): %v", c.X, err)
+						return fmt.Errorf("error translating case value (%v): %w", c.X, err)
 					}
 					fmt.Fprintf(out, "\tcase %s:\n", x)
 					phis, err := PhiAssignments(b, c.Target)
 					if err != nil {
-						return fmt.Errorf("error translating phi nodes: %v", err)
+						return fmt.Errorf("error translating phi nodes: %w", err)
 					}
 					if phis != "" {
 						fmt.Fprintf(out, "\t\t%s\n", phis)
@@ -264,7 +264,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				fmt.Fprint(out, "\tdefault:\n")
 				phis, err := PhiAssignments(b, term.TargetDefault)
 				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %v", err)
+					return fmt.Errorf("error translating phi nodes: %w", err)
 				}
 				if phis != "" {
 					fmt.Fprintf(out, "\t\t%s\n", phis)
@@ -273,7 +273,7 @@ func compile(out io.Writer, m *ir.Module) error {
 				fmt.Fprint(out, "\t}\n")
 
 			default:
-				return fmt.Errorf("unsupported block terminator type: %T", term)
+				return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
 			}
 		}
 
@@ -322,7 +322,7 @@ func PhiAssignments(a, b value.Value) (string, error) {
 			if inc.Pred == a {
 				source, err := FormatValue(inc.X)
 				if err != nil {
-					return "", fmt.Errorf("error translating value (%v): %v", inc.X, err)
+					return "", fmt.Errorf("error translating value (%v): %w", inc.X, err)
 				}
 				src = append(src, source)
 				dest = append(dest, VariableName(phi))

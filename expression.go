@@ -13,10 +13,10 @@ import (
 func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (string, error) {
 	srcPointerType, ok := src.Type().(*types.PointerType)
 	if !ok {
-		return "", fmt.Errorf("non-pointer source parameter: %v", src.Type())
+		return "", fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
 	if !types.Equal(srcPointerType.ElemType, elemType) {
-		return "", fmt.Errorf("mismatched source and element types")
+		return "", errMismatchedSrcElem
 	}
 
 	zeroFirstIndex := false
@@ -34,14 +34,14 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 
 	source, err := FormatValue(src)
 	if err != nil {
-		return "", fmt.Errorf("error translating source pointer (%q): %v", src, err)
+		return "", fmt.Errorf("error translating source pointer (%q): %w", src, err)
 	}
 	result := source
 
 	if !zeroFirstIndex {
 		firstIndex, err := FormatValue(indices[0])
 		if err != nil {
-			return "", fmt.Errorf("error translating first index (%v): %v", indices[0], err)
+			return "", fmt.Errorf("error translating first index (%v): %w", indices[0], err)
 		}
 		result = fmt.Sprintf("libc.AddPointer(%s, int(%s))", source, firstIndex)
 	}
@@ -57,7 +57,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		case *types.ArrayType:
 			v, err := FormatValue(index)
 			if err != nil {
-				return "", fmt.Errorf("error translating index (%v): %v", index, err)
+				return "", fmt.Errorf("error translating index (%v): %w", index, err)
 			}
 			result = fmt.Sprintf("%s[%s]", result, v)
 			currentType = ct.ElemType
@@ -66,14 +66,14 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		case *types.StructType:
 			ci, ok := index.(*constant.Int)
 			if !ok {
-				return "", fmt.Errorf("non-constant index into struct: %v %T", index, index)
+				return "", fmt.Errorf("%w: %v %T", errNonConstantStructIdx, index, index)
 			}
 			result = fmt.Sprintf("%s.F%v", result, ci.X)
 			currentType = ct.Fields[ci.X.Int64()]
 			takeAddress = true
 
 		default:
-			return "", fmt.Errorf("unsupported type to index into: %v", currentType)
+			return "", fmt.Errorf("%w: %v", errUnsupportedIndexType, currentType)
 		}
 	}
 

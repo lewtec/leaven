@@ -154,10 +154,10 @@ func requireCsmithTools(t *testing.T) csmithTools {
 func resolveCsmith() (csmithBin, includeDir string, err error) {
 	if p := os.Getenv("CSMITH"); p != "" {
 		if !filepath.IsAbs(p) {
-			return "", "", fmt.Errorf("CSMITH must be an absolute path, got %q", p)
+			return "", "", fmt.Errorf("%w: CSMITH must be an absolute path, got %q", errCsmithConfig, p)
 		}
 		if st, e := os.Stat(p); e != nil || st.IsDir() {
-			return "", "", fmt.Errorf("CSMITH=%q is not a usable binary: %v", p, e)
+			return "", "", fmt.Errorf("CSMITH=%q is not a usable binary: %w", p, e)
 		}
 		home := filepath.Dir(filepath.Dir(p))
 		if envHome := os.Getenv("CSMITH_HOME"); envHome != "" {
@@ -172,11 +172,11 @@ func resolveCsmith() (csmithBin, includeDir string, err error) {
 
 	if home := os.Getenv("CSMITH_HOME"); home != "" {
 		if !filepath.IsAbs(home) {
-			return "", "", fmt.Errorf("CSMITH_HOME must be an absolute path, got %q", home)
+			return "", "", fmt.Errorf("%w: CSMITH_HOME must be an absolute path, got %q", errCsmithConfig, home)
 		}
 		bin := filepath.Join(home, "bin", "csmith")
 		if st, e := os.Stat(bin); e != nil || st.IsDir() {
-			return "", "", fmt.Errorf("csmith binary not found at %s: %v", bin, e)
+			return "", "", fmt.Errorf("csmith binary not found at %s: %w", bin, e)
 		}
 		inc, e := findCsmithInclude(home)
 		if e != nil {
@@ -230,7 +230,7 @@ func findCsmithInclude(prefix string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("csmith.h not found under %s/include", prefix)
+	return "", fmt.Errorf("%w: csmith.h not found under %s/include", errCsmithConfig, prefix)
 }
 
 // defaultCsmithArgs keeps programs smaller / closer to what leaven can handle.
