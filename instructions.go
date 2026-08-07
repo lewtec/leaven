@@ -129,6 +129,14 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 			if len(args) == 1 {
 				return fmt.Sprintf("%s = float32(math.Abs(float64(%s)))", VariableName(inst), args[0]), nil
 			}
+		case "llvm_fmuladd_f64":
+			if len(args) == 3 {
+				return fmt.Sprintf("%s = %s*%s + %s", VariableName(inst), args[0], args[1], args[2]), nil
+			}
+		case "llvm_fmuladd_f32":
+			if len(args) == 3 {
+				return fmt.Sprintf("%s = %s*%s + %s", VariableName(inst), args[0], args[1], args[2]), nil
+			}
 		case "llvm_lifetime_start", "llvm_lifetime_end":
 			return ";", nil
 		case "llvm_memcpy_p0i8_p0i8_i64":
@@ -444,6 +452,23 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		}
 		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
 
+	case *ir.InstUDiv:
+		x, err := FormatUnsigned(inst.X)
+		if err != nil {
+			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+		}
+		y, err := FormatUnsigned(inst.Y)
+		if err != nil {
+			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+		}
+		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
+			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
+		}
+		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
+			return fmt.Sprintf("%s = int%d(%s / %s)", VariableName(inst), intType.BitSize, x, y), nil
+		}
+		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
+
 	case *ir.InstSelect:
 		cond, err := FormatValue(inst.Cond)
 		if err != nil {
@@ -520,6 +545,23 @@ func TranslateInstruction(inst ir.Instruction) (string, error) {
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
 			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
+		}
+		return fmt.Sprintf("%s = %s %% %s", VariableName(inst), x, y), nil
+
+	case *ir.InstURem:
+		x, err := FormatUnsigned(inst.X)
+		if err != nil {
+			return "", fmt.Errorf("error translating left operand (%v): %v", inst.X, err)
+		}
+		y, err := FormatUnsigned(inst.Y)
+		if err != nil {
+			return "", fmt.Errorf("error translating right operand (%v): %v", inst.Y, err)
+		}
+		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
+			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
+		}
+		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
+			return fmt.Sprintf("%s = int%d(%s %% %s)", VariableName(inst), intType.BitSize, x, y), nil
 		}
 		return fmt.Sprintf("%s = %s %% %s", VariableName(inst), x, y), nil
 

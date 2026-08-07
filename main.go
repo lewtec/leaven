@@ -157,10 +157,21 @@ func compile(out io.Writer, m *ir.Module) error {
 			fmt.Fprintf(out, " = %s\n\n", strings.Join(allVars, ", "))
 		}
 
+		// Labels are only legal in Go if something gotos them. Collect jump targets.
+		gotoTargets := blockGotoTargets(f)
+
 		// Translate instructions.
 		for i, b := range f.Blocks {
-			if i != 0 {
-				fmt.Fprintf(out, "\n%s:\n", BlockName(b))
+			// Entry always emitted; other blocks only if they are branch targets
+			// (avoids "label defined and not used" and pure dead code).
+			if i != 0 && !gotoTargets[b] {
+				continue
+			}
+			if gotoTargets[b] {
+				if i != 0 {
+					fmt.Fprintln(out)
+				}
+				fmt.Fprintf(out, "%s:\n", BlockName(b))
 			}
 			for _, inst := range b.Insts {
 				if _, ok := inst.(*ir.InstPhi); ok {
@@ -269,6 +280,32 @@ func compile(out io.Writer, m *ir.Module) error {
 		fmt.Fprint(out, "}\n\n")
 	}
 	return nil
+}
+
+// blockGotoTargets returns the set of blocks that are targets of an explicit
+// branch/switch in f (i.e. need a Go label).
+func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
+	targets := make(map[*ir.Block]bool)
+	add := func(v value.Value) {
+		if b, ok := v.(*ir.Block); ok {
+			targets[b] = true
+		}
+	}
+	for _, b := range f.Blocks {
+		switch term := b.Term.(type) {
+		case *ir.TermBr:
+			add(term.Target)
+		case *ir.TermCondBr:
+			add(term.TargetTrue)
+			add(term.TargetFalse)
+		case *ir.TermSwitch:
+			add(term.TargetDefault)
+			for _, c := range term.Cases {
+				add(c.Target)
+			}
+		}
+	}
+	return targets
 }
 
 // PhiAssignments returns an assignment statement expressing the effects of Phi
