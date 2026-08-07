@@ -104,6 +104,38 @@ func Iswupper(c int32) int32 {
 	return 0
 }
 
+// Iswcntrl is C iswcntrl(c) from <wctype.h>.
+func Iswcntrl(c int32) int32 {
+	if unicode.IsControl(rune(uint32(c))) {
+		return 1
+	}
+	return 0
+}
+
+// Iswxdigit is C iswxdigit(c) from <wctype.h>.
+func Iswxdigit(c int32) int32 {
+	r := rune(uint32(c))
+	if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+		return 1
+	}
+	return 0
+}
+
+// Towupper is C towupper(c) from <wctype.h>.
+func Towupper(c int32) int32 {
+	return int32(unicode.ToUpper(rune(uint32(c))))
+}
+
+// Towlower is C towlower(c) from <wctype.h>.
+func Towlower(c int32) int32 {
+	return int32(unicode.ToLower(rune(uint32(c))))
+}
+
+// Exit is C exit(status).
+func Exit(status int32) {
+	os.Exit(int(status))
+}
+
 // Dup is C dup(fd). Pure-Go: only maps 0/1/2 to themselves; other FDs
 // return -1 (tree-sitter uses this for print-dot-graph on std FDs).
 func Dup(fd int32) int32 {

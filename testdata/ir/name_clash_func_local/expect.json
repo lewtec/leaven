@@ -1,0 +1,8 @@
+{
+  "cases": [{
+    "name": "package-p", "package": "p",
+    "contains": ["func is_verbatim", "local_is_verbatim", "call = is_verbatim(cur)"],
+    "not_contains": ["call = local_is_verbatim(cur)"]
+  }],
+  "run": { "stdout_contains": [] }
+}

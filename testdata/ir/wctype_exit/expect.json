@@ -1,0 +1,8 @@
+{
+  "cases": [{
+    "name": "package-p", "package": "p",
+    "contains": ["libc.Iswcntrl", "libc.Iswxdigit", "libc.Towupper", "libc.Towlower", "libc.Exit"],
+    "not_contains": ["iswcntrl(", "towupper(", "exit("]
+  }],
+  "run": { "stdout_contains": [] }
+}
