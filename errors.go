@@ -5,6 +5,8 @@ import "errors"
 // Sentinel errors for non-wrapping failures (janitor: table then %w).
 var (
 	errInvalidPackage = errors.New("invalid Go package name")
+	errInputRequired  = errors.New("input is required")
+	errOutputRequired = errors.New("output is required")
 
 	errCsmithConfig = errors.New("csmith configuration")
 

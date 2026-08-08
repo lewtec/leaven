@@ -17,7 +17,7 @@ func TestCommandRun(t *testing.T) {
 	defer in.Close()
 	var out bytes.Buffer
 	c := &Command{Name: "hello.ll", Input: in, Output: &out}
-	if err := c.Run(context.Background()); err != nil {
+	if err := c.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte("package main")) {
@@ -26,7 +26,7 @@ func TestCommandRun(t *testing.T) {
 }
 
 func TestCommandRunCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	c := &Command{Input: bytes.NewReader(nil), Output: io.Discard}
 	if err := c.Run(ctx); !errors.Is(err, context.Canceled) {
@@ -36,21 +36,21 @@ func TestCommandRunCanceled(t *testing.T) {
 
 func TestCommandRunInvalidPackage(t *testing.T) {
 	c := &Command{Package: "123bad", Input: bytes.NewReader(nil), Output: io.Discard}
-	if err := c.Run(context.Background()); !errors.Is(err, errInvalidPackage) {
+	if err := c.Run(t.Context()); !errors.Is(err, errInvalidPackage) {
 		t.Fatalf("Run() error = %v, want errInvalidPackage", err)
 	}
 }
 
 func TestCommandRunRequiresInput(t *testing.T) {
 	c := &Command{Output: io.Discard}
-	if err := c.Run(context.Background()); err == nil {
-		t.Fatal("Run() error = nil, want input required")
+	if err := c.Run(t.Context()); !errors.Is(err, errInputRequired) {
+		t.Fatalf("Run() error = %v, want errInputRequired", err)
 	}
 }
 
 func TestCommandRunRequiresOutput(t *testing.T) {
 	c := &Command{Input: bytes.NewReader(nil)}
-	if err := c.Run(context.Background()); err == nil {
-		t.Fatal("Run() error = nil, want output required")
+	if err := c.Run(t.Context()); !errors.Is(err, errOutputRequired) {
+		t.Fatalf("Run() error = %v, want errOutputRequired", err)
 	}
 }

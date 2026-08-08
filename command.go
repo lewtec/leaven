@@ -34,10 +34,10 @@ func (c *Command) Run(ctx context.Context) error {
 		return err
 	}
 	if c.Input == nil {
-		return fmt.Errorf("input is required")
+		return errInputRequired
 	}
 	if c.Output == nil {
-		return fmt.Errorf("output is required")
+		return errOutputRequired
 	}
 
 	m, err := parseIR(c.Name, c.Input)
