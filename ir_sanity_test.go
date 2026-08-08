@@ -1,4 +1,4 @@
-package main
+package leaven
 
 import (
 	"bytes"
@@ -83,7 +83,7 @@ func TestIRSanity(t *testing.T) {
 						pkg = "main"
 					}
 					var buf bytes.Buffer
-					if err := compile(&buf, m, pkg); err != nil {
+					if err := Compile(&buf, m, pkg); err != nil {
 						t.Fatalf("compile package=%s: %v", pkg, err)
 					}
 					got := buf.String()
@@ -119,7 +119,7 @@ func TestIRSanity(t *testing.T) {
 func runFixtureProgram(t *testing.T, m *ir.Module, run *expectRun) {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := compile(&buf, m, "main"); err != nil {
+	if err := Compile(&buf, m, "main"); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	src, err := format.Source(buf.Bytes())

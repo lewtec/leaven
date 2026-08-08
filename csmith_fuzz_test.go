@@ -1,6 +1,6 @@
 //go:build csmith
 
-package main
+package leaven
 
 import (
 	"bytes"
@@ -23,13 +23,14 @@ var errRunTimeout = errors.New("run timeout")
 // Build tag: csmith (normal `go test` skips this file).
 //
 //	mise install   # clang 14, prebuilt csmith, go, goimports
-//	go install .
 //	go test -tags=csmith -run TestCsmithFixedSeeds -v -count=1
 //	go test -tags=csmith -fuzz=FuzzCsmith -fuzztime=30s
 //
 // Required tools on PATH (via mise.toml; overrides optional):
 //
-//	csmith / clang / leaven / goimports / go
+//	csmith / clang / goimports / go
+//
+// leaven is invoked with `go run ./cmd/leaven` (no install).
 //
 // Optional env:
 //
@@ -99,7 +100,6 @@ type csmithTools struct {
 	csmith  string
 	include string
 	clang   string
-	leaven  string
 	timeout time.Duration
 }
 
@@ -119,10 +119,6 @@ func requireCsmithTools(t *testing.T) csmithTools {
 		t.Skipf("%s not on PATH (install via mise: conda:clang@14): %v", clang, err)
 	}
 
-	leaven, err := exec.LookPath("leaven")
-	if err != nil {
-		t.Skip("leaven not on PATH (run: go install .)")
-	}
 	if _, err := exec.LookPath("goimports"); err != nil {
 		t.Skip("goimports not on PATH")
 	}
@@ -143,7 +139,6 @@ func requireCsmithTools(t *testing.T) csmithTools {
 		csmith:  csmith,
 		include: include,
 		clang:   clang,
-		leaven:  leaven,
 		timeout: timeout,
 	}
 }
@@ -311,7 +306,7 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	}
 
 	// 4. Transpile with leaven
-	leaven := exec.Command(tools.leaven, llFile)
+	leaven := exec.Command("go", "run", "./cmd/leaven", llFile)
 	if out, err := leaven.CombinedOutput(); err != nil {
 		t.Fatalf("leaven seed=%d: %v\n%s\n(source kept under temp dir; re-run with -count=1 -v)", seed, err, out)
 	}

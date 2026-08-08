@@ -1,77 +1,18 @@
-package main
+package leaven
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
 	"io"
-	"log"
-	"os"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
 
-func main() {
-	packageName := flag.String("package", "main", "Go package name for generated code")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: leaven [flags] input-file.ll\n")
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-	if flag.NArg() != 1 {
-		flag.Usage()
-		os.Exit(1)
-	}
-	if err := validatePackageName(*packageName); err != nil {
-		log.Fatal(err)
-	}
-
-	inFile := flag.Arg(0)
-	m, err := parseIRFile(inFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	outFile := strings.TrimSuffix(inFile, ".ll") + ".go"
-	out, err := os.Create(outFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer out.Close()
-
-	err = compile(out, m, *packageName)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-// validatePackageName checks that name is a legal Go package identifier.
-func validatePackageName(name string) error {
-	if name == "" {
-		return fmt.Errorf("%w: empty package name", errInvalidPackage)
-	}
-	r, size := utf8.DecodeRuneInString(name)
-	if r == utf8.RuneError && size == 1 {
-		return fmt.Errorf("%w: %q", errInvalidPackage, name)
-	}
-	if !unicode.IsLetter(r) && r != '_' {
-		return fmt.Errorf("%w: %q", errInvalidPackage, name)
-	}
-	for _, r := range name[size:] {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
-			return fmt.Errorf("%w: %q", errInvalidPackage, name)
-		}
-	}
-	return nil
-}
-
-func compile(out io.Writer, m *ir.Module, packageName string) error {
+func Compile(out io.Writer, m *ir.Module, packageName string) error {
 	var body bytes.Buffer
 	if err := writeModule(&body, m, packageName); err != nil {
 		return err

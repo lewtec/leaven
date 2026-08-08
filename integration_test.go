@@ -1,4 +1,4 @@
-package main
+package leaven
 
 import (
 	"bytes"
@@ -11,9 +11,9 @@ import (
 // leaven. It compares the output of the two programs.
 func doTestCase(t *testing.T, progName string) {
 	p := "testdata/" + progName
-	clang := exec.Command("clang", "-o", p+"_c", p+".c", "testdata/main.c")
-	if err := clang.Run(); err != nil {
-		t.Fatalf("Error in native compilation: %v", err)
+	clang := exec.Command("clang", "-o", p+"_c", p+".c", "testdata/main.c", "-lm")
+	if out, err := clang.CombinedOutput(); err != nil {
+		t.Fatalf("Error in native compilation: %v\n%s", err, out)
 	}
 
 	prog := exec.Command(p + "_c")
@@ -23,18 +23,18 @@ func doTestCase(t *testing.T, progName string) {
 	}
 
 	clang2 := exec.Command("clang", "-S", "-emit-llvm", "-fno-builtin", "-nostdinc", "-Iinclude", "-o", p+".ll", p+".c")
-	if err := clang2.Run(); err != nil {
-		t.Fatalf("Error compiling to LLVM: %v", err)
+	if out, err := clang2.CombinedOutput(); err != nil {
+		t.Fatalf("Error compiling to LLVM: %v\n%s", err, out)
 	}
 
-	leaven := exec.Command("leaven", p+".ll")
-	if err := leaven.Run(); err != nil {
-		t.Fatalf("Error running leaven: %v", err)
+	leaven := exec.Command("go", "run", "./cmd/leaven", p+".ll")
+	if out, err := leaven.CombinedOutput(); err != nil {
+		t.Fatalf("Error running leaven: %v\n%s", err, out)
 	}
 
 	goimports := exec.Command("goimports", "-w", p+".go")
-	if err := goimports.Run(); err != nil {
-		t.Fatalf("Error running goimports: %v", err)
+	if out, err := goimports.CombinedOutput(); err != nil {
+		t.Fatalf("Error running goimports: %v\n%s", err, out)
 	}
 
 	goRun := exec.Command("go", "run", p+".go", "testdata/main.go")

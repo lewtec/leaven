@@ -1,4 +1,4 @@
-package main
+package leaven
 
 import (
 	"github.com/llir/llvm/ir"

@@ -6,3 +6,11 @@
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
+
+[tasks.test]
+description = "Integration tests (clang vs leaven output)"
+run = "go test -count=1 -timeout 10m ./..."
+
+[tasks."test:csmith"]
+description = "Csmith smoke: known-good seed=1"
+run = "go test -tags=csmith -count=1 -timeout 10m -run 'TestCsmithFixedSeeds/seed=1$'"
