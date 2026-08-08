@@ -5,18 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"testing"
 )
 
 func TestCommandRun(t *testing.T) {
-	in, err := os.Open("testdata/hello.ll")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer in.Close()
 	var out bytes.Buffer
-	c := &Command{Name: "hello.ll", Input: in, Output: &out}
+	c := &Command{Name: "anon_dot.ll", Input: bytes.NewReader(testdataIR(t)), Output: &out}
 	if err := c.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}

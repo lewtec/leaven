@@ -2,18 +2,13 @@ package leaven
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"testing"
 )
 
 func TestCLIStdinStdout(t *testing.T) {
-	ir, err := os.ReadFile("testdata/hello.ll")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cmd := exec.Command("go", "run", "./cmd/leaven")
-	cmd.Stdin = bytes.NewReader(ir)
+	cmd.Stdin = bytes.NewReader(testdataIR(t))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -26,12 +21,8 @@ func TestCLIStdinStdout(t *testing.T) {
 }
 
 func TestCLIDashStdin(t *testing.T) {
-	ir, err := os.ReadFile("testdata/hello.ll")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cmd := exec.Command("go", "run", "./cmd/leaven", "-")
-	cmd.Stdin = bytes.NewReader(ir)
+	cmd.Stdin = bytes.NewReader(testdataIR(t))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
