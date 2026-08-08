@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "package p",
-        "\"github.com/andybalholm/leaven/libc\"",
+        "\"github.com/lewtec/leaven/libc\"",
         "var current_free func(*byte) = libc.Free",
         "func release(p *byte)",
         "func set_free(fn func(*byte))",

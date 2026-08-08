@@ -34,7 +34,7 @@ func writeImports(out io.Writer, body string) {
 		{`"math"`, "math."},
 		{`"os"`, "os."},
 		{`"sync/atomic"`, "atomic."},
-		{`"github.com/andybalholm/leaven/libc"`, "libc."},
+		{`"github.com/lewtec/leaven/libc"`, "libc."},
 	}
 	var paths []string
 	for _, n := range needed {

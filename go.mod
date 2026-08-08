@@ -1,4 +1,4 @@
-module github.com/andybalholm/leaven
+module github.com/lewtec/leaven
 
 go 1.18
 

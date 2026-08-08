@@ -6,7 +6,7 @@
       "contains": [
         "package p",
         "\"os\"",
-        "\"github.com/andybalholm/leaven/libc\"",
+        "\"github.com/lewtec/leaven/libc\"",
         "os.Stderr",
         "*os.File",
         "libc.Fprintf",

@@ -317,7 +317,7 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 		t.Fatalf("goimports seed=%d: %v\n%s", seed, err, out)
 	}
 
-	// Run from module root so imports like github.com/andybalholm/leaven/libc resolve.
+	// Run from module root so imports like github.com/lewtec/leaven/libc resolve.
 	goRun := exec.Command("go", "run", goFile)
 	goOut, err := runCmdWithTimeout(goRun, tools.timeout)
 	if err != nil {
