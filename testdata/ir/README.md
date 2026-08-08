@@ -1,24 +1,42 @@
-# IR fixtures (`testdata/ir/<name>/`)
+# IR fixtures (`testdata/ir/<lang>_<name>/`)
 
-Each folder is one regression case for `TestIRSanity`.
+Folder name starts with the language: `c_`, `cpp_`, `rust_`. Example: `c_strlen_map`, `cpp_add`, `rust_add`.
+
+Each folder is one regression case for `TestIRSanity`. Default `go test` reads committed IR only. Clang / clang++ / rustc are gen-only (`mise run ir:gen`).
 
 | File | Role |
 |------|------|
-| `source.c` | Human-readable C repro (when possible). Document intent + clang flags. |
-| `input.ll` | **Oracle** IR fed to leaven (clang-14 typed pointers). May be hand-curated when clang will not emit the pattern. |
-| `expect.json` | Table of `contains` / `not_contains` on generated Go; optional `run` builds+executes package main. |
+| `source.c` / `source.cpp` / `source.rs` | Exactly one. Extension picks the compiler and must match the dir prefix. |
+| `input.<n>.ll` | IR dialect **n** (LLVM major). Example: clang 14 → `input.14.ll`, rustc LLVM 22 → `input.22.ll`. |
+| `expect.json` | `contains` / `not_contains` on generated Go; optional `run`; `"parse": false` skips llir. |
 
-## Regenerate IR (when source.c is authoritative)
+A folder may keep several majors (`input.14.ll` and `input.18.ll`). `TestIRSanity` runs each file.
+
+Compilers are mise conda pins in `mise.toml`:
+
+| Source | Tool | Default pin | Typical `input.<n>.ll` |
+|--------|------|-------------|------------------------|
+| `source.c` | `clang` | `conda:clang` 14.0.6 | `input.14.ll` |
+| `source.cpp` | `clang++` | `conda:clangxx` 14.0.6 | `input.14.ll` |
+| `source.rs` | `rustc` | `conda:rust` 1.97.1 | `input.22.ll` |
+
+C/C++ 14 is typed pointers (leaven today). rustc 22 is opaque `ptr` — use `"parse": false`.
+
+Another clang major: put `leaven:tool=conda:clang@18.1.8` in the source (`mise ls-remote conda:clang`). Gen writes `input.18.ll` and leaves `input.14.ll` in place.
+
+## Generate (needs compilers)
 
 ```bash
-clang-14 -S -emit-llvm -fno-discard-value-names -std=gnu11 -O0 \
-  -o testdata/ir/<name>/input.ll testdata/ir/<name>/source.c
+mise install
+mise run ir:gen
+mise run ir:check
 ```
 
-Do **not** blindly regenerate if the comment on `source.c` says `input.ll` is hand-curated.
+Skip generation when the compiler cannot emit the pattern. Put `leaven:hand-ir` in the source. Current hand IR: `c_anon_dot`, `c_name_clash_func_local`, `c_unreachable`, `c_void_mid_return`.
 
-## Run
+## Test (no clang)
 
 ```bash
-go test -run TestIR ./...
+go test ./...
+mise run test:live    # optional C vs Go; needs clang
 ```

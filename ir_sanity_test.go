@@ -3,11 +3,14 @@ package leaven
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/format"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,6 +22,8 @@ type expectTable struct {
 	Cases []expectCase `json:"cases"`
 	// Run, if set, go-builds and runs the generated program as package main.
 	Run *expectRun `json:"run"`
+	// Parse, if false, skips llir (e.g. rustc LLVM 22 opaque ptr).
+	Parse *bool `json:"parse"`
 }
 
 type expectCase struct {
@@ -34,7 +39,7 @@ type expectRun struct {
 	StderrContains []string `json:"stderr_contains"`
 }
 
-// TestIRSanity walks testdata/ir/<fixture>/{input.ll,expect.json}.
+// TestIRSanity walks testdata/ir/<fixture>/{input.<n>.ll,expect.json}.
 func TestIRSanity(t *testing.T) {
 	root := filepath.Join("testdata", "ir")
 	entries, err := os.ReadDir(root)
@@ -48,13 +53,7 @@ func TestIRSanity(t *testing.T) {
 		fixture := e.Name()
 		t.Run(fixture, func(t *testing.T) {
 			dir := filepath.Join(root, fixture)
-			llPath := filepath.Join(dir, "input.ll")
 			tablePath := filepath.Join(dir, "expect.json")
-
-			m, err := parseIRFile(llPath)
-			if err != nil {
-				t.Fatalf("parse %s: %v", llPath, err)
-			}
 
 			raw, err := os.ReadFile(tablePath)
 			if err != nil {
@@ -64,50 +63,68 @@ func TestIRSanity(t *testing.T) {
 			if err := json.Unmarshal(raw, &table); err != nil {
 				t.Fatalf("json %s: %v", tablePath, err)
 			}
+			if table.Parse != nil && !*table.Parse {
+				return
+			}
 			if len(table.Cases) == 0 {
 				t.Fatalf("%s: empty cases table", tablePath)
 			}
 
-			for _, tc := range table.Cases {
-				tc := tc
-				name := tc.Name
-				if name == "" {
-					name = tc.Package
-				}
-				if name == "" {
-					name = "default"
-				}
-				t.Run(name, func(t *testing.T) {
-					pkg := tc.Package
-					if pkg == "" {
-						pkg = "main"
-					}
-					var buf bytes.Buffer
-					if err := Compile(&buf, m, pkg); err != nil {
-						t.Fatalf("compile package=%s: %v", pkg, err)
-					}
-					got := buf.String()
-
-					if _, err := format.Source(buf.Bytes()); err != nil {
-						t.Fatalf("go/format: %v\n---- generated ----\n%s", err, got)
-					}
-
-					for _, s := range tc.Contains {
-						if !strings.Contains(got, s) {
-							t.Errorf("missing %q in:\n%s", s, got)
-						}
-					}
-					for _, s := range tc.NotContains {
-						if strings.Contains(got, s) {
-							t.Errorf("unexpected %q in:\n%s", s, got)
-						}
-					}
-				})
+			lls, err := fixtureIRFiles(dir)
+			if err != nil {
+				t.Fatal(err)
 			}
+			for _, llPath := range lls {
+				llPath := llPath
+				ver := irFileVersion(llPath)
+				t.Run("ir"+ver, func(t *testing.T) {
+					m, err := parseIRFile(llPath)
+					if err != nil {
+						t.Fatalf("parse %s: %v", llPath, err)
+					}
 
-			if table.Run != nil {
-				t.Run("run", func(t *testing.T) {
-					runFixtureProgram(t, m, table.Run)
+					for _, tc := range table.Cases {
+						tc := tc
+						name := tc.Name
+						if name == "" {
+							name = tc.Package
+						}
+						if name == "" {
+							name = "default"
+						}
+						t.Run(name, func(t *testing.T) {
+							pkg := tc.Package
+							if pkg == "" {
+								pkg = "main"
+							}
+							var buf bytes.Buffer
+							if err := Compile(&buf, m, pkg); err != nil {
+								t.Fatalf("compile package=%s: %v", pkg, err)
+							}
+							got := buf.String()
+
+							if _, err := format.Source(buf.Bytes()); err != nil {
+								t.Fatalf("go/format: %v\n---- generated ----\n%s", err, got)
+							}
+
+							for _, s := range tc.Contains {
+								if !strings.Contains(got, s) {
+									t.Errorf("missing %q in:\n%s", s, got)
+								}
+							}
+							for _, s := range tc.NotContains {
+								if strings.Contains(got, s) {
+									t.Errorf("unexpected %q in:\n%s", s, got)
+								}
+							}
+						})
+					}
+
+					if table.Run != nil {
+						t.Run("run", func(t *testing.T) {
+							runFixtureProgram(t, m, table.Run)
+						})
+					}
 				})
 			}
 		})
@@ -184,13 +201,139 @@ func TestIRFixturesLayout(t *testing.T) {
 		}
 		found++
 		dir := filepath.Join(root, e.Name())
-		for _, need := range []string{"input.ll", "expect.json", "source.c"} {
-			if _, err := os.Stat(filepath.Join(dir, need)); err != nil {
-				t.Errorf("%s: missing %s", e.Name(), need)
+		if _, err := os.Stat(filepath.Join(dir, "expect.json")); err != nil {
+			t.Errorf("%s: missing expect.json", e.Name())
+		}
+		src, err := fixtureSource(dir)
+		if err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+		} else {
+			prefix, err := fixtureLangPrefix(src)
+			if err != nil {
+				t.Errorf("%s: %v", e.Name(), err)
+			} else if !strings.HasPrefix(e.Name(), prefix) {
+				t.Errorf("%s: dir must start with %s (have %s)", e.Name(), prefix, filepath.Base(src))
 			}
+		}
+		if _, err := fixtureIRFiles(dir); err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
 		}
 	}
 	if found == 0 {
 		t.Fatal("no fixture folders under testdata/ir")
+	}
+}
+
+const irHandMarker = "leaven:hand-ir"
+
+var (
+	errFixtureSourceCount = errors.New("need exactly one of source.c, source.cpp, source.rs")
+	errFixtureIRMissing   = errors.New("need at least one input.<LLVM-major>.ll")
+	irFileName            = regexp.MustCompile(`^input\.([0-9]+)\.ll$`)
+)
+
+func fixtureIRFiles(dir string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "input.*.ll"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range matches {
+		if irFileName.MatchString(filepath.Base(p)) {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil, errFixtureIRMissing
+	}
+	return out, nil
+}
+
+func irFileVersion(path string) string {
+	m := irFileName.FindStringSubmatch(filepath.Base(path))
+	if len(m) != 2 {
+		return "?"
+	}
+	return m[1]
+}
+
+func fixtureSource(dir string) (string, error) {
+	var hits []string
+	for _, name := range []string{"source.c", "source.cpp", "source.rs"} {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			hits = append(hits, p)
+		}
+	}
+	if len(hits) != 1 {
+		return "", fmt.Errorf("%w (found %d)", errFixtureSourceCount, len(hits))
+	}
+	return hits[0], nil
+}
+
+func fixtureLangPrefix(src string) (string, error) {
+	switch filepath.Ext(src) {
+	case ".c":
+		return "c_", nil
+	case ".cpp":
+		return "cpp_", nil
+	case ".rs":
+		return "rust_", nil
+	default:
+		return "", fmt.Errorf("%w: %s", errFixtureSourceCount, src)
+	}
+}
+
+func fixtureHandIR(t *testing.T, sourcePath string) bool {
+	t.Helper()
+	b, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Contains(b, []byte(irHandMarker))
+}
+
+// TestIRFixturesProducer requires generated input.<n>.ll to name clang or rustc.
+func TestIRFixturesProducer(t *testing.T) {
+	root := filepath.Join("testdata", "ir")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		src, err := fixtureSource(dir)
+		if err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+			continue
+		}
+		if fixtureHandIR(t, src) {
+			continue
+		}
+		lls, err := fixtureIRFiles(dir)
+		if err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+			continue
+		}
+		for _, p := range lls {
+			ll, err := os.ReadFile(p)
+			if err != nil {
+				t.Errorf("%s: %v", e.Name(), err)
+				continue
+			}
+			want := "clang version "
+			if strings.HasSuffix(src, ".rs") {
+				want = "rustc version "
+			} else {
+				want = "clang version " + irFileVersion(p) + "."
+			}
+			if !bytes.Contains(ll, []byte(want)) {
+				t.Errorf("%s: missing %q (run mise run ir:gen)", filepath.Base(p), want)
+			}
+		}
 	}
 }

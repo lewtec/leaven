@@ -10,7 +10,7 @@ import (
 
 func TestCommandRun(t *testing.T) {
 	var out bytes.Buffer
-	c := &Command{Name: "anon_dot.ll", Input: bytes.NewReader(testdataIR(t)), Output: &out}
+	c := &Command{Name: "c_anon_dot.ll", Input: bytes.NewReader(testdataIR(t)), Output: &out}
 	if err := c.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -3,9 +3,11 @@
 *.go
 *_c
 
-# Curated IR fixtures: one folder per case (input.ll + expect.json [+ optional source.c])
+# Curated IR fixtures: input.<LLVM-major>.ll + expect.json + source.{c,cpp,rs}
 !ir/
 !ir/*/
-!ir/*/input.ll
+!ir/*/input.*.ll
 !ir/*/expect.json
 !ir/*/source.c
+!ir/*/source.cpp
+!ir/*/source.rs

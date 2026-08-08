@@ -1,15 +1,29 @@
 [tools]
 # Install: mise install
-# Clang 14 for C → LLVM IR and native reference binaries.
+# Compilers for testdata/ir (scripts/gen-ir.sh via mise exec). Same major for C/C++.
 "conda:clang" = "14.0.6"
+"conda:clangxx" = "14.0.6"
+"conda:rust" = "1.97.1"
 # Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
 
 [tasks.test]
-description = "Integration tests (clang vs leaven output)"
+description = "IR-only tests (committed input.<n>.ll; no clang)"
 run = "go test -count=1 -timeout 10m ./..."
+
+[tasks."ir:gen"]
+description = "Regenerate testdata/ir/*/input.<LLVM-major>.ll via mise conda compilers"
+run = "scripts/gen-ir.sh"
+
+[tasks."ir:check"]
+description = "Fail if committed input.<n>.ll is stale vs compilers (dev)"
+run = "scripts/gen-ir.sh --check"
+
+[tasks."test:live"]
+description = "C vs leaven differential (needs clang)"
+run = "go test -tags=live -count=1 -timeout 10m ./..."
 
 [tasks."test:csmith"]
 description = "Csmith smoke: known-good seed=1"

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": [
+        "func _Z3addii(a int32, b int32) int32",
+        "add = v0 + v1"
+      ]
+    }
+  ]
+}
