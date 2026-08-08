@@ -57,7 +57,7 @@ func isTaggedPointerType(t types.Type) bool {
 func taggedPointerElemName(t types.Type) (string, error) {
 	pt, ok := t.(*types.PointerType)
 	if !ok {
-		return "", fmt.Errorf("not a pointer type: %v", t)
+		return "", fmt.Errorf("%w: %v", errNotPointerType, t)
 	}
 	// Temporarily ignore tagged map so we get the real struct name / def.
 	return typeSpecIgnoringTagged(pt.ElemType)
