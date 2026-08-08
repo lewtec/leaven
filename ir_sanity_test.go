@@ -136,7 +136,7 @@ func runFixtureProgram(t *testing.T, m *ir.Module, run *expectRun) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gomod := fmt.Sprintf("module leavenfixture\n\ngo 1.22\n\nrequire github.com/andybalholm/leaven v0.0.0\n\nreplace github.com/andybalholm/leaven => %s\n", modRoot)
+	gomod := fmt.Sprintf("module leavenfixture\n\ngo 1.22\n\nrequire github.com/lewtec/leaven v0.0.0\n\nreplace github.com/lewtec/leaven => %s\n", modRoot)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
 		t.Fatal(err)
 	}

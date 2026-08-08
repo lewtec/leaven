@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "package p",
-        "\"github.com/andybalholm/leaven/libc\"",
+        "\"github.com/lewtec/leaven/libc\"",
         "libc.CtypeBLoc",
         "libc.Iswalnum",
         "libc.Dup",
