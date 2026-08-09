@@ -36,8 +36,10 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if err != nil {
 		return expr{}, fmt.Errorf("error translating source pointer (%q): %w", src, err)
 	}
-	result := srcExpr.dropAddr()
-	source := result
+	// Keep &src for AddPointer (needs *T). Drop it only when we index into
+	// the pointee, matching the old strings.TrimPrefix after that call.
+	result := srcExpr.code
+	rewrote := false
 
 	// Tagged union pointers are uintptr in Go; cast to real pointer before GEP.
 	if pt, ok := src.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
@@ -46,7 +48,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			return expr{}, err
 		}
 		result = ptrCast(ptrTyp(elem), result)
-		source = result
+		rewrote = true
 	}
 
 	if !zeroFirstIndex {
@@ -54,7 +56,11 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating first index (%v): %w", indices[0], err)
 		}
-		result = libc("AddPointer").Call(source, jen.Int().Call(idx))
+		result = libc("AddPointer").Call(result, jen.Int().Call(idx))
+		rewrote = true
+	}
+	if !rewrote {
+		result = srcExpr.dropAddr()
 	}
 
 	currentType := elemType
