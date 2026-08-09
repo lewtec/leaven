@@ -15,8 +15,5 @@
         "violates Go's unsafe.Pointer rules"
       ]
     }
-  ],
-  "parse": {
-    "22": false
-  }
+  ]
 }

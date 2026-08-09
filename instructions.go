@@ -697,7 +697,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	switch llvmName {
 	case "calloc", "malloc":
 		callee = jen.Id(llvmName)
-		if pt, ok := inst.Typ.(*types.PointerType); ok {
+		if pt, ok := inst.Typ.(*types.PointerType); ok && !pt.IsOpaque() && pt.ElemType != nil {
 			if et, err := TypeSpec(pt.ElemType); err == nil {
 				callee = libc(strings.Title(llvmName)).Types(et)
 			}

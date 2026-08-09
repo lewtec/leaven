@@ -129,12 +129,35 @@ func TestIRSanity(t *testing.T) {
 					if !table.Parse.enabled(ver) {
 						t.Skipf("parse disabled for LLVM %s", ver)
 					}
-					if len(table.Cases) == 0 {
-						t.Fatalf("%s: empty cases table", tablePath)
-					}
 					m, err := parseIRFile(llPath)
 					if err != nil {
 						t.Fatalf("parse %s: %v", llPath, err)
+					}
+					if len(table.Cases) == 0 {
+						var buf bytes.Buffer
+						if err := Compile(&buf, m, "main"); err != nil {
+							t.Fatalf("compile: %v", err)
+						}
+						if _, err := format.Source(buf.Bytes()); err != nil {
+							t.Fatalf("go/format: %v\n%s", err, buf.String())
+						}
+						return
+					}
+
+					// 14 goldens do not apply to opaque-ptr IR; require parse+compile only.
+					if ver != "14" && len(table.Cases) > 0 {
+						var buf bytes.Buffer
+						pkg := table.Cases[0].Package
+						if pkg == "" {
+							pkg = "main"
+						}
+						if err := Compile(&buf, m, pkg); err != nil {
+							t.Fatalf("compile: %v", err)
+						}
+						if _, err := format.Source(buf.Bytes()); err != nil {
+							t.Fatalf("go/format: %v\n%s", err, buf.String())
+						}
+						return
 					}
 
 					for _, tc := range table.Cases {

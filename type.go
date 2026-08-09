@@ -30,7 +30,7 @@ func collectTaggedPointerTypes(m *ir.Module) {
 			continue
 		}
 		pt, ok := st.Fields[0].(*types.PointerType)
-		if !ok {
+		if !ok || pt.IsOpaque() {
 			continue
 		}
 		// Skip function pointers.
@@ -75,6 +75,9 @@ func typeSpecIgnoringTagged(t types.Type) (*jen.Statement, error) {
 func typeDefinitionIgnoringTagged(t types.Type) (*jen.Statement, error) {
 	switch t := t.(type) {
 	case *types.PointerType:
+		if t.IsOpaque() {
+			return jen.Qual("unsafe", "Pointer"), nil
+		}
 		if _, ok := t.ElemType.(*types.FuncType); ok {
 			return TypeDefinition(t.ElemType)
 		}
@@ -146,6 +149,9 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		}
 
 	case *types.PointerType:
+		if t.IsOpaque() {
+			return jen.Qual("unsafe", "Pointer"), nil
+		}
 		if _, ok := t.ElemType.(*types.FuncType); ok {
 			// Translate a C function pointer type as a Go function type.
 			return TypeDefinition(t.ElemType)
@@ -185,6 +191,9 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 
 // TypeSpec returns the name (if it has one) or the definition of t.
 func TypeSpec(t types.Type) (*jen.Statement, error) {
+	if t == nil {
+		return nil, fmt.Errorf("%w: nil type", errUnsupportedType)
+	}
 	if ref, ok := libraryTypeRef(t); ok {
 		return ref.code(), nil
 	}
@@ -275,7 +284,7 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 // (emitted as a Go func type).
 func isFuncPointerType(t types.Type) bool {
 	pt, ok := t.(*types.PointerType)
-	if !ok {
+	if !ok || pt.IsOpaque() {
 		return false
 	}
 	_, ok = pt.ElemType.(*types.FuncType)

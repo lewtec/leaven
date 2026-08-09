@@ -12,8 +12,5 @@
         "(func(*byte))(unsafe.Pointer(destroy))"
       ]
     }
-  ],
-  "parse": {
-    "22": false
-  }
+  ]
 }

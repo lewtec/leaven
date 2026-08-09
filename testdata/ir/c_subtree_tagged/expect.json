@@ -20,8 +20,5 @@
       "inline depends=0",
       "heap   depends=1"
     ]
-  },
-  "parse": {
-    "22": false
   }
 }

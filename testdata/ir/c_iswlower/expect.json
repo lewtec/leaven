@@ -12,8 +12,5 @@
         " = iswupper("
       ]
     }
-  ],
-  "parse": {
-    "22": false
-  }
+  ]
 }
