@@ -248,7 +248,15 @@ func compileOne(cfg config, f fixture, out string) error {
 	case "clang++":
 		args = []string{"clang++", "-S", "-emit-llvm", "-fno-discard-value-names", "-std=c++17", "-O0", "-o", out, absSrc}
 	case "rustc":
-		args = []string{"rustc", "--emit=llvm-ir", "-C", "opt-level=0", "-C", "debuginfo=0", "--crate-type=lib", "-o", out, absSrc}
+		relSrc, err := filepath.Rel(cfg.root, absSrc)
+		if err != nil {
+			relSrc = absSrc
+		}
+		relOut, err := filepath.Rel(cfg.root, out)
+		if err != nil {
+			relOut = out
+		}
+		args = []string{"rustc", "--emit=llvm-ir", "-C", "opt-level=0", "-C", "debuginfo=0", "-C", "panic=abort", "--crate-type=lib", "-o", relOut, relSrc}
 	default:
 		return fmt.Errorf("unknown compiler %s", f.bin)
 	}

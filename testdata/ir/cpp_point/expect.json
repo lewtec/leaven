@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": [
+        "type Point struct",
+        "func main"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["7"],
+    "majors": ["14", "22"]
+  }
+}

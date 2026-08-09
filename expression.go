@@ -15,8 +15,15 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
-	if !srcPointerType.IsOpaque() && !types.Equal(srcPointerType.ElemType, elemType) {
-		return expr{}, errMismatchedSrcElem
+	// Typed-pointer IR: src must be elemType*. LLVM 15+ also uses
+	// `gep i8, T*, i64 n` (byte offset) and `gep %T, ptr, ...` (opaque this).
+	byteGEP := types.Equal(elemType, types.I8)
+	if !srcPointerType.IsOpaque() && !types.Equal(srcPointerType.ElemType, elemType) && !byteGEP {
+		if _, agg := elemType.(*types.StructType); !agg {
+			if _, arr := elemType.(*types.ArrayType); !arr {
+				return expr{}, errMismatchedSrcElem
+			}
+		}
 	}
 
 	zeroFirstIndex := false
@@ -51,12 +58,32 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		rewrote = true
 	}
 
+	// Opaque/mismatched src: cast to *elemType before field/array indexing.
+	switch elemType.(type) {
+	case *types.StructType, *types.ArrayType:
+		if srcPointerType.IsOpaque() || !types.Equal(srcPointerType.ElemType, elemType) {
+			et, err := TypeSpec(elemType)
+			if err != nil {
+				return expr{}, err
+			}
+			result = ptrCast(ptrTyp(et), result)
+			rewrote = true
+		}
+	}
+
 	if !zeroFirstIndex {
 		idx, err := FormatValue(indices[0])
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating first index (%v): %w", indices[0], err)
 		}
-		result = libc("AddPointer").Call(result, jen.Int().Call(idx))
+		if byteGEP {
+			result = libc("AddPointer").Types(jen.Byte()).Call(
+				ptrCast(ptrTyp(jen.Byte()), result),
+				jen.Int().Call(idx),
+			)
+		} else {
+			result = libc("AddPointer").Call(result, jen.Int().Call(idx))
+		}
 		rewrote = true
 	}
 	if !rewrote {
@@ -97,4 +124,37 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		return addrExpr(result), nil
 	}
 	return val(result), nil
+}
+
+func pointerElem(t types.Type) (types.Type, bool) {
+	pt, ok := t.(*types.PointerType)
+	if !ok {
+		return nil, false
+	}
+	if pt.IsOpaque() {
+		return nil, false
+	}
+	return pt.ElemType, true
+}
+
+func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, error) {
+	if got, ok := pointerElem(srcVal.Type()); ok && types.Equal(got, elem) {
+		return src.load(), nil
+	}
+	t, err := TypeSpec(elem)
+	if err != nil {
+		return nil, err
+	}
+	return deref(ptrCast(ptrTyp(t), src.code)), nil
+}
+
+func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
+	if got, ok := pointerElem(dstVal.Type()); ok && types.Equal(got, elem) {
+		return dst.store(src), nil
+	}
+	t, err := TypeSpec(elem)
+	if err != nil {
+		return nil, err
+	}
+	return deref(ptrCast(ptrTyp(t), dst.code)).Op("=").Add(src), nil
 }

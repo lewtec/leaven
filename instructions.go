@@ -342,7 +342,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
-		return one(assign(VariableName(inst), src.load())), nil
+		val, err := typedLoad(src, inst.Src, inst.ElemType)
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), val)), nil
 
 	case *ir.InstLShr:
 		x, err := FormatUnsigned(inst.X)
@@ -484,7 +488,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(dest.store(src)), nil
+		st, err := typedStore(dest, inst.Dst, inst.Src.Type(), src)
+		if err != nil {
+			return nil, err
+		}
+		return one(st), nil
 
 	case *ir.InstSub:
 		return translateBinAssign(inst, llvmBin{op: "-", x: inst.X, y: inst.Y})
@@ -675,6 +683,22 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 	return one(assign(name, bin(xv, b.op, yv))), nil
 }
 
+func coerceCallArg(inst *ir.InstCall, i int, a value.Value, got *jen.Statement) *jen.Statement {
+	fn, ok := inst.Callee.(*ir.Func)
+	if !ok || i >= len(fn.Params) {
+		return got
+	}
+	want, ok := fn.Params[i].Typ.(*types.PointerType)
+	if !ok || !want.IsOpaque() {
+		return got
+	}
+	have, ok := a.Type().(*types.PointerType)
+	if !ok || have.IsOpaque() {
+		return got
+	}
+	return unsafePtr(got)
+}
+
 func calleeLLVMName(v value.Value) string {
 	if n, ok := v.(value.Named); ok {
 		return VariableName(n)
@@ -690,7 +714,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating argument %d (%v): %w", i, a, err)
 		}
-		args[i] = v
+		args[i] = coerceCallArg(inst, i, a, v)
 	}
 
 	var callee *jen.Statement
@@ -733,19 +757,30 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if len(args) == 3 {
 			return one(assign(VariableName(inst), bin(bin(args[0], "*", args[1]), "+", args[2]))), nil
 		}
-	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64":
+	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64",
+		"llvm_memcpy_p0_p0_i64", "llvm_memmove_p0_p0_i64":
 		return one(libc("Memmove").Call(args[0], args[1], args[2])), nil
-	case "llvm_memset_p0i8_i64":
+	case "llvm_memset_p0i8_i64", "llvm_memset_p0_i64":
 		return one(libc("Memset").Call(args[0], args[1], args[2])), nil
+	case "llvm_sadd_with_overflow_i32":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("SAddWithOverflowI32").Call(args[0], args[1]))), nil
+		}
 	case "llvm_objectsize_i64_p0i8":
 		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
 	case "llvm_stacksave":
 		return one(assign(VariableName(inst), jen.Nil())), nil
 	}
 
+	if llvmName == "printf" && len(args) > 0 {
+		args[0] = jen.Parens(ptrTyp(jen.Byte())).Call(args[0])
+	}
+
 	if callee == nil {
 		if ref, ok := libraryFunctions[llvmName]; ok {
 			callee = ref.code()
+		} else if strings.Contains(llvmName, "panicking") {
+			return one(jen.Panic(jen.Lit("rust panic"))), nil
 		} else {
 			var err error
 			callee, err = FormatValue(inst.Callee)

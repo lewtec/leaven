@@ -359,6 +359,13 @@ func formatExpr(v value.Value) (expr, error) {
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}
+			if v.Typ != nil && i < len(v.Typ.Fields) {
+				if want, ok := v.Typ.Fields[i].(*types.PointerType); ok && want.IsOpaque() {
+					if have, ok := c.Type().(*types.PointerType); ok && !have.IsOpaque() {
+						e = unsafePtr(e)
+					}
+				}
+			}
 			elems[i] = e
 		}
 		return val(formatComposite(t, elems)), nil
