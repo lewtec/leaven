@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": ["func main", "basic_string"]
+    }
+  ],
+  "parse": {"14": false},
+  "run": {
+    "stdout_contains": ["6"],
+    "majors": ["22"]
+  }
+}

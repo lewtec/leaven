@@ -250,9 +250,10 @@ func TypeName(t types.Type) string {
 		return ""
 	}
 
-	// Sanitize remaining punctuation from LLVM/clang type names.
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, "-", "_")
+	// Sanitize remaining punctuation from LLVM/clang type names
+	// (std::__cxx11::basic_string, templates, etc.).
+	r := strings.NewReplacer(".", "_", "-", "_", ":", "_", "<", "_", ">", "_", ",", "_", " ", "_", "*", "p")
+	name = r.Replace(name)
 	if name == "" {
 		return ""
 	}
