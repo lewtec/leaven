@@ -23,5 +23,8 @@
         "tobool3 = byte("
       ]
     }
-  ]
+  ],
+  "parse": {
+    "22": false
+  }
 }

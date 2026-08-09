@@ -22,8 +22,63 @@ type expectTable struct {
 	Cases []expectCase `json:"cases"`
 	// Run, if set, go-builds and runs the generated program as package main.
 	Run *expectRun `json:"run"`
-	// Parse, if false, skips llir (e.g. rustc LLVM 22 opaque ptr).
-	Parse *bool `json:"parse"`
+	// Parse chooses whether to run llir on each input.<n>.ll.
+	// JSON may be a bool (all majors) or an object of major→bool
+	// (missing majors default to true). Example: {"22": false}.
+	Parse parseSpec `json:"parse"`
+}
+
+// parseSpec is expect.json "parse": true/false or {"14": true, "22": false}.
+type parseSpec struct {
+	all *bool
+	by  map[string]bool
+}
+
+func (p *parseSpec) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '{' {
+		p.by = make(map[string]bool)
+		return json.Unmarshal(b, &p.by)
+	}
+	var v bool
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	p.all = &v
+	return nil
+}
+
+func (p parseSpec) enabled(ver string) bool {
+	if p.by != nil {
+		if v, ok := p.by[ver]; ok {
+			return v
+		}
+		return true
+	}
+	if p.all != nil {
+		return *p.all
+	}
+	return true
+}
+
+func TestParseSpecJSON(t *testing.T) {
+	var tbl expectTable
+	if err := json.Unmarshal([]byte(`{"cases":[],"parse":false}`), &tbl); err != nil {
+		t.Fatal(err)
+	}
+	if tbl.Parse.enabled("14") || tbl.Parse.enabled("22") {
+		t.Fatal("bool false should disable all majors")
+	}
+	tbl = expectTable{}
+	if err := json.Unmarshal([]byte(`{"parse":{"22":false}}`), &tbl); err != nil {
+		t.Fatal(err)
+	}
+	if !tbl.Parse.enabled("14") || tbl.Parse.enabled("22") {
+		t.Fatalf("object: 14=%v 22=%v", tbl.Parse.enabled("14"), tbl.Parse.enabled("22"))
+	}
 }
 
 type expectCase struct {
@@ -63,13 +118,6 @@ func TestIRSanity(t *testing.T) {
 			if err := json.Unmarshal(raw, &table); err != nil {
 				t.Fatalf("json %s: %v", tablePath, err)
 			}
-			if table.Parse != nil && !*table.Parse {
-				return
-			}
-			if len(table.Cases) == 0 {
-				t.Fatalf("%s: empty cases table", tablePath)
-			}
-
 			lls, err := fixtureIRFiles(dir)
 			if err != nil {
 				t.Fatal(err)
@@ -78,6 +126,12 @@ func TestIRSanity(t *testing.T) {
 				llPath := llPath
 				ver := irFileVersion(llPath)
 				t.Run("ir"+ver, func(t *testing.T) {
+					if !table.Parse.enabled(ver) {
+						t.Skipf("parse disabled for LLVM %s", ver)
+					}
+					if len(table.Cases) == 0 {
+						t.Fatalf("%s: empty cases table", tablePath)
+					}
 					m, err := parseIRFile(llPath)
 					if err != nil {
 						t.Fatalf("parse %s: %v", llPath, err)
@@ -332,7 +386,7 @@ func TestIRFixturesProducer(t *testing.T) {
 				want = "clang version " + irFileVersion(p) + "."
 			}
 			if !bytes.Contains(ll, []byte(want)) {
-				t.Errorf("%s: missing %q (run mise run ir:gen)", filepath.Base(p), want)
+				t.Errorf("%s: missing %q (run go generate .)", filepath.Base(p), want)
 			}
 		}
 	}

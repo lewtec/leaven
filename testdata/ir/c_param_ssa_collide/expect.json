@@ -13,5 +13,8 @@
         "func renumber(self *int32, v1 int32, v2 int32)"
       ]
     }
-  ]
+  ],
+  "parse": {
+    "22": false
+  }
 }

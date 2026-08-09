@@ -22,5 +22,8 @@
     "stderr_contains": [
       "is_inline=1"
     ]
+  },
+  "parse": {
+    "22": false
   }
 }

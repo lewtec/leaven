@@ -1,6 +1,6 @@
 [tools]
 # Install: mise install
-# Compilers for testdata/ir (scripts/gen-ir.sh via mise exec). Same major for C/C++.
+# Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
 "conda:clang" = "14.0.6"
 "conda:clangxx" = "14.0.6"
 "conda:rust" = "1.97.1"
@@ -14,12 +14,16 @@ description = "IR-only tests (committed input.<n>.ll; no clang)"
 run = "go test -v -count=1 -timeout 10m ./..."
 
 [tasks."ir:gen"]
-description = "Regenerate testdata/ir/*/input.<LLVM-major>.ll via mise conda compilers"
-run = "scripts/gen-ir.sh"
+description = "Regenerate testdata/ir/*/input.<n>.ll (clang 14 + clang 22 + rustc)"
+run = "go generate ."
 
 [tasks."ir:check"]
-description = "Fail if committed input.<n>.ll is stale vs compilers (dev)"
-run = "scripts/gen-ir.sh --check"
+description = "Fail if committed input.<n>.ll is stale vs default mise compilers"
+run = "go run ./internal/genir -check"
+
+[tasks."ir:gen22"]
+description = "Write testdata/ir/*/input.22.ll with clang 22 (keeps input.14.ll)"
+run = "go run ./internal/genir -c conda:clang@22.1.8 -cxx conda:clangxx@22.1.8"
 
 [tasks."test:live"]
 description = "C vs leaven differential (needs clang); -v lists fixtures"

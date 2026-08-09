@@ -16,5 +16,8 @@
         "atomicrmw"
       ]
     }
-  ]
+  ],
+  "parse": {
+    "22": false
+  }
 }

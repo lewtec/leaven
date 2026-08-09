@@ -3,8 +3,17 @@
     {
       "name": "package-p",
       "package": "p",
-      "contains": ["libc.Iswlower", "libc.Iswupper"],
-      "not_contains": [" = iswlower(", " = iswupper("]
+      "contains": [
+        "libc.Iswlower",
+        "libc.Iswupper"
+      ],
+      "not_contains": [
+        " = iswlower(",
+        " = iswupper("
+      ]
     }
-  ]
+  ],
+  "parse": {
+    "22": false
+  }
 }

@@ -2,7 +2,7 @@
 
 Folder name starts with the language: `c_`, `cpp_`, `rust_`. Example: `c_strlen_map`, `cpp_add`, `rust_add`.
 
-Each folder is one regression case for `TestIRSanity`. Default `go test` reads committed IR only. Clang / clang++ / rustc are gen-only (`mise run ir:gen`).
+Each folder is one regression case for `TestIRSanity`. Default `go test` reads committed IR only. Clang / clang++ / rustc are gen-only (`go generate .`).
 
 | File | Role |
 |------|------|
@@ -20,16 +20,20 @@ Compilers are mise conda pins in `mise.toml`:
 | `source.cpp` | `clang++` | `conda:clangxx` 14.0.6 | `input.14.ll` |
 | `source.rs` | `rustc` | `conda:rust` 1.97.1 | `input.22.ll` |
 
-C/C++ 14 is typed pointers (leaven today). rustc 22 is opaque `ptr` — use `"parse": false`.
+C/C++ 14 is typed pointers (v14 parser). rustc and clang 22 emit opaque `ptr`.
 
-Another clang major: put `leaven:tool=conda:clang@18.1.8` in the source (`mise ls-remote conda:clang`). Gen writes `input.18.ll` and leaves `input.14.ll` in place.
+`expect.json` `"parse"` may be a bool (all majors) or an object of major→bool. Missing majors default to true. Example: `"parse": {"22": false}` runs 14 and skips 22 until the v22 frontend exists.
+
+Another clang major: `go generate .` also runs clang 22, or put `leaven:tool=conda:clang@18.1.8` in the source. Gen writes `input.<n>.ll` and leaves other majors in place.
 
 ## Generate (needs compilers)
 
 ```bash
 mise install
-mise run ir:gen
-mise run ir:check
+go generate .        # clang 14 + clang 22 + rustc
+mise run ir:gen      # same
+mise run ir:gen22    # clang 22 only
+mise run ir:check    # default pins only
 ```
 
 Skip generation when the compiler cannot emit the pattern. Put `leaven:hand-ir` in the source. Current hand IR: `c_anon_dot`, `c_name_clash_func_local`, `c_unreachable`, `c_void_mid_return`.
