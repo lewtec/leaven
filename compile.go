@@ -234,6 +234,11 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 			if isGoMain {
 				g.Qual("os", "Exit").Call(jen.Int().Call(retVal))
 			} else {
+				if want, ok := fn.Sig.RetType.(*types.PointerType); ok && want.IsOpaque() {
+					if have, ok := term.X.Type().(*types.PointerType); ok && !have.IsOpaque() {
+						retVal = unsafePtr(retVal)
+					}
+				}
 				g.Return(retVal)
 			}
 

@@ -384,18 +384,14 @@ func (p *parser) parseFunc(def bool) error {
 		case "dso_preemptable":
 			pre = enum.PreemptionDSOPreemptable
 			p.next()
+		case "fastcc", "ccc", "coldcc", "tailcc", "webkit_jscc", "anyregcc",
+			"preserve_mostcc", "preserve_allcc", "swiftcc", "cxx_fast_tlscc":
+			p.next()
 		case "unnamed_addr", "local_unnamed_addr":
 			// after params usually; stop header prefixes
 			goto ret
 		default:
-			if isRetAttr(p.tok.s) {
-				a, err := p.parseRetAttr()
-				if err != nil {
-					return err
-				}
-				if a != nil {
-					retAttrs = append(retAttrs, a)
-				}
+			if p.skipRetAttr() {
 				continue
 			}
 			goto ret
@@ -668,6 +664,12 @@ func (p *parser) parseInst(block *ir.Block) error {
 	if p.tok.kind != kIdent {
 		return p.errorf("expected instruction, got %s", p.tok)
 	}
+	if p.tok.s == "tail" || p.tok.s == "musttail" || p.tok.s == "notail" {
+		p.next()
+	}
+	if p.tok.kind != kIdent {
+		return p.errorf("expected instruction, got %s", p.tok)
+	}
 	op := p.tok.s
 	p.next()
 	switch op {
@@ -706,6 +708,8 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseSelect(block, ident, name)
 	case "extractvalue":
 		return p.parseExtractValue(block, ident, name)
+	case "insertvalue":
+		return p.parseInsertValue(block, ident, name)
 	default:
 		return p.errorf("unsupported instruction %q", op)
 	}
@@ -911,11 +915,9 @@ func (p *parser) parseAtomicRMW(block *ir.Block, ident ir.LocalIdent, name strin
 }
 
 func (p *parser) parseCall(block *ir.Block, ident ir.LocalIdent, name string) error {
-	// call [retattrs] [ty | fnty] callee(args) [fnattrs]
-	for p.tok.kind == kIdent && isRetAttr(p.tok.s) {
-		if _, err := p.parseRetAttr(); err != nil {
-			return err
-		}
+	// call [cconv] [retattrs] [ty | fnty] callee(args) [fnattrs]
+	p.skipCallingConv()
+	for p.skipRetAttr() {
 	}
 	typ, err := p.parseType()
 	if err != nil {
@@ -1151,6 +1153,9 @@ func (p *parser) parseBr(block *ir.Block) error {
 }
 
 func (p *parser) parseICmp(block *ir.Block, ident ir.LocalIdent, name string) error {
+	if p.isIdent("samesign") {
+		p.next()
+	}
 	if p.tok.kind != kIdent {
 		return p.errorf("expected icmp predicate")
 	}
@@ -1284,6 +1289,9 @@ func (p *parser) parseBin(block *ir.Block, ident ir.LocalIdent, name, op string)
 }
 
 func (p *parser) parseCast(block *ir.Block, ident ir.LocalIdent, name, op string) error {
+	for p.isIdent("nsw") || p.isIdent("nuw") {
+		p.next()
+	}
 	from, err := p.parseTypedValue()
 	if err != nil {
 		return err
@@ -1418,7 +1426,7 @@ func (p *parser) parsePhiInc(typ types.Type) (pendingInc, error) {
 		p.next()
 		return pendingInc{val: v, bb: bb}, nil
 	}
-	c, err := p.parseConst(typ)
+	c, err := p.parseValue(typ)
 	if err != nil {
 		return pendingInc{}, err
 	}
@@ -1478,6 +1486,33 @@ func (p *parser) parseExtractValue(block *ir.Block, ident ir.LocalIdent, name st
 	}
 	inst := ir.NewExtractValue(x, idxs...)
 	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) parseInsertValue(block *ir.Block, ident ir.LocalIdent, name string) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	elem, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	var idxs []uint64
+	for p.tok.kind == kComma {
+		p.next()
+		if p.tok.kind != kInt {
+			return p.errorf("expected insertvalue index")
+		}
+		idxs = append(idxs, uint64(p.tok.i))
+		p.next()
+	}
+	inst := &ir.InstInsertValue{LocalIdent: ident, X: x, Elem: elem, Indices: idxs, Typ: x.Type()}
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
 	return nil
@@ -1730,7 +1765,13 @@ func (p *parser) parseValue(typ types.Type) (value.Value, error) {
 		return nil, p.errorf("unknown local %%%s", name)
 	case kGlobal:
 		return p.refAt(p.tok.s)
+	case kMetaID, kMetaName, kBang:
+		_ = p.skipMDNode()
+		return constant.NewUndef(types.Metadata), nil
 	default:
+		if p.isConstExpr() {
+			return p.parseConstExpr(typ)
+		}
 		return p.parseConst(typ)
 	}
 }
@@ -1756,11 +1797,80 @@ func (p *parser) startsValue() bool {
 		return true
 	case kIdent:
 		switch p.tok.s {
-		case "true", "false", "null", "undef", "poison", "zeroinitializer":
+		case "true", "false", "null", "undef", "poison", "zeroinitializer",
+			"inttoptr", "ptrtoint", "bitcast", "getelementptr", "addrspacecast":
 			return true
 		}
 	}
 	return false
+}
+
+func (p *parser) isConstExpr() bool {
+	return p.tok.kind == kIdent && (p.tok.s == "inttoptr" || p.tok.s == "ptrtoint" ||
+		p.tok.s == "bitcast" || p.tok.s == "getelementptr" || p.tok.s == "addrspacecast")
+}
+
+func (p *parser) parseConstExpr(typ types.Type) (constant.Constant, error) {
+	op := p.tok.s
+	p.next()
+	inbounds := false
+	if op == "getelementptr" && p.isIdent("inbounds") {
+		inbounds = true
+		p.next()
+	}
+	_ = inbounds
+	if err := p.expect(kLParen); err != nil {
+		return nil, err
+	}
+	// inttoptr (i64 1 to ptr)  / bitcast (ty val to ty)
+	if op == "inttoptr" || op == "ptrtoint" || op == "bitcast" || op == "addrspacecast" {
+		from, err := p.parseTypedValue()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.wantIdent("to"); err != nil {
+			return nil, err
+		}
+		to, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expect(kRParen); err != nil {
+			return nil, err
+		}
+		c, ok := from.(constant.Constant)
+		if !ok {
+			return nil, p.errorf("constexpr operand is not constant")
+		}
+		switch op {
+		case "inttoptr":
+			return constant.NewIntToPtr(c, to), nil
+		case "ptrtoint":
+			return constant.NewPtrToInt(c, to), nil
+		case "addrspacecast":
+			return constant.NewAddrSpaceCast(c, to), nil
+		default:
+			return constant.NewBitCast(c, to), nil
+		}
+	}
+	// getelementptr (ty, ty val, ...)
+	if _, err := p.parseType(); err != nil {
+		return nil, err
+	}
+	for p.tok.kind == kComma {
+		p.next()
+		if _, err := p.parseTypedValue(); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.expect(kRParen); err != nil {
+		return nil, err
+	}
+	// Enough for call args: use null/zero of result type.
+	if pt, ok := typ.(*types.PointerType); ok {
+		return constant.NewNull(pt), nil
+	}
+	return constant.NewZeroInitializer(typ), nil
 }
 
 func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
@@ -2037,7 +2147,9 @@ func (p *parser) skipParamAttrs() error {
 		}
 		if p.isIdent("dereferenceable") || p.isIdent("dereferenceable_or_null") ||
 			p.isIdent("alignstack") || p.isIdent("byval") || p.isIdent("preallocated") ||
-			p.isIdent("sret") || p.isIdent("elementtype") || p.isIdent("captures") {
+			p.isIdent("sret") || p.isIdent("elementtype") || p.isIdent("captures") ||
+			p.isIdent("range") || p.isIdent("initializes") || p.isIdent("allockind") ||
+			p.isIdent("allocsize") {
 			p.next()
 			if p.tok.kind == kLParen {
 				if err := p.skipBalanced(kLParen, kRParen); err != nil {
@@ -2046,9 +2158,53 @@ func (p *parser) skipParamAttrs() error {
 			}
 			continue
 		}
+		if p.isIdent("noalias") || p.isIdent("readonly") || p.isIdent("writeonly") ||
+			p.isIdent("readnone") || p.isIdent("writable") || p.isIdent("dead_on_unwind") ||
+			p.isIdent("allocptr") || p.isIdent("allocalign") || p.isIdent("nocapture") ||
+			p.isIdent("nofree") || p.isIdent("nonnull") {
+			p.next()
+			continue
+		}
 		break
 	}
 	return nil
+}
+
+func (p *parser) skipCallingConv() {
+	if p.tok.kind != kIdent {
+		return
+	}
+	switch p.tok.s {
+	case "fastcc", "ccc", "coldcc", "tailcc", "webkit_jscc", "anyregcc",
+		"preserve_mostcc", "preserve_allcc", "swiftcc", "cxx_fast_tlscc":
+		p.next()
+	}
+}
+
+func (p *parser) skipRetAttr() bool {
+	if p.tok.kind == kIdent && isRetAttr(p.tok.s) {
+		_, _ = p.parseRetAttr()
+		return true
+	}
+	if p.isIdent("align") {
+		p.next()
+		if p.tok.kind == kInt {
+			p.next()
+		}
+		return true
+	}
+	if p.isIdent("dereferenceable") || p.isIdent("dereferenceable_or_null") || p.isIdent("range") {
+		p.next()
+		if p.tok.kind == kLParen {
+			_ = p.skipBalanced(kLParen, kRParen)
+		}
+		return true
+	}
+	if p.isIdent("noalias") {
+		p.next()
+		return true
+	}
+	return false
 }
 
 func (p *parser) parseRetAttr() (ir.ReturnAttribute, error) {

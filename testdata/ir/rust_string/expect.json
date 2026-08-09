@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": ["func main", "libc.Printf"]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["6"]
+  }
+}

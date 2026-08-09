@@ -683,6 +683,10 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 	return one(assign(name, bin(xv, b.op, yv))), nil
 }
 
+func asBytePtr(x jen.Code) *jen.Statement {
+	return jen.Parens(ptrTyp(jen.Byte())).Call(x)
+}
+
 func coerceCallArg(inst *ir.InstCall, i int, a value.Value, got *jen.Statement) *jen.Statement {
 	fn, ok := inst.Callee.(*ir.Func)
 	if !ok || i >= len(fn.Params) {
@@ -708,6 +712,12 @@ func calleeLLVMName(v value.Value) string {
 
 func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	llvmName := calleeLLVMName(inst.Callee)
+	switch llvmName {
+	case "llvm_lifetime_start_p0", "llvm_lifetime_end_p0",
+		"llvm_experimental_noalias_scope_decl", "llvm_assume",
+		"llvm_donothing":
+		return nil, nil
+	}
 	args := make([]jen.Code, len(inst.Args))
 	for i, a := range inst.Args {
 		v, err := FormatValue(a)
@@ -759,12 +769,24 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		}
 	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64",
 		"llvm_memcpy_p0_p0_i64", "llvm_memmove_p0_p0_i64":
-		return one(libc("Memmove").Call(args[0], args[1], args[2])), nil
+		return one(libc("Memmove").Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
 	case "llvm_memset_p0i8_i64", "llvm_memset_p0_i64":
-		return one(libc("Memset").Call(args[0], args[1], args[2])), nil
+		return one(libc("Memset").Call(asBytePtr(args[0]), args[1], args[2])), nil
 	case "llvm_sadd_with_overflow_i32":
 		if len(args) == 2 {
 			return one(assign(VariableName(inst), libc("SAddWithOverflowI32").Call(args[0], args[1]))), nil
+		}
+	case "llvm_umax_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("UMaxU64").Call(args[0], args[1]))), nil
+		}
+	case "llvm_ctpop_i64":
+		if len(args) == 1 {
+			return one(assign(VariableName(inst), jen.Qual("math/bits", "OnesCount64").Call(jen.Uint64().Call(args[0])))), nil
+		}
+	case "llvm_umul_with_overflow_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("UMulWithOverflowU64").Call(args[0], args[1]))), nil
 		}
 	case "llvm_objectsize_i64_p0i8":
 		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
@@ -773,14 +795,37 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	}
 
 	if llvmName == "printf" && len(args) > 0 {
-		args[0] = jen.Parens(ptrTyp(jen.Byte())).Call(args[0])
+		args[0] = asBytePtr(args[0])
+	}
+	switch llvmName {
+	case "strlen", "strcpy", "strchr", "strcmp":
+		for i := range args {
+			args[i] = asBytePtr(args[i])
+		}
 	}
 
 	if callee == nil {
 		if ref, ok := libraryFunctions[llvmName]; ok {
 			callee = ref.code()
-		} else if strings.Contains(llvmName, "panicking") {
-			return one(jen.Panic(jen.Lit("rust panic"))), nil
+		} else if strings.Contains(llvmName, "panicking") ||
+			strings.Contains(llvmName, "handle_error") ||
+			strings.Contains(llvmName, "throw_logic_error") ||
+			strings.Contains(llvmName, "throw_length_error") ||
+			strings.Contains(llvmName, "throw_bad_alloc") ||
+			strings.Contains(llvmName, "throw_bad_array") {
+			return one(jen.Panic(jen.Lit("runtime error"))), nil
+		} else if strings.Contains(llvmName, "__rust_alloc") && !strings.Contains(llvmName, "dealloc") && !strings.Contains(llvmName, "realloc") && !strings.Contains(llvmName, "zeroed") {
+			return one(assign(VariableName(inst), libc("RustAlloc").Call(args...))), nil
+		} else if strings.Contains(llvmName, "__rust_dealloc") {
+			return one(libc("RustDealloc").Call(args...)), nil
+		} else if strings.Contains(llvmName, "__rust_realloc") {
+			return one(assign(VariableName(inst), libc("RustRealloc").Call(args...))), nil
+		} else if strings.Contains(llvmName, "__rust_no_alloc_shim") {
+			return nil, nil
+		} else if llvmName == "_Znwm" || llvmName == "_Znam" {
+			return one(assign(VariableName(inst), libc("RustAlloc").Call(args[0], jen.Lit(1)))), nil
+		} else if strings.HasPrefix(llvmName, "_Zdl") || strings.HasPrefix(llvmName, "_Zda") {
+			return one(libc("RustDealloc").Call(args[0], jen.Lit(0), jen.Lit(1))), nil
 		} else {
 			var err error
 			callee, err = FormatValue(inst.Callee)

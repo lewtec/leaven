@@ -17,6 +17,7 @@ import (
 const (
 	handIRMarker = "leaven:hand-ir"
 	toolPrefix   = "leaven:tool="
+	optPrefix    = "leaven:opt-level="
 )
 
 func main() {
@@ -141,6 +142,7 @@ type config struct {
 type fixture struct {
 	dir, name, src, bin string
 	hand                bool
+	opt                 string // rustc -C opt-level, empty → 0
 }
 
 func listFixtures(irRoot string) ([]fixture, error) {
@@ -172,6 +174,7 @@ func listFixtures(irRoot string) ([]fixture, error) {
 			src:  src,
 			bin:  bin,
 			hand: bytes.Contains(body, []byte(handIRMarker)),
+			opt:  sourceOptLevel(body),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
@@ -236,6 +239,18 @@ func toolOverride(src string) string {
 	return ""
 }
 
+func sourceOptLevel(body []byte) string {
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if i := bytes.Index(line, []byte(optPrefix)); i >= 0 {
+			fields := strings.Fields(string(line[i+len(optPrefix):]))
+			if len(fields) > 0 {
+				return fields[0]
+			}
+		}
+	}
+	return ""
+}
+
 func compileOne(cfg config, f fixture, out string) error {
 	absSrc, err := filepath.Abs(f.src)
 	if err != nil {
@@ -246,7 +261,10 @@ func compileOne(cfg config, f fixture, out string) error {
 	case "clang":
 		args = []string{"clang", "-S", "-emit-llvm", "-fno-discard-value-names", "-std=gnu11", "-O0", "-o", out, absSrc}
 	case "clang++":
-		args = []string{"clang++", "-S", "-emit-llvm", "-fno-discard-value-names", "-std=c++17", "-O0", "-o", out, absSrc}
+		args = []string{"clang++", "-S", "-emit-llvm", "-fno-discard-value-names", "-std=c++17", "-O0",
+			"-fno-exceptions", "-fno-rtti"}
+		args = append(args, cxxIsystem(cfg, f)...)
+		args = append(args, "-o", out, absSrc)
 	case "rustc":
 		relSrc, err := filepath.Rel(cfg.root, absSrc)
 		if err != nil {
@@ -256,11 +274,64 @@ func compileOne(cfg config, f fixture, out string) error {
 		if err != nil {
 			relOut = out
 		}
-		args = []string{"rustc", "--emit=llvm-ir", "-C", "opt-level=0", "-C", "debuginfo=0", "-C", "panic=abort", "--crate-type=lib", "-o", relOut, relSrc}
+		opt := f.opt
+		if opt == "" {
+			opt = "0"
+		}
+		args = []string{"rustc", "--emit=llvm-ir", "-C", "opt-level=" + opt, "-C", "debuginfo=0", "-C", "panic=abort", "--crate-type=lib", "-o", relOut, relSrc}
 	default:
 		return fmt.Errorf("unknown compiler %s", f.bin)
 	}
 	return runMise(cfg.root, specFor(cfg, f.src, f.bin), args...)
+}
+
+// cxxIsystem locates conda/libstdc++ headers next to clang++.
+// conda-clangxx does not add them to the default include path.
+func cxxIsystem(cfg config, f fixture) []string {
+	spec := specFor(cfg, f.src, f.bin)
+	out, err := miseOutput(cfg.root, spec, "sh", "-c", "command -v clang++")
+	if err != nil {
+		return nil
+	}
+	clangxx := strings.TrimSpace(out)
+	dir := filepath.Dir(clangxx)
+	// shims live in .mise-bins; real prefix is two parents up from there, or the bin dir's parent.
+	candidates := []string{
+		filepath.Join(dir, ".."),
+		filepath.Join(dir, "..", ".."),
+		filepath.Dir(dir),
+	}
+	// resolve one more hop if clang++ is a symlink into the prefix
+	if real, err := filepath.EvalSymlinks(clangxx); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(real), ".."))
+	}
+	for _, c := range candidates {
+		matches, _ := filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "include", "c++"))
+		if len(matches) == 0 {
+			matches, _ = filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "*", "include", "c++"))
+		}
+		if len(matches) == 0 {
+			continue
+		}
+		inc := matches[0]
+		triple := filepath.Join(inc, "x86_64-conda-linux-gnu")
+		if _, err := os.Stat(triple); err != nil {
+			// any * subdirectory
+			if ts, _ := filepath.Glob(filepath.Join(inc, "*-*")); len(ts) > 0 {
+				triple = ts[0]
+			}
+		}
+		flags := []string{"-isystem", inc}
+		if triple != "" {
+			flags = append(flags, "-isystem", triple)
+		}
+		back := filepath.Join(inc, "backward")
+		if _, err := os.Stat(back); err == nil {
+			flags = append(flags, "-isystem", back)
+		}
+		return flags
+	}
+	return nil
 }
 
 func irMajor(cfg config, f fixture) (string, error) {
