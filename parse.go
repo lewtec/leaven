@@ -4,8 +4,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/llir/llvm/asm"
-	"github.com/llir/llvm/ir"
+	"github.com/lewtec/leaven/internal/llir"
+	"github.com/lewtec/leaven/internal/llir/ir"
 )
 
 // parseIRFile reads path, normalizes clang-14 quirks, and parses with llir.
@@ -24,5 +24,5 @@ func parseIR(name string, r io.Reader) (*ir.Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asm.ParseString(name, normalizeLLVMIR(string(b)))
+	return llir.ParseString(name, normalizeLLVMIR(string(b)))
 }

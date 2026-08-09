@@ -1,6 +1,6 @@
 package leaven
 
-import "github.com/llir/llvm/ir"
+import "github.com/lewtec/leaven/internal/llir/ir"
 
 func fixMalloc(f *ir.Func) {
 	var idx Index

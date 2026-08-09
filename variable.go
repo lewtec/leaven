@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/dave/jennifer/jen"
-	"github.com/llir/llvm/ir"
-	"github.com/llir/llvm/ir/constant"
-	"github.com/llir/llvm/ir/enum"
-	"github.com/llir/llvm/ir/types"
-	"github.com/llir/llvm/ir/value"
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/enum"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
 )
 
 // moduleFuncNames / moduleTypeNames are filled by collectModuleNames so locals

@@ -1,8 +1,8 @@
 package leaven
 
 import (
-	"github.com/llir/llvm/ir"
-	"github.com/llir/llvm/ir/value"
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
 	"golang.org/x/exp/slices"
 )
 

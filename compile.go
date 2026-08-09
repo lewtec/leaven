@@ -6,9 +6,9 @@ import (
 	"sort"
 
 	"github.com/dave/jennifer/jen"
-	"github.com/llir/llvm/ir"
-	"github.com/llir/llvm/ir/types"
-	"github.com/llir/llvm/ir/value"
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
 )
 
 func Compile(out io.Writer, m *ir.Module, packageName string) error {

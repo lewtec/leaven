@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/dave/jennifer/jen"
-	"github.com/llir/llvm/ir/constant"
-	"github.com/llir/llvm/ir/types"
-	"github.com/llir/llvm/ir/value"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
 )
 
 // GetElementPtr translates a getelementptr expression.

@@ -1,0 +1,94 @@
+package constant
+
+// === [ Expressions ] =========================================================
+
+// Expression is an LLVM IR constant expression.
+//
+// An Expression has one of the following underlying types.
+//
+// Unary expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprFNeg   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFNeg
+//
+// Binary expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprAdd    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprAdd
+//    *constant.ExprFAdd   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFAdd
+//    *constant.ExprSub    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSub
+//    *constant.ExprFSub   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFSub
+//    *constant.ExprMul    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprMul
+//    *constant.ExprFMul   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFMul
+//    *constant.ExprUDiv   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprUDiv
+//    *constant.ExprSDiv   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSDiv
+//    *constant.ExprFDiv   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFDiv
+//    *constant.ExprURem   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprURem
+//    *constant.ExprSRem   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSRem
+//    *constant.ExprFRem   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFRem
+//
+// Bitwise expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprShl    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprShl
+//    *constant.ExprLShr   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprLShr
+//    *constant.ExprAShr   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprAShr
+//    *constant.ExprAnd    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprAnd
+//    *constant.ExprOr     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprOr
+//    *constant.ExprXor    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprXor
+//
+// Vector expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprExtractElement   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprExtractElement
+//    *constant.ExprInsertElement    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprInsertElement
+//    *constant.ExprShuffleVector    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprShuffleVector
+//
+// Aggregate expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprExtractValue   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprExtractValue
+//    *constant.ExprInsertValue    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprInsertValue
+//
+// Memory expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprGetElementPtr   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprGetElementPtr
+//
+// Conversion expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprTrunc           // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprTrunc
+//    *constant.ExprZExt            // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprZExt
+//    *constant.ExprSExt            // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSExt
+//    *constant.ExprFPTrunc         // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFPTrunc
+//    *constant.ExprFPExt           // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFPExt
+//    *constant.ExprFPToUI          // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFPToUI
+//    *constant.ExprFPToSI          // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFPToSI
+//    *constant.ExprUIToFP          // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprUIToFP
+//    *constant.ExprSIToFP          // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSIToFP
+//    *constant.ExprPtrToInt        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprPtrToInt
+//    *constant.ExprIntToPtr        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprIntToPtr
+//    *constant.ExprBitCast         // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprBitCast
+//    *constant.ExprAddrSpaceCast   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprAddrSpaceCast
+//
+// Other expressions
+//
+// https://llvm.org/docs/LangRef.html#constant-expressions
+//
+//    *constant.ExprICmp     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprICmp
+//    *constant.ExprFCmp     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprFCmp
+//    *constant.ExprSelect   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/constant#ExprSelect
+type Expression interface {
+	Constant
+	// IsExpression ensures that only constants expressions can be assigned to
+	// the constant.Expression interface.
+	IsExpression()
+}

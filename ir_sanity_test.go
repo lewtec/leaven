@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/llir/llvm/ir"
+	"github.com/lewtec/leaven/internal/llir/ir"
 )
 
 // expectTable is the JSON table in each fixture folder (expect.json).
