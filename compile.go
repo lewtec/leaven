@@ -1,62 +1,25 @@
 package leaven
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
 
 func Compile(out io.Writer, m *ir.Module, packageName string) error {
-	var body bytes.Buffer
-	if err := writeModule(&body, m, packageName); err != nil {
+	f := newGoFile(packageName)
+	if err := writeModule(f, m, packageName); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "package %s\n\n", packageName)
-	writeImports(out, body.String())
-	_, err := io.WriteString(out, body.String())
-	return err
+	return f.Render(out)
 }
 
-// writeImports emits import declarations for packages referenced in body.
-func writeImports(out io.Writer, body string) {
-	type imp struct {
-		path string
-		hit  string // substring that indicates the package is needed
-	}
-	needed := []imp{
-		{`"unsafe"`, "unsafe."},
-		{`"math"`, "math."},
-		{`"os"`, "os."},
-		{`"sync/atomic"`, "atomic."},
-		{`"github.com/lewtec/leaven/libc"`, "libc."},
-	}
-	var paths []string
-	for _, n := range needed {
-		if strings.Contains(body, n.hit) {
-			paths = append(paths, n.path)
-		}
-	}
-	if len(paths) == 0 {
-		return
-	}
-	if len(paths) == 1 {
-		fmt.Fprintf(out, "import %s\n\n", paths[0])
-		return
-	}
-	fmt.Fprintln(out, "import (")
-	for _, p := range paths {
-		fmt.Fprintf(out, "\t%s\n", p)
-	}
-	fmt.Fprint(out, ")\n\n")
-}
-
-func writeModule(out io.Writer, m *ir.Module, packageName string) error {
+func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	collectTaggedPointerTypes(m)
 	collectModuleNames(m)
 
@@ -65,17 +28,12 @@ func writeModule(out io.Writer, m *ir.Module, packageName string) error {
 		if name == "" {
 			continue
 		}
-		if strings.Contains(name, ".") {
-			// It's a definition that's beeen replaced by a reference to a standard-library type.
-			continue
-		}
 
 		def, err := TypeDefinition(t)
 		if err != nil {
 			return fmt.Errorf("error generating type definition for %v: %w", t, err)
 		}
-
-		fmt.Fprintf(out, "type %s %s\n\n", name, def)
+		f.Type().Id(name).Add(def)
 	}
 
 	for _, g := range m.Globals {
@@ -91,219 +49,245 @@ func writeModule(out io.Writer, m *ir.Module, packageName string) error {
 		if err != nil {
 			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
-		fmt.Fprintf(out, "var %s %s = %s\n\n", VariableName(g), t, val)
+		f.Var().Id(VariableName(g)).Add(t).Op("=").Add(val)
 	}
 
-	for _, f := range m.Funcs {
-		if f.Blocks == nil {
+	for _, fn := range m.Funcs {
+		if fn.Blocks == nil {
 			// Just a declaration, not a definition; skip it.
 			continue
 		}
 
-		fixMalloc(f)
+		fixMalloc(fn)
 
-		name := VariableName(f)
+		name := VariableName(fn)
 		// Only package main gets a Go program entry point from C main.
 		isGoMain := name == "main" && packageName == "main"
 
-		if isGoMain {
-			fmt.Fprintln(out, "func main() {")
-		} else {
-			fmt.Fprintf(out, "func %s(", name)
-			for i, p := range f.Params {
-				if i > 0 {
-					fmt.Fprint(out, ", ")
-				}
+		var params []jen.Code
+		if !isGoMain {
+			for i, p := range fn.Params {
 				pt, err := TypeSpec(p.Typ)
 				if err != nil {
-					return fmt.Errorf("error translating type for parameter %d of %s: %w", i, f.Name(), err)
+					return fmt.Errorf("error translating type for parameter %d of %s: %w", i, fn.Name(), err)
 				}
-				fmt.Fprintf(out, "%s %s", VariableName(p), pt)
+				params = append(params, jen.Id(VariableName(p)).Add(pt))
 			}
-			if f.Sig.Variadic {
-				if len(f.Params) > 0 {
-					fmt.Fprint(out, ", ")
-				}
-				fmt.Fprint(out, "varargs ...interface{}")
+			if fn.Sig.Variadic {
+				params = append(params, jen.Id("varargs").Op("...").Interface())
 			}
-			fmt.Fprint(out, ") ")
-			rt := f.Sig.RetType
+		}
+
+		var ret *jen.Statement
+		if !isGoMain {
+			rt := fn.Sig.RetType
 			if !types.Equal(rt, types.Void) {
 				retType, err := TypeSpec(rt)
 				if err != nil {
-					return fmt.Errorf("error translating return type for %s: %w", f.Name(), err)
+					return fmt.Errorf("error translating return type for %s: %w", fn.Name(), err)
 				}
-				fmt.Fprintf(out, "%s ", retType)
-			}
-			fmt.Fprint(out, "{\n")
-		}
-
-		// Declare variables.
-		vars := make(map[string][]string)
-		var allVars []string
-		for _, b := range f.Blocks {
-			for _, inst := range b.Insts {
-				if inst, ok := inst.(value.Named); ok {
-					if types.Equal(inst.Type(), types.Void) {
-						continue
-					}
-					t, err := TypeSpec(inst.Type())
-					if err != nil {
-						return fmt.Errorf("error translating type of %s in %s: %w", inst.Ident(), f.Name(), err)
-					}
-					vars[t] = append(vars[t], VariableName(inst))
-					allVars = append(allVars, VariableName(inst))
-				}
+				ret = retType
 			}
 		}
-		varTypes := make([]string, 0, len(vars))
-		for t := range vars {
-			varTypes = append(varTypes, t)
+
+		var bodyErr error
+		decl := f.Func().Id(name).Params(params...)
+		if ret != nil {
+			decl.Add(ret)
 		}
-		sort.Strings(varTypes)
-		for _, t := range varTypes {
-			fmt.Fprintf(out, "\tvar %s %s\n", strings.Join(vars[t], ", "), t)
-		}
-		if len(vars) > 0 {
-			fmt.Fprintln(out)
-			// Get rid of unused-variable errors.
-			for i := range allVars {
-				if i == 0 {
-					fmt.Fprint(out, "\t_")
-				} else {
-					fmt.Fprint(out, ", _")
-				}
+		decl.BlockFunc(func(g *jen.Group) {
+			if err := writeFuncBody(g, fn, isGoMain); err != nil {
+				bodyErr = err
 			}
-			fmt.Fprintf(out, " = %s\n\n", strings.Join(allVars, ", "))
+		})
+		if bodyErr != nil {
+			return bodyErr
 		}
+	}
+	return nil
+}
 
-		// Labels are only legal in Go if something gotos them. Collect jump targets.
-		gotoTargets := blockGotoTargets(f)
-
-		// Translate instructions.
-		for i, b := range f.Blocks {
-			// Entry always emitted; other blocks only if they are branch targets
-			// (avoids "label defined and not used" and pure dead code).
-			if i != 0 && !gotoTargets[b] {
+func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
+	type varGroup struct {
+		typ   *jen.Statement
+		names []string
+	}
+	groups := make(map[string]*varGroup)
+	var allVars []string
+	for _, b := range fn.Blocks {
+		for _, inst := range b.Insts {
+			inst, ok := inst.(value.Named)
+			if !ok {
 				continue
 			}
-			if gotoTargets[b] {
-				if i != 0 {
-					fmt.Fprintln(out)
-				}
-				fmt.Fprintf(out, "%s:\n", BlockName(b))
+			if types.Equal(inst.Type(), types.Void) {
+				continue
 			}
-			for _, inst := range b.Insts {
-				if _, ok := inst.(*ir.InstPhi); ok {
-					continue
-				}
-				translated, err := TranslateInstruction(inst)
-				if err != nil {
-					return fmt.Errorf("error translating %q: %w", inst.LLString(), err)
-				}
-				if translated != "" {
-					fmt.Fprintf(out, "\t%s\n", translated)
-				}
+			t, err := TypeSpec(inst.Type())
+			if err != nil {
+				return fmt.Errorf("error translating type of %s in %s: %w", inst.Ident(), fn.Name(), err)
 			}
-			switch term := b.Term.(type) {
-			case *ir.TermBr:
-				phis, err := PhiAssignments(b, term.Target)
-				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %w", err)
-				}
-				if phis != "" {
-					fmt.Fprintf(out, "\t%s\n", phis)
-				}
-				fmt.Fprintf(out, "\tgoto %s\n", BlockName(term.Target))
+			key := inst.Type().String()
+			if groups[key] == nil {
+				groups[key] = &varGroup{typ: t}
+			}
+			groups[key].names = append(groups[key].names, VariableName(inst))
+			allVars = append(allVars, VariableName(inst))
+		}
+	}
+	varTypes := make([]string, 0, len(groups))
+	for t := range groups {
+		varTypes = append(varTypes, t)
+	}
+	sort.Strings(varTypes)
+	for _, key := range varTypes {
+		grp := groups[key]
+		ids := make([]jen.Code, len(grp.names))
+		for i, n := range grp.names {
+			ids[i] = jen.Id(n)
+		}
+		g.Var().List(ids...).Add(grp.typ)
+	}
+	if len(allVars) > 0 {
+		lhs := make([]jen.Code, len(allVars))
+		rhs := make([]jen.Code, len(allVars))
+		for i, n := range allVars {
+			lhs[i] = jen.Id("_")
+			rhs[i] = jen.Id(n)
+		}
+		g.List(lhs...).Op("=").List(rhs...)
+		g.Line()
+	}
 
-			case *ir.TermCondBr:
-				cond, err := FormatValue(term.Cond)
-				if err != nil {
-					return fmt.Errorf("error translating condition (%v): %w", term.Cond, err)
-				}
-				fmt.Fprintf(out, "\tif %s {\n", cond)
-				phis, err := PhiAssignments(b, term.TargetTrue)
-				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %w", err)
-				}
-				if phis != "" {
-					fmt.Fprintf(out, "\t\t%s\n", phis)
-				}
-				fmt.Fprintf(out, "\t\tgoto %s\n", BlockName(term.TargetTrue))
-				fmt.Fprintln(out, "\t} else {")
-				phis, err = PhiAssignments(b, term.TargetFalse)
-				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %w", err)
-				}
-				if phis != "" {
-					fmt.Fprintf(out, "\t\t%s\n", phis)
-				}
-				fmt.Fprintf(out, "\t\tgoto %s\n", BlockName(term.TargetFalse))
-				fmt.Fprintln(out, "\t}")
+	gotoTargets := blockGotoTargets(fn)
 
-			case *ir.TermRet:
-				if term.X == nil {
-					// void return
-					if i == len(f.Blocks)-1 {
-						// Just skip the return statement, since it's the end of the function anyway.
-						continue
-					}
-					fmt.Fprintln(out, "\treturn")
-					continue
-				}
-				retVal, err := FormatValue(term.X)
-				if err != nil {
-					return fmt.Errorf("error translating return value (%v): %w", term.X, err)
-				}
-				if isGoMain {
-					fmt.Fprintf(out, "\tos.Exit(int(%s))\n", retVal)
-				} else {
-					fmt.Fprintf(out, "\treturn %s\n", retVal)
-				}
-
-			case *ir.TermSwitch:
-				x, err := FormatValue(term.X)
-				if err != nil {
-					return fmt.Errorf("error translating control value (%v): %w", term.X, err)
-				}
-				fmt.Fprintf(out, "\tswitch %s {\n", x)
-				for _, c := range term.Cases {
-					x, err := FormatValue(c.X)
-					if err != nil {
-						return fmt.Errorf("error translating case value (%v): %w", c.X, err)
-					}
-					fmt.Fprintf(out, "\tcase %s:\n", x)
-					phis, err := PhiAssignments(b, c.Target)
-					if err != nil {
-						return fmt.Errorf("error translating phi nodes: %w", err)
-					}
-					if phis != "" {
-						fmt.Fprintf(out, "\t\t%s\n", phis)
-					}
-					fmt.Fprintf(out, "\t\tgoto %s\n", BlockName(c.Target))
-				}
-				fmt.Fprint(out, "\tdefault:\n")
-				phis, err := PhiAssignments(b, term.TargetDefault)
-				if err != nil {
-					return fmt.Errorf("error translating phi nodes: %w", err)
-				}
-				if phis != "" {
-					fmt.Fprintf(out, "\t\t%s\n", phis)
-				}
-				fmt.Fprintf(out, "\t\tgoto %s\n", BlockName(term.TargetDefault))
-				fmt.Fprint(out, "\t}\n")
-
-			case *ir.TermUnreachable:
-				// LLVM unreachable: UB if executed. panic is a no-return so Go
-				// typechecks functions that end only on this path.
-				fmt.Fprintln(out, "\tpanic(\"unreachable\")")
-
-			default:
-				return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
+	for i, b := range fn.Blocks {
+		if i != 0 && !gotoTargets[b] {
+			continue
+		}
+		if gotoTargets[b] {
+			if i != 0 {
+				g.Line()
+			}
+			g.Id(BlockName(b)).Op(":")
+		}
+		for _, inst := range b.Insts {
+			if _, ok := inst.(*ir.InstPhi); ok {
+				continue
+			}
+			translated, err := TranslateInstruction(inst)
+			if err != nil {
+				return fmt.Errorf("error translating %q: %w", inst.LLString(), err)
+			}
+			for _, stmt := range translated {
+				g.Add(stmt)
 			}
 		}
+		switch term := b.Term.(type) {
+		case *ir.TermBr:
+			phis, err := PhiAssignments(b, term.Target)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			if phis != nil {
+				g.Add(phis)
+			}
+			g.Goto().Id(BlockName(term.Target))
 
-		fmt.Fprint(out, "}\n\n")
+		case *ir.TermCondBr:
+			cond, err := FormatValue(term.Cond)
+			if err != nil {
+				return fmt.Errorf("error translating condition (%v): %w", term.Cond, err)
+			}
+			truePhis, err := PhiAssignments(b, term.TargetTrue)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			falsePhis, err := PhiAssignments(b, term.TargetFalse)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			g.If(cond).BlockFunc(func(ig *jen.Group) {
+				if truePhis != nil {
+					ig.Add(truePhis)
+				}
+				ig.Goto().Id(BlockName(term.TargetTrue))
+			}).Else().BlockFunc(func(ig *jen.Group) {
+				if falsePhis != nil {
+					ig.Add(falsePhis)
+				}
+				ig.Goto().Id(BlockName(term.TargetFalse))
+			})
+
+		case *ir.TermRet:
+			if term.X == nil {
+				if i == len(fn.Blocks)-1 {
+					continue
+				}
+				g.Return()
+				continue
+			}
+			retVal, err := FormatValue(term.X)
+			if err != nil {
+				return fmt.Errorf("error translating return value (%v): %w", term.X, err)
+			}
+			if isGoMain {
+				g.Qual("os", "Exit").Call(jen.Int().Call(retVal))
+			} else {
+				g.Return(retVal)
+			}
+
+		case *ir.TermSwitch:
+			x, err := FormatValue(term.X)
+			if err != nil {
+				return fmt.Errorf("error translating control value (%v): %w", term.X, err)
+			}
+			type swCase struct {
+				x      *jen.Statement
+				phis   *jen.Statement
+				target string
+			}
+			cases := make([]swCase, 0, len(term.Cases))
+			for _, c := range term.Cases {
+				cx, err := FormatValue(c.X)
+				if err != nil {
+					return fmt.Errorf("error translating case value (%v): %w", c.X, err)
+				}
+				phis, err := PhiAssignments(b, c.Target)
+				if err != nil {
+					return fmt.Errorf("error translating phi nodes: %w", err)
+				}
+				cases = append(cases, swCase{x: cx, phis: phis, target: BlockName(c.Target)})
+			}
+			defPhis, err := PhiAssignments(b, term.TargetDefault)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			defTarget := BlockName(term.TargetDefault)
+			g.Switch(x).BlockFunc(func(sg *jen.Group) {
+				for _, c := range cases {
+					c := c
+					sg.Case(c.x).BlockFunc(func(cg *jen.Group) {
+						if c.phis != nil {
+							cg.Add(c.phis)
+						}
+						cg.Goto().Id(c.target)
+					})
+				}
+				sg.Default().BlockFunc(func(dg *jen.Group) {
+					if defPhis != nil {
+						dg.Add(defPhis)
+					}
+					dg.Goto().Id(defTarget)
+				})
+			})
+
+		case *ir.TermUnreachable:
+			g.Panic(jen.Lit("unreachable"))
+
+		default:
+			return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
+		}
 	}
 	return nil
 }
@@ -336,9 +320,9 @@ func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
 
 // PhiAssignments returns an assignment statement expressing the effects of Phi
 // nodes on the branch from block a to block b. If block b has no phi nodes,
-// it returns the empty string.
-func PhiAssignments(a, b value.Value) (string, error) {
-	var dest, src []string
+// it returns nil.
+func PhiAssignments(a, b value.Value) (*jen.Statement, error) {
+	var dest, src []jen.Code
 	for _, inst := range b.(*ir.Block).Insts {
 		phi, ok := inst.(*ir.InstPhi)
 		if !ok {
@@ -348,16 +332,16 @@ func PhiAssignments(a, b value.Value) (string, error) {
 			if inc.Pred == a {
 				source, err := FormatValue(inc.X)
 				if err != nil {
-					return "", fmt.Errorf("error translating value (%v): %w", inc.X, err)
+					return nil, fmt.Errorf("error translating value (%v): %w", inc.X, err)
 				}
 				src = append(src, source)
-				dest = append(dest, VariableName(phi))
+				dest = append(dest, jen.Id(VariableName(phi)))
 				break
 			}
 		}
 	}
 	if len(src) == 0 {
-		return "", nil
+		return nil, nil
 	}
-	return strings.Join(dest, ", ") + " = " + strings.Join(src, ", "), nil
+	return jen.List(dest...).Op("=").List(src...), nil
 }

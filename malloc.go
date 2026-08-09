@@ -10,11 +10,7 @@ func fixMalloc(f *ir.Func) {
 		for _, inst := range b.Insts {
 			switch inst := inst.(type) {
 			case *ir.InstCall:
-				callee, err := FormatValue(inst.Callee)
-				if err != nil {
-					continue
-				}
-				switch callee {
+				switch calleeLLVMName(inst.Callee) {
 				case "malloc", "calloc":
 					users := idx.Users(inst)
 					if len(users) == 1 {

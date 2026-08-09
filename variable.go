@@ -1,11 +1,11 @@
 package leaven
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 	"strings"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
 	"github.com/llir/llvm/ir/enum"
@@ -28,7 +28,7 @@ func collectModuleNames(m *ir.Module) {
 		moduleFuncNames[rawIdentName(f)] = true
 	}
 	for _, t := range m.TypeDefs {
-		if n := TypeName(t); n != "" && !strings.Contains(n, ".") {
+		if n := TypeName(t); n != "" {
 			moduleTypeNames[n] = true
 		}
 	}
@@ -124,150 +124,127 @@ var invalidNames = map[string]bool{
 	"complex128": true, "any": true, "comparable": true,
 }
 
+func namedRef(name string) (*jen.Statement, bool) {
+	if ref, ok := libraryFunctions[name]; ok {
+		return ref.code(), true
+	}
+	return nil, false
+}
+
+func compositeValues(elems []jen.Code) *jen.Statement {
+	return jen.Values(elems...)
+}
+
+func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
+	return jen.Add(typ).Add(compositeValues(elems))
+}
+
+func fnPtrBitcast(to, from *jen.Statement) *jen.Statement {
+	// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
+	return jen.Func().Params().Add(to).Block(
+		jen.Id("tmp").Op(":=").Add(from),
+		jen.Return(deref(jen.Parens(ptrTyp(to))).Call(unsafePtr(addrOf(jen.Id("tmp"))))),
+	).Call()
+}
+
 // FormatValue formats a constant or variable as it should appear in an expression.
-func FormatValue(v value.Value) (string, error) {
+func FormatValue(v value.Value) (*jen.Statement, error) {
+	e, err := formatExpr(v)
+	if err != nil {
+		return nil, err
+	}
+	return e.code, nil
+}
+
+func formatExpr(v value.Value) (expr, error) {
 	switch v := v.(type) {
 	case *ir.Global:
 		name := VariableName(v)
 		if types.IsFunc(v.ContentType) {
-			// Function used as a value (initializer / assignment), not a call.
-			if renamed, ok := libraryFunctions[name]; ok {
-				return renamed, nil
+			if c, ok := namedRef(name); ok {
+				return val(c), nil
 			}
-			return name, nil
+			return ident(name), nil
 		}
-		if renamed, ok := libraryGlobals[name]; ok {
-			name = renamed
+		if ref, ok := libraryGlobals[name]; ok {
+			return addrExpr(ref.code()), nil
 		}
-		return "&" + name, nil
+		return addrExpr(jen.Id(name)), nil
 
 	case value.Named:
 		name := VariableName(v)
-		// Declarations like @free used as fn values (e.g. current_free = free).
-		if renamed, ok := libraryFunctions[name]; ok {
-			return renamed, nil
+		if c, ok := namedRef(name); ok {
+			return val(c), nil
 		}
-		return name, nil
+		return ident(name), nil
 
 	case *ir.Arg:
-		return FormatValue(v.Value)
+		return formatExpr(v.Value)
 
 	case *constant.Array:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		b := new(bytes.Buffer)
-		if len(v.Elems) < 16 {
-			b.WriteString(t)
-			b.WriteByte('{')
-			for i, c := range v.Elems {
-				if i > 0 {
-					b.WriteString(", ")
-				}
-				e, err := FormatValue(c)
-				if err != nil {
-					return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
-				}
-				fmt.Fprint(b, e)
+		elems := make([]jen.Code, len(v.Elems))
+		for i, c := range v.Elems {
+			e, err := FormatValue(c)
+			if err != nil {
+				return expr{}, fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 			}
-			b.WriteByte('}')
-		} else {
-			b.WriteString(t)
-			b.WriteString("{\n\t")
-			for i, c := range v.Elems {
-				if i > 0 {
-					if i%16 == 0 {
-						b.WriteString(",\n\t")
-					} else {
-						b.WriteString(", ")
-					}
-				}
-				e, err := FormatValue(c)
-				if err != nil {
-					return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
-				}
-				fmt.Fprint(b, e)
-			}
-			b.WriteString(",\n}")
+			elems[i] = e
 		}
-		return b.String(), nil
+		return val(formatComposite(t, elems)), nil
 
 	case *constant.CharArray:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		b := new(bytes.Buffer)
-		if len(v.X) < 16 {
-			b.WriteString(t)
-			b.WriteByte('{')
-			for i, c := range v.X {
-				if i > 0 {
-					b.WriteString(", ")
-				}
-				fmt.Fprintf(b, "%d", c)
-			}
-			b.WriteByte('}')
-		} else {
-			b.WriteString(t)
-			b.WriteString("{\n\t")
-			for i, c := range v.X {
-				if i > 0 {
-					if i%16 == 0 {
-						b.WriteString(",\n\t")
-					} else {
-						b.WriteString(", ")
-					}
-				}
-				fmt.Fprintf(b, "%d", c)
-			}
-			b.WriteString(",\n}")
+		elems := make([]jen.Code, len(v.X))
+		for i, c := range v.X {
+			elems[i] = litUntyped(int64(c))
 		}
-		return b.String(), nil
+		return val(formatComposite(t, elems)), nil
 
 	case *constant.ExprBitCast:
 		from, err := FormatValue(v.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
+			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
 		to, err := TypeSpec(v.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
 		if isFuncPointerType(v.To) || isFuncPointerType(v.From.Type()) {
-			return fmt.Sprintf("func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", to, from, to), nil
+			return val(fnPtrBitcast(to, from)), nil
 		}
 		if isTaggedPointerType(v.To) {
-			return fmt.Sprintf("uintptr(unsafe.Pointer(%s))", from), nil
+			return val(uintptrOfPtr(from)), nil
 		}
-		if isTaggedPointerType(v.From.Type()) {
-			return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
-		}
-		return fmt.Sprintf("(%s)(unsafe.Pointer(%s))", to, from), nil
+		return val(ptrCast(to, from)), nil
 
 	case *constant.ExprIntToPtr:
 		from, err := FormatValue(v.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
+			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
 		to, err := TypeSpec(v.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return fmt.Sprintf("(%s)(unsafe.Pointer(uintptr(%s)))", to, from), nil
+		return val(jen.Parens(to).Call(unsafePtr(jen.Uintptr().Call(from)))), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", v.From, err)
+			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
 		to, err := TypeSpec(v.To)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.To, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return fmt.Sprintf("%s(uintptr(unsafe.Pointer(%s)))", to, from), nil
+		return val(conv(to, uintptrOfPtr(from))), nil
 
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
@@ -277,161 +254,162 @@ func FormatValue(v value.Value) (string, error) {
 		return GetElementPtr(v.ElemType, v.Src, indices)
 
 	case *constant.ExprICmp:
-		return formatICmp(v.Pred, v.X, v.Y)
+		c, err := formatICmp(v.Pred, v.X, v.Y)
+		if err != nil {
+			return expr{}, err
+		}
+		return val(c), nil
 
 	case *constant.ExprZExt:
-		return formatZExt(v.From, v.To)
+		c, err := formatZExt(v.From, v.To)
+		if err != nil {
+			return expr{}, err
+		}
+		return val(c), nil
 
 	case *constant.ExprSExt:
-		return formatSExt(v.From, v.To)
+		c, err := formatSExt(v.From, v.To)
+		if err != nil {
+			return expr{}, err
+		}
+		return val(c), nil
 
 	case *constant.ExprTrunc:
-		return formatTrunc(v.From, v.To)
+		c, err := formatTrunc(v.From, v.To)
+		if err != nil {
+			return expr{}, err
+		}
+		return val(c), nil
 
 	case *constant.Float:
 		result := v.X.String()
-		special := false
+		var c *jen.Statement
 		switch result {
 		case "+Inf":
-			result = "math.Inf(1)"
-			special = true
+			c = jen.Qual("math", "Inf").Call(jen.Lit(1))
 		case "-Inf":
-			result = "math.Inf(-1)"
-			special = true
+			c = jen.Qual("math", "Inf").Call(jen.Lit(-1))
 		case "NaN":
-			result = "math.NaN()"
-			special = true
+			c = jen.Qual("math", "NaN").Call()
+		default:
+			c = jen.Op(result)
 		}
-		if special && v.Typ.Kind == types.FloatKindFloat {
-			result = fmt.Sprintf("float32(%s)", result)
+		if c != nil && (result == "+Inf" || result == "-Inf" || result == "NaN") && v.Typ.Kind == types.FloatKindFloat {
+			c = jen.Float32().Call(c)
 		}
-		return result, nil
+		return val(c), nil
 
 	case *constant.Index:
-		return FormatValue(v.Constant)
+		return formatExpr(v.Constant)
 
 	case *constant.Int:
 		if v.Typ.BitSize > 64 {
-			return "", fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
+			return expr{}, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
 		}
-		var value int64
+		var n int64
 		switch {
 		case v.X.IsInt64():
-			value = v.X.Int64()
+			n = v.X.Int64()
 		case v.X.IsUint64():
 			// Reinterpret as two's-complement signed for this bit width
 			// (e.g. i64 all-ones → -1, not 18446744073709551615).
-			value = int64(v.X.Uint64())
+			n = int64(v.X.Uint64())
 		default:
 			// Truncate wide math/big values into the declared bit width (≤64).
 			truncated, err := intFromBig(v.X, v.Typ.BitSize)
 			if err != nil {
-				return "", err
+				return expr{}, err
 			}
-			value = truncated
+			n = truncated
 		}
 
 		if v.Typ.BitSize == 1 {
-			if value != 0 {
-				return "true", nil
+			if n != 0 {
+				return val(jen.True()), nil
 			}
-			return "false", nil
+			return val(jen.False()), nil
 		}
 		switch goIntBits(v.Typ.BitSize) {
 		case 8:
-			return fmt.Sprint(byte(value)), nil
-		case 16:
-			return fmt.Sprint(int16(value)), nil
-		case 32:
-			return fmt.Sprint(int32(value)), nil
+			return val(litUntyped(int64(byte(n)))), nil
+		case 16, 32:
+			return val(litUntyped(n)), nil
 		case 64:
 			// Typed so large bit patterns never appear as untyped ints.
-			return fmt.Sprintf("int64(%d)", value), nil
+			return val(jen.Lit(n)), nil
 		default:
-			return fmt.Sprint(value), nil
+			return val(litUntyped(n)), nil
 		}
 
 	case *constant.Null:
 		// Tagged union pointers are uintptr; use 0 not nil.
 		if isTaggedPointerType(v.Typ) {
-			return "0", nil
+			return val(jen.Lit(0)), nil
 		}
-		return "nil", nil
+		return val(jen.Nil()), nil
 
 	case *constant.Struct:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		b := new(bytes.Buffer)
-		b.WriteString(t)
-		b.WriteByte('{')
+		elems := make([]jen.Code, len(v.Fields))
 		for i, c := range v.Fields {
-			if i > 0 {
-				b.WriteString(", ")
-			}
 			e, err := FormatValue(c)
 			if err != nil {
-				return "", fmt.Errorf("error translating field %d (%v): %w", i, c, err)
+				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}
-			fmt.Fprint(b, e)
+			elems[i] = e
 		}
-		b.WriteByte('}')
-		return b.String(), nil
+		return val(formatComposite(t, elems)), nil
 
 	case *constant.Undef:
 		switch v.Typ.(type) {
 		case *types.ArrayType, *types.StructType, *types.VectorType:
 			t, err := TypeSpec(v.Typ)
 			if err != nil {
-				return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+				return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 			}
-			return t + "{}", nil
+			return val(jen.Add(t).Values()), nil
 		case *types.IntType, *types.FloatType:
-			return "0", nil
+			return val(jen.Lit(0)), nil
 		case *types.PointerType:
-			return "nil", nil
+			return val(jen.Nil()), nil
 		default:
-			return "", fmt.Errorf("%w: %v", errUnsupportedUndefType, v.Typ)
+			return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, v.Typ)
 		}
 
 	case *constant.Vector:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		b := new(bytes.Buffer)
-		b.WriteString(t)
-		b.WriteByte('{')
+		elems := make([]jen.Code, len(v.Elems))
 		for i, c := range v.Elems {
-			if i > 0 {
-				b.WriteString(", ")
-			}
 			e, err := FormatValue(c)
 			if err != nil {
-				return "", fmt.Errorf("error translating element %d (%v): %w", i, c, err)
+				return expr{}, fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 			}
-			fmt.Fprint(b, e)
+			elems[i] = e
 		}
-		b.WriteByte('}')
-		return b.String(), nil
+		return val(formatComposite(t, elems)), nil
 
 	case *constant.ZeroInitializer:
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", v.Typ, err)
+			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		return t + "{}", nil
+		return val(jen.Add(t).Values()), nil
 
 	default:
-		return "", fmt.Errorf("%w: %T", errUnsupportedValueType, v)
+		return expr{}, fmt.Errorf("%w: %T", errUnsupportedValueType, v)
 	}
 }
 
-var libraryGlobals = map[string]string{
-	"stdin":  "os.Stdin",
-	"stdout": "os.Stdout",
-	"stderr": "os.Stderr",
+var libraryGlobals = map[string]goRef{
+	"stdin":  {pkg: "os", name: "Stdin"},
+	"stdout": {pkg: "os", name: "Stdout"},
+	"stderr": {pkg: "os", name: "Stderr"},
 }
 
 // intFromBig truncates x to bitSize bits and returns it as int64 (two's complement).
@@ -453,7 +431,7 @@ func intFromBig(x *big.Int, bitSize uint64) (int64, error) {
 }
 
 // formatICmp translates an icmp predicate and operands to a Go comparison expr.
-func formatICmp(pred enum.IPred, xVal, yVal value.Value) (string, error) {
+func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error) {
 	var op string
 	format := FormatValue
 	switch pred {
@@ -486,155 +464,158 @@ func formatICmp(pred enum.IPred, xVal, yVal value.Value) (string, error) {
 		op = "<"
 		format = FormatUnsigned
 	default:
-		return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
+		return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
 	}
 	x, err := format(xVal)
 	if err != nil {
-		return "", fmt.Errorf("error translating left operand (%v): %w", xVal, err)
+		return nil, fmt.Errorf("error translating left operand (%v): %w", xVal, err)
 	}
 	y, err := format(yVal)
 	if err != nil {
-		return "", fmt.Errorf("error translating right operand (%v): %w", yVal, err)
+		return nil, fmt.Errorf("error translating right operand (%v): %w", yVal, err)
 	}
-	return fmt.Sprintf("%s %s %s", x, op, y), nil
+	return bin(x, op, y), nil
 }
 
 // formatZExt is the expression form of zext (usable in constant expressions).
-func formatZExt(from value.Value, to types.Type) (string, error) {
+func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	toType, ok := to.(*types.IntType)
 	if !ok {
-		return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
+		return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
 	}
 	src, err := FormatUnsigned(from)
 	if err != nil {
-		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
 	w := goIntBits(toType.BitSize)
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 		// bool → int expression (no statements in constant-expr context).
-		return fmt.Sprintf("map[bool]int%d{true: 1, false: 0}[%s]", w, src), nil
+		return jen.Map(jen.Bool()).Add(goIntType(w)).Values(jen.Dict{
+			jen.True():  jen.Lit(1),
+			jen.False(): jen.Lit(0),
+		}).Index(src), nil
 	}
-	return fmt.Sprintf("int%d(uint%d(%s))", w, w, src), nil
+	return conv(goIntType(w), conv(goUintType(w), src)), nil
 }
 
 // formatSExt is the expression form of sext.
-func formatSExt(from value.Value, to types.Type) (string, error) {
+func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	toType, ok := to.(*types.IntType)
 	if !ok {
-		return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
+		return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, to)
 	}
 	src, err := FormatSigned(from)
 	if err != nil {
-		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	return fmt.Sprintf("int%d(%s)", goIntBits(toType.BitSize), src), nil
+	return conv(goIntType(toType.BitSize), src), nil
 }
 
 // formatTrunc is the expression form of trunc.
-func formatTrunc(from value.Value, to types.Type) (string, error) {
+func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 	toSpec, err := TypeSpec(to)
 	if err != nil {
-		return "", fmt.Errorf("error translating To type (%v): %w", to, err)
+		return nil, fmt.Errorf("error translating To type (%v): %w", to, err)
 	}
 	src, err := FormatValue(from)
 	if err != nil {
-		return "", fmt.Errorf("error translating source (%v): %w", from, err)
+		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {
-		return fmt.Sprintf("(%s & 1) != 0", src), nil
+		return jen.Parens(bin(src, "&", jen.Lit(1))).Op("!=").Lit(0), nil
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize < 8 {
-		return fmt.Sprintf("byte(%s & %d)", src, 255>>(8-intType.BitSize)), nil
+		return jen.Byte().Call(bin(src, "&", litUntyped(int64(255>>(8-intType.BitSize))))), nil
 	}
-	return fmt.Sprintf("%s(%s)", toSpec, src), nil
+	return conv(toSpec, src), nil
 }
 
 // FormatSigned is like FormatValue, except that it converts "byte" to "int8".
-func FormatSigned(v value.Value) (string, error) {
+func FormatSigned(v value.Value) (*jen.Statement, error) {
 	result, err := FormatValue(v)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
 		if ci.Typ.BitSize == 8 {
-			return fmt.Sprint(int8(ci.X.Int64())), nil
+			return litUntyped(int64(int8(ci.X.Int64()))), nil
 		}
 		return result, nil
 	}
 
 	if t, ok := v.Type().(*types.IntType); ok && t.BitSize == 8 {
-		return fmt.Sprintf("int8(%s)", result), nil
+		return jen.Int8().Call(result), nil
 	}
 	return result, nil
 }
 
 // FormatUnsigned is like FormatValue, except that it converts integer types to
 // unsigned.
-func FormatUnsigned(v value.Value) (string, error) {
+func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 	result, err := FormatValue(v)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
 		if ci.Typ.BitSize > 64 {
-			return "", fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, ci.Typ.BitSize, ci.X)
+			return nil, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, ci.Typ.BitSize, ci.X)
 		}
-		var value uint64
+		var n uint64
 		switch {
 		case ci.X.IsUint64():
-			value = ci.X.Uint64()
+			n = ci.X.Uint64()
 		case ci.X.IsInt64():
-			value = uint64(ci.X.Int64())
+			n = uint64(ci.X.Int64())
 			switch goIntBits(ci.Typ.BitSize) {
 			case 8:
-				return fmt.Sprintf("byte(%d)", byte(value)), nil
+				return jen.Byte().Call(litUntyped(int64(byte(n)))), nil
 			case 16:
-				return fmt.Sprintf("uint16(%d)", uint16(value)), nil
+				return jen.Uint16().Call(litUntyped(int64(uint16(n)))), nil
 			case 32:
-				return fmt.Sprintf("uint32(%d)", uint32(value)), nil
+				return jen.Uint32().Call(litUntyped(int64(uint32(n)))), nil
 			default:
-				return fmt.Sprintf("uint64(%d)", value), nil
+				return jen.Uint64().Call(jen.Lit(int64(n))), nil
 			}
 		default:
 			// Low bitSize bits as unsigned.
 			mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(ci.Typ.BitSize)), big.NewInt(1))
 			t := new(big.Int).And(ci.X, mask)
 			if !t.IsUint64() {
-				return "", fmt.Errorf("%w: %v", errIntConstTooLarge, ci.X)
+				return nil, fmt.Errorf("%w: %v", errIntConstTooLarge, ci.X)
 			}
-			value = t.Uint64()
+			n = t.Uint64()
 		}
 
 		if ci.Typ.BitSize == 1 {
-			if value != 0 {
-				return "true", nil
+			if n != 0 {
+				return jen.True(), nil
 			}
-			return "false", nil
+			return jen.False(), nil
 		}
 		switch goIntBits(ci.Typ.BitSize) {
 		case 8:
-			return fmt.Sprint(byte(value)), nil
+			return litUntyped(int64(byte(n))), nil
 		case 16:
-			return fmt.Sprint(uint16(value)), nil
+			return litUntyped(int64(uint16(n))), nil
 		case 32:
-			return fmt.Sprint(uint32(value)), nil
+			return litUntyped(int64(uint32(n))), nil
 		case 64:
 			// Untyped 18446744073709551615 overflows int64 in Go source.
-			return fmt.Sprintf("uint64(%d)", value), nil
+			return jen.Uint64().Call(jen.Op(fmt.Sprintf("%d", n))), nil
 		default:
-			return fmt.Sprint(value), nil
+			return litUntyped(int64(n)), nil
 		}
 	}
 
 	switch t := v.Type().(type) {
 	case *types.IntType:
 		if t.BitSize > 8 {
-			return fmt.Sprintf("uint%d(%s)", goIntBits(t.BitSize), result), nil
+			return conv(goUintType(t.BitSize), result), nil
 		}
 	case *types.PointerType:
-		return fmt.Sprintf("uintptr(unsafe.Pointer(%s))", result), nil
+		return uintptrOfPtr(result), nil
 	}
 
 	return result, nil

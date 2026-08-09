@@ -4,7 +4,8 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "func() func(*byte) { tmp := destroy; return *(*func(*byte))(unsafe.Pointer(&tmp)) }()",
+        "tmp := destroy",
+        "*(*func(*byte))(unsafe.Pointer(&tmp))",
         "var h Hooks"
       ],
       "not_contains": [

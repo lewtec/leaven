@@ -1,0 +1,173 @@
+package leaven
+
+import (
+	"fmt"
+
+	"github.com/dave/jennifer/jen"
+)
+
+const libcPath = "github.com/lewtec/leaven/libc"
+
+// goRef is a Go identifier, optionally from another package.
+// Empty pkg means a local or builtin name (jen.Id).
+type goRef struct {
+	pkg  string
+	name string
+}
+
+func (r goRef) code() *jen.Statement {
+	if r.pkg == "" {
+		return jen.Id(r.name)
+	}
+	return jen.Qual(r.pkg, r.name)
+}
+
+func libc(name string) *jen.Statement {
+	return jen.Qual(libcPath, name)
+}
+
+func newGoFile(packageName string) *jen.File {
+	f := jen.NewFile(packageName)
+	f.ImportName(libcPath, "libc")
+	f.ImportName("sync/atomic", "atomic")
+	f.ImportName("math", "math")
+	f.ImportName("os", "os")
+	f.ImportName("unsafe", "unsafe")
+	return f
+}
+
+func assign(name string, rhs jen.Code) *jen.Statement {
+	return jen.Id(name).Op("=").Add(rhs)
+}
+
+func bin(lhs jen.Code, op string, rhs jen.Code) *jen.Statement {
+	return jen.Add(lhs).Op(op).Add(rhs)
+}
+
+func conv(typ, expr jen.Code) *jen.Statement {
+	return jen.Add(typ).Call(expr)
+}
+
+func ptrTyp(t jen.Code) *jen.Statement {
+	return jen.Op("*").Add(t)
+}
+
+func addrOf(x jen.Code) *jen.Statement {
+	return jen.Op("&").Add(x)
+}
+
+func deref(x jen.Code) *jen.Statement {
+	return jen.Op("*").Add(x)
+}
+
+func unsafePtr(x jen.Code) *jen.Statement {
+	return jen.Qual("unsafe", "Pointer").Call(x)
+}
+
+func uintptrOfPtr(x jen.Code) *jen.Statement {
+	return jen.Uintptr().Call(unsafePtr(x))
+}
+
+func ptrCast(typ, expr jen.Code) *jen.Statement {
+	return jen.Parens(typ).Call(unsafePtr(expr))
+}
+
+func goIntType(bits uint64) *jen.Statement {
+	switch goIntBits(bits) {
+	case 8:
+		return jen.Byte()
+	case 16:
+		return jen.Int16()
+	case 32:
+		return jen.Int32()
+	case 64:
+		return jen.Int64()
+	default:
+		return jen.Id(fmt.Sprintf("int%d", bits))
+	}
+}
+
+func goUintType(bits uint64) *jen.Statement {
+	switch goIntBits(bits) {
+	case 8:
+		return jen.Byte()
+	case 16:
+		return jen.Uint16()
+	case 32:
+		return jen.Uint32()
+	case 64:
+		return jen.Uint64()
+	default:
+		return jen.Id(fmt.Sprintf("uint%d", bits))
+	}
+}
+
+func litUntyped(n int64) *jen.Statement {
+	return jen.Lit(int(n))
+}
+
+type vecBin struct {
+	dest, op string
+	x, y     jen.Code
+}
+
+func vectorBin(v vecBin) *jen.Statement {
+	return jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(v.x)).Block(
+		jen.Id(v.dest).Index(jen.Id("i")).Op("=").Id("v").Op(v.op).Add(v.y).Index(jen.Id("i")),
+	)
+}
+
+func one(s *jen.Statement) []jen.Code {
+	if s == nil {
+		return nil
+	}
+	return []jen.Code{s}
+}
+
+func fieldName(i int) string {
+	return fmt.Sprintf("F%d", i)
+}
+
+func fieldNameU(i uint64) string {
+	return fmt.Sprintf("F%d", i)
+}
+
+// expr is a Go expression. If base != nil, code is &base (so load/store can
+// drop the address-of instead of emitting *&x).
+type expr struct {
+	code *jen.Statement
+	base *jen.Statement
+}
+
+func val(c *jen.Statement) expr {
+	return expr{code: c}
+}
+
+func ident(name string) expr {
+	return expr{code: jen.Id(name)}
+}
+
+func addrExpr(base *jen.Statement) expr {
+	return expr{code: addrOf(base), base: base}
+}
+
+func (e expr) load() *jen.Statement {
+	if e.base != nil {
+		return e.base
+	}
+	return deref(e.code)
+}
+
+func (e expr) store(src jen.Code) *jen.Statement {
+	if e.base != nil {
+		return jen.Add(e.base).Op("=").Add(src)
+	}
+	return deref(e.code).Op("=").Add(src)
+}
+
+func (e expr) dropAddr() *jen.Statement {
+	if e.base != nil {
+		return e.base
+	}
+	return e.code
+}
