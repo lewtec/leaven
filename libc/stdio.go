@@ -63,6 +63,15 @@ func Iswspace(c int32) int32 {
 	return 0
 }
 
+// Iswblank is C iswblank(c) from <wctype.h>.
+func Iswblank(c int32) int32 {
+	r := rune(uint32(c))
+	if r == '\t' || unicode.Is(unicode.Zs, r) {
+		return 1
+	}
+	return 0
+}
+
 // Iswalnum is C iswalnum(c) from <wctype.h>.
 func Iswalnum(c int32) int32 {
 	r := rune(uint32(c))

@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": ["libc.Iswblank"],
+      "not_contains": [" = iswblank("]
+    }
+  ],
+  "run": { "stdout_contains": [] }
+}
