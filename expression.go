@@ -15,7 +15,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
-	if !types.Equal(srcPointerType.ElemType, elemType) {
+	if !srcPointerType.IsOpaque() && !types.Equal(srcPointerType.ElemType, elemType) {
 		return expr{}, errMismatchedSrcElem
 	}
 

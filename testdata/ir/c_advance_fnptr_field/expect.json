@@ -16,8 +16,5 @@
   ],
   "run": {
     "stdout_contains": []
-  },
-  "parse": {
-    "22": false
   }
 }

@@ -517,15 +517,24 @@ func (inst *InstCall) Operands() []*value.Value {
 
 // Sig returns the function signature of the callee.
 func (inst *InstCall) Sig() *types.FuncType {
-	t, ok := inst.Callee.Type().(*types.PointerType)
-	if !ok {
-		panic(fmt.Errorf("invalid callee type; expected *types.PointerType, got %T", inst.Callee.Type()))
+	if t, ok := inst.Callee.Type().(*types.PointerType); ok && !t.IsOpaque() {
+		if sig, ok := t.ElemType.(*types.FuncType); ok {
+			return sig
+		}
 	}
-	sig, ok := t.ElemType.(*types.FuncType)
-	if !ok {
-		panic(fmt.Errorf("invalid callee type; expected *types.FuncType, got %T", t.ElemType))
+	// Opaque callee (LLVM 15+ ptr): use the explicit call type if present.
+	if sig, ok := inst.Typ.(*types.FuncType); ok {
+		return sig
 	}
-	return sig
+	ret := inst.Typ
+	if ret == nil {
+		ret = types.Void
+	}
+	params := make([]types.Type, len(inst.Args))
+	for i, a := range inst.Args {
+		params[i] = a.Type()
+	}
+	return types.NewFunc(ret, params...)
 }
 
 // ~~~ [ va_arg ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

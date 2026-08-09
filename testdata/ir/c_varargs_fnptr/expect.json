@@ -13,8 +13,5 @@
         "func(*L, *byte)"
       ]
     }
-  ],
-  "parse": {
-    "22": false
-  }
+  ]
 }

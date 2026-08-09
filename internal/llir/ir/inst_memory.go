@@ -151,11 +151,11 @@ func (inst *InstLoad) Type() types.Type {
 //
 // Load instruction.
 //
-//    'load' Volatileopt ElemType=Type ',' Src=TypeValue (',' Align)? Metadata=(',' MetadataAttachment)+?
+//	'load' Volatileopt ElemType=Type ',' Src=TypeValue (',' Align)? Metadata=(',' MetadataAttachment)+?
 //
 // Atomic load instruction.
 //
-//    'load' Atomic Volatileopt ElemType=Type ',' Src=TypeValue SyncScopeopt Ordering=AtomicOrdering (',' Align)? Metadata=(',' MetadataAttachment)+?
+//	'load' Atomic Volatileopt ElemType=Type ',' Src=TypeValue SyncScopeopt Ordering=AtomicOrdering (',' Align)? Metadata=(',' MetadataAttachment)+?
 func (inst *InstLoad) LLString() string {
 	buf := &strings.Builder{}
 	fmt.Fprintf(buf, "%s = ", inst.Ident())
@@ -215,13 +215,8 @@ type InstStore struct {
 // NewStore returns a new store instruction based on the given source value and
 // destination address.
 func NewStore(src, dst value.Value) *InstStore {
-	// Type-check operands.
-	dstPtrType, ok := dst.Type().(*types.PointerType)
-	if !ok {
+	if _, ok := dst.Type().(*types.PointerType); !ok {
 		panic(fmt.Errorf("invalid store dst operand type; expected *types.Pointer, got %T", dst.Type()))
-	}
-	if !src.Type().Equal(dstPtrType.ElemType) {
-		panic(fmt.Errorf("store operands are not compatible: src=%v; dst=%v", src.Type(), dst.Type()))
 	}
 	return &InstStore{Src: src, Dst: dst}
 }
@@ -230,11 +225,11 @@ func NewStore(src, dst value.Value) *InstStore {
 //
 // Store instruction.
 //
-//    'store' Volatileopt Src=TypeValue ',' Dst=TypeValue (',' Align)? Metadata=(',' MetadataAttachment)+?
+//	'store' Volatileopt Src=TypeValue ',' Dst=TypeValue (',' Align)? Metadata=(',' MetadataAttachment)+?
 //
 // Atomic store instruction.
 //
-//    'store' Atomic Volatileopt Src=TypeValue ',' Dst=TypeValue SyncScopeopt Ordering=AtomicOrdering (',' Align)? Metadata=(',' MetadataAttachment)+?
+//	'store' Atomic Volatileopt Src=TypeValue ',' Dst=TypeValue SyncScopeopt Ordering=AtomicOrdering (',' Align)? Metadata=(',' MetadataAttachment)+?
 func (inst *InstStore) LLString() string {
 	buf := &strings.Builder{}
 	buf.WriteString("store")
@@ -443,10 +438,14 @@ func (inst *InstAtomicRMW) Type() types.Type {
 	// Cache type if not present.
 	if inst.Typ == nil {
 		t, ok := inst.Dst.Type().(*types.PointerType)
-		if !ok {
+		if ok && !t.IsOpaque() && t.ElemType != nil {
+			inst.Typ = t.ElemType
+		} else if inst.X != nil {
+			// Opaque ptr: result type is the value operand, not the pointee.
+			inst.Typ = inst.X.Type()
+		} else {
 			panic(fmt.Errorf("invalid destination type; expected *types.PointerType, got %T", inst.Dst.Type()))
 		}
-		inst.Typ = t.ElemType
 	}
 	return inst.Typ
 }
@@ -558,7 +557,7 @@ func (inst *InstGetElementPtr) Operands() []*value.Value {
 
 // gepInstType computes the result type of a getelementptr instruction.
 //
-//    getelementptr ElemType, Src, Indices
+//	getelementptr ElemType, Src, Indices
 func gepInstType(elemType, src types.Type, indices []value.Value) types.Type {
 	var idxs []gep.Index
 	for _, index := range indices {

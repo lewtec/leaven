@@ -133,18 +133,18 @@ func Equal(t, u Type) bool {
 //
 // A Type has one of the following underlying types.
 //
-//    *types.VoidType       // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#VoidType
-//    *types.FuncType       // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#FuncType
-//    *types.IntType        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#IntType
-//    *types.FloatType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#FloatType
-//    *types.MMXType        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#MMXType
-//    *types.PointerType    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#PointerType
-//    *types.VectorType     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#VectorType
-//    *types.LabelType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#LabelType
-//    *types.TokenType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#TokenType
-//    *types.MetadataType   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#MetadataType
-//    *types.ArrayType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#ArrayType
-//    *types.StructType     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#StructType
+//	*types.VoidType       // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#VoidType
+//	*types.FuncType       // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#FuncType
+//	*types.IntType        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#IntType
+//	*types.FloatType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#FloatType
+//	*types.MMXType        // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#MMXType
+//	*types.PointerType    // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#PointerType
+//	*types.VectorType     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#VectorType
+//	*types.LabelType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#LabelType
+//	*types.TokenType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#TokenType
+//	*types.MetadataType   // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#MetadataType
+//	*types.ArrayType      // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#ArrayType
+//	*types.StructType     // https://pkg.go.dev/github.com/lewtec/leaven/internal/llir/ir/types#StructType
 type Type interface {
 	fmt.Stringer
 	// LLString returns the LLVM syntax representation of the definition of the
@@ -447,10 +447,17 @@ func (t *MMXType) SetName(name string) {
 type PointerType struct {
 	// Type name; or empty if not present.
 	TypeName string
-	// Element type.
+	// Element type. Ignored when Opaque (LLVM 15+ ptr).
 	ElemType Type
+	// Opaque is a typeless ptr (LLVM 15+).
+	Opaque bool
 	// Address space; or zero value for default address space.
 	AddrSpace AddrSpace
+}
+
+// IsOpaque reports whether t is an opaque ptr (no pointee in the type).
+func (t *PointerType) IsOpaque() bool {
+	return t != nil && (t.Opaque || t.ElemType == nil)
 }
 
 // NewPointer returns a new pointer type based on the given element type.
@@ -460,8 +467,20 @@ func NewPointer(elemType Type) *PointerType {
 	}
 }
 
+// NewOpaquePointer returns an LLVM 15+ typeless ptr, optionally in addrspace.
+func NewOpaquePointer(addrSpace ...AddrSpace) *PointerType {
+	t := &PointerType{Opaque: true}
+	if len(addrSpace) > 0 {
+		t.AddrSpace = addrSpace[0]
+	}
+	return t
+}
+
 // Equal reports whether t and u are of equal type.
 func (t *PointerType) Equal(u Type) bool {
+	if t == nil || u == nil {
+		return t == u
+	}
 	// HACK: to prevent infinite loops (e.g. struct foo containing field of type
 	// pointer to foo).
 	return t.String() == u.String()
@@ -478,8 +497,14 @@ func (t *PointerType) String() string {
 // LLString returns the LLVM syntax representation of the definition of the
 // type.
 //
-// Elem=Type AddrSpaceopt '*'
+// Elem=Type AddrSpaceopt '*'   or   'ptr' AddrSpaceopt
 func (t *PointerType) LLString() string {
+	if t.IsOpaque() {
+		if t.AddrSpace != 0 {
+			return "ptr " + t.AddrSpace.String()
+		}
+		return "ptr"
+	}
 	buf := &strings.Builder{}
 	buf.WriteString(t.ElemType.String())
 	if t.AddrSpace != 0 {
@@ -823,15 +848,15 @@ func (t *StructType) String() string {
 //
 // Opaque struct type.
 //
-//    'opaque'
+//	'opaque'
 //
 // Struct type.
 //
-//    '{' Fields=(Type separator ',')+? '}'
+//	'{' Fields=(Type separator ',')+? '}'
 //
 // Packed struct type.
 //
-//    '<' '{' Fields=(Type separator ',')+? '}' '>'   -> PackedStructType
+//	'<' '{' Fields=(Type separator ',')+? '}' '>'   -> PackedStructType
 func (t *StructType) LLString() string {
 	if t.Opaque {
 		return "opaque"
