@@ -1,0 +1,10 @@
+Vendored LLVM IR library (typed-pointer dialect, LLVM 14 / llir 0.3.5).
+
+Sources:
+  github.com/llir/llvm  v0.3.5-0.20220120022543-ad080cea55b7
+  github.com/llir/ll    v0.0.0-20210719001141-246f2b6b1fa9
+
+Licenses (0BSD / Unlicense): licenses/
+
+ir/ is the shared IR model. v14/ is the LLVM 14 parser (Textmapper + asm).
+A later v22/ parser should write the same ir types.

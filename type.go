@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/dave/jennifer/jen"
-	"github.com/llir/llvm/ir"
-	"github.com/llir/llvm/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
 )
 
 // taggedPointerTypes are LLVM pointer types that appear as the sole field of a

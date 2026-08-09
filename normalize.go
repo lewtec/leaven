@@ -6,7 +6,7 @@ import (
 )
 
 // alignOnAtomic strips ", align N" that clang 13+ emits on atomicrmw / cmpxchg.
-// github.com/llir/ll (2021) parses atomicrmw without the align operand.
+// The vendored v14 parser (llir 0.3.5) parses atomicrmw without the align operand.
 var alignOnAtomic = regexp.MustCompile(`(?i)(atomicrmw\b.*?\b(?:seq_cst|acq_rel|acquire|release|monotonic|unordered))\s*,\s*align\s+\d+`)
 
 // mustprogressAttr is a clang-14 C++ function attr unknown to llir 0.3.5.
