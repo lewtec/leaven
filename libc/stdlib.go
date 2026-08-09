@@ -13,10 +13,10 @@ type allocRec struct {
 }
 
 // allocs is uintptr → *allocRec. Keys are distinct heap addresses, so
-// sync.Map is the right concurrent map (disjoint writes, grow-only).
+// sync.Map is the right concurrent map (disjoint writes). Free deletes.
 var allocs sync.Map
 
-// Retain keeps p reachable for the rest of the process. Returns p for chaining.
+// Retain keeps p reachable until Free. Returns p for chaining.
 func Retain[T any](p *T) *T {
 	if p != nil {
 		allocs.LoadOrStore(uintptr(unsafe.Pointer(p)), &allocRec{p: p})
@@ -79,10 +79,17 @@ func Realloc(p *byte, n int64) *byte {
 	if copyN > 0 {
 		copy(unsafe.Slice(out, copyN), unsafe.Slice(p, copyN))
 	}
-	// Leave p in allocs; C free is a no-op under GC.
+	unpin(unsafe.Pointer(p))
 	return out
 }
 
-// Free is C free(p). Go is GC'd; this is a no-op so call sites typecheck.
-// (Objects stay in allocs; we do not reclaim.)
-func Free(p *byte) {}
+// Free is C free(p). Drops the pin so GC can reclaim the block.
+func Free(p *byte) {
+	if p != nil {
+		unpin(unsafe.Pointer(p))
+	}
+}
+
+func unpin(p unsafe.Pointer) {
+	allocs.Delete(uintptr(p))
+}
