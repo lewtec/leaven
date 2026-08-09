@@ -106,6 +106,10 @@ func litUntyped(n int64) *jen.Statement {
 	return jen.Lit(int(n))
 }
 
+func litUint64(n uint64) *jen.Statement {
+	return jen.Uint64().Call(jen.Op(fmt.Sprintf("%d", n)))
+}
+
 type vecBin struct {
 	dest, op string
 	x, y     jen.Code

@@ -576,7 +576,8 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 			case 32:
 				return jen.Uint32().Call(litUntyped(int64(uint32(n)))), nil
 			default:
-				return jen.Uint64().Call(jen.Lit(int64(n))), nil
+				// Unsigned decimal: uint64(int64(neg)) is a Go constant overflow.
+				return litUint64(n), nil
 			}
 		default:
 			// Low bitSize bits as unsigned.
@@ -603,7 +604,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 			return litUntyped(int64(uint32(n))), nil
 		case 64:
 			// Untyped 18446744073709551615 overflows int64 in Go source.
-			return jen.Uint64().Call(jen.Op(fmt.Sprintf("%d", n))), nil
+			return litUint64(n), nil
 		default:
 			return litUntyped(int64(n)), nil
 		}
