@@ -4,873 +4,874 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
 	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/types"
+	"github.com/llir/llvm/ir/value"
 )
 
-// TranslateInstruction translates an LLVM instruction to Go.
-func TranslateInstruction(inst ir.Instruction) (string, error) {
+func translateOp(v value.Value, what string) (*jen.Statement, error) {
+	s, err := FormatValue(v)
+	if err != nil {
+		return nil, fmt.Errorf("error translating %s (%v): %w", what, v, err)
+	}
+	return s, nil
+}
+
+func translateType(t types.Type, what string) (*jen.Statement, error) {
+	s, err := TypeSpec(t)
+	if err != nil {
+		return nil, fmt.Errorf("error translating %s (%v): %w", what, t, err)
+	}
+	return s, nil
+}
+
+// TranslateInstruction translates an LLVM instruction to one or more Go statements.
+// A nil slice means the instruction is a no-op in Go.
+func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 	switch inst := inst.(type) {
 	case *ir.InstAdd:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		y, err := FormatValue(inst.Y)
+		y, err := translateOp(inst.Y, "right operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return fmt.Sprintf("for i, v := range %s { %s[i] = v + %s[i] }", x, VariableName(inst), y), nil
+			return one(vectorBin(vecBin{dest: name, op: "+", x: x, y: y})), nil
 		}
 		if ciy, ok := inst.Y.(*constant.Int); ok && ciy.X.Sign() == -1 {
-			return fmt.Sprintf("%s = %s %s", VariableName(inst), x, ciy.X), nil // Use the constant's own minus sign.
+			// Use the constant's own minus sign.
+			return one(jen.Id(name).Op("=").Add(x).Op(ciy.X.String())), nil
 		}
-		return fmt.Sprintf("%s = %s + %s", VariableName(inst), x, y), nil
+		return one(assign(name, bin(x, "+", y))), nil
 
 	case *ir.InstAtomicRMW:
-		dst, err := FormatValue(inst.Dst)
+		dst, err := translateOp(inst.Dst, "destination")
 		if err != nil {
-			return "", fmt.Errorf("error translating destination (%v): %w", inst.Dst, err)
+			return nil, err
 		}
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating operand (%v): %w", inst.X, err)
+			return nil, err
 		}
 		name := VariableName(inst)
 		addFn, ok := atomicAddFunc(inst.Type())
 		if !ok {
-			return "", fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
+			return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
 		}
 		switch inst.Op {
 		case enum.AtomicOpAdd:
 			// atomicrmw returns the old value; Add* returns the new value.
-			return fmt.Sprintf("%s = %s(%s, %s) - %s", name, addFn, dst, x, x), nil
+			return one(assign(name, bin(addFn.Call(dst, x), "-", x))), nil
 		case enum.AtomicOpSub:
-			return fmt.Sprintf("%s = %s(%s, -(%s)) + %s", name, addFn, dst, x, x), nil
+			return one(assign(name, bin(addFn.Call(dst, jen.Op("-").Parens(x)), "+", x))), nil
 		case enum.AtomicOpXChg:
 			swapFn, ok := atomicSwapFunc(inst.Type())
 			if !ok {
-				return "", fmt.Errorf("%w: atomicrmw xchg on %v", errUnsupportedInstruction, inst.Type())
+				return nil, fmt.Errorf("%w: atomicrmw xchg on %v", errUnsupportedInstruction, inst.Type())
 			}
-			return fmt.Sprintf("%s = %s(%s, %s)", name, swapFn, dst, x), nil
+			return one(assign(name, swapFn.Call(dst, x))), nil
 		default:
-			return "", fmt.Errorf("%w: atomicrmw %v", errUnsupportedInstruction, inst.Op)
+			return nil, fmt.Errorf("%w: atomicrmw %v", errUnsupportedInstruction, inst.Op)
 		}
 
 	case *ir.InstAlloca:
-		t, err := TypeSpec(inst.ElemType)
+		t, err := translateType(inst.ElemType, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.ElemType, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if inst.NElems == nil {
 			if _, ok := inst.ElemType.(*types.ArrayType); ok {
 				// If it's an array, allocate an extra byte to allow indexing off the end.
-				return fmt.Sprintf("%s = &new(struct{v %s; b byte}).v", VariableName(inst), t), nil
+				return one(assign(name, addrOf(jen.New(jen.Struct(
+					jen.Id("v").Add(t),
+					jen.Id("b").Byte(),
+				)).Dot("v")))), nil
 			}
-			expr := fmt.Sprintf("new(%s)", t)
+			newExpr := jen.New(t)
 			// Alloca of T yields *T; if *T is a tagged union pointer, store as uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return fmt.Sprintf("%s = uintptr(unsafe.Pointer(libc.Retain(%s)))", VariableName(inst), expr), nil
+				return one(assign(name, uintptrOfPtr(libc("Retain").Call(newExpr)))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				// t is "uintptr"; new(uintptr) is *uintptr — slot for a pointer-sized bag of bits.
-				return fmt.Sprintf("%s = new(uintptr)", VariableName(inst)), nil
+				return one(assign(name, jen.New(jen.Uintptr()))), nil
 			}
-			return fmt.Sprintf("%s = %s", VariableName(inst), expr), nil
+			return one(assign(name, newExpr)), nil
 		}
-		nElems, err := FormatValue(inst.NElems)
+		nElems, err := translateOp(inst.NElems, "NElems")
 		if err != nil {
-			return "", fmt.Errorf("error translating NElems (%v): %w", inst.NElems, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = &make([]%s, %s + 1)[0]", VariableName(inst), t, nElems), nil
+		return one(assign(name, addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0))))), nil
 
 	case *ir.InstAnd:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		y, err := FormatValue(inst.Y)
+		y, err := translateOp(inst.Y, "right operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return fmt.Sprintf("for i, v := range %s { %s[i] = v & %s[i] }", x, VariableName(inst), y), nil
+			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return fmt.Sprintf("%s = %s && %s", VariableName(inst), x, y), nil
+			return one(assign(name, bin(x, "&&", y))), nil
 		}
-		return fmt.Sprintf("%s = %s & %s", VariableName(inst), x, y), nil
+		return one(assign(name, bin(x, "&", y))), nil
 
 	case *ir.InstAShr:
 		x, err := FormatSigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
+		name := VariableName(inst)
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
-			return fmt.Sprintf("%s = byte(%s >> %s)", VariableName(inst), x, y), nil
+			return one(assign(name, jen.Byte().Call(bin(x, ">>", y)))), nil
 		}
-		return fmt.Sprintf("%s = %s >> %s", VariableName(inst), x, y), nil
+		return one(assign(name, bin(x, ">>", y))), nil
 
 	case *ir.InstBitCast:
 		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
-			return "", fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
+			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
 		}
-		from, err := FormatValue(inst.From)
+		from, err := translateOp(inst.From, "source")
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, err
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
+		name := VariableName(inst)
 		if isFuncPointerType(inst.To) || isFuncPointerType(inst.From.Type()) {
-			return fmt.Sprintf("%s = func() %s { tmp := %s; return *(*%s)(unsafe.Pointer(&tmp)) }()", VariableName(inst), to, from, to), nil
+			return one(assign(name, fnPtrBitcast(to, from))), nil
 		}
-		// Tagged union pointer (uintptr) ↔ ordinary pointer.
 		if isTaggedPointerType(inst.To) {
-			return fmt.Sprintf("%s = uintptr(unsafe.Pointer(%s))", VariableName(inst), from), nil
+			return one(assign(name, uintptrOfPtr(from))), nil
 		}
-		if isTaggedPointerType(inst.From.Type()) {
-			return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
-		}
-		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", VariableName(inst), to, from), nil
+		return one(assign(name, ptrCast(to, from))), nil
 
 	case *ir.InstCall:
-		callee, err := FormatValue(inst.Callee)
-		if err != nil {
-			return "", fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
-		}
-		args := make([]string, len(inst.Args))
-		for i, a := range inst.Args {
-			v, err := FormatValue(a)
-			if err != nil {
-				return "", fmt.Errorf("error translating argument %d (%v): %w", i, a, err)
-			}
-			args[i] = v
-		}
-		if renamed, ok := libraryFunctions[callee]; ok {
-			callee = renamed
-		}
-		switch callee {
-		case "calloc", "malloc":
-			if pt, ok := inst.Typ.(*types.PointerType); ok {
-				if et, err := TypeSpec(pt.ElemType); err == nil {
-					callee = fmt.Sprintf("libc.%s[%s]", strings.Title(callee), et)
-				}
-			}
-		case "leaven_va_start":
-			if len(args) == 1 {
-				return fmt.Sprintf("*%s = (*byte)(unsafe.Pointer(&varargs))", args[0]), nil
-			}
-		case "llvm_va_start":
-			// System stdarg: va_list is __va_list_tag; store &varargs in
-			// overflow_arg_area (pointer field at offset 8 on amd64).
-			if len(args) == 1 {
-				return fmt.Sprintf("*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(%s), 8)) = unsafe.Pointer(&varargs)", args[0]), nil
-			}
-		case "llvm_va_end":
-			return ";", nil
-		case "vsnprintf":
-			// ap is *__va_list_tag; libc.Vsnprintf takes *byte.
-			if len(args) == 4 {
-				return fmt.Sprintf("%s = libc.Vsnprintf(%s, %s, %s, (*byte)(unsafe.Pointer(%s)))", VariableName(inst), args[0], args[1], args[2], args[3]), nil
-			}
-		case "ldexp":
-			if len(args) == 2 {
-				return fmt.Sprintf("%s = math.Ldexp(%s, int(%s))", VariableName(inst), args[0], args[1]), nil
-			}
-		case "llvm_fabs_f32":
-			if len(args) == 1 {
-				return fmt.Sprintf("%s = float32(math.Abs(float64(%s)))", VariableName(inst), args[0]), nil
-			}
-		case "llvm_fmuladd_f64":
-			if len(args) == 3 {
-				return fmt.Sprintf("%s = %s*%s + %s", VariableName(inst), args[0], args[1], args[2]), nil
-			}
-		case "llvm_fmuladd_f32":
-			if len(args) == 3 {
-				return fmt.Sprintf("%s = %s*%s + %s", VariableName(inst), args[0], args[1], args[2]), nil
-			}
-		case "llvm_lifetime_start", "llvm_lifetime_end":
-			return ";", nil
-		case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64":
-			// Intrinsic last arg is isvolatile; ignore it.
-			return fmt.Sprintf("libc.Memmove(%s, %s, %s)", args[0], args[1], args[2]), nil
-		case "llvm_memset_p0i8_i64":
-			return fmt.Sprintf("libc.Memset(%s, %s, %s)", args[0], args[1], args[2]), nil
-		case "llvm_objectsize_i64_p0i8":
-			// Use -1 for unknown size.
-			return fmt.Sprintf("%s = -1", VariableName(inst)), nil
-		case "llvm_stacksave":
-			// Use nil, since we're doing llvm_stackrestore as a no-op.
-			return fmt.Sprintf("%s = nil", VariableName(inst)), nil
-		case "llvm_stackrestore":
-			return ";", nil
-		}
-		if types.Equal(inst.Type(), types.Void) {
-			return fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", ")), nil
-		}
-		callExpr := fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", "))
-		// libc malloc/calloc return real *T; convert to uintptr for tagged-union ABI.
-		// Do not wrap calls that already return uintptr (other leaven funcs).
-		if isTaggedPointerType(inst.Type()) && (strings.HasPrefix(callee, "libc.Malloc") || strings.HasPrefix(callee, "libc.Calloc") || strings.HasPrefix(callee, "libc.Realloc")) {
-			callExpr = fmt.Sprintf("uintptr(unsafe.Pointer(%s))", callExpr)
-		}
-		return fmt.Sprintf("%s = %s", VariableName(inst), callExpr), nil
+		return translateCall(inst)
 
 	case *ir.InstExtractElement:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "vector")
 		if err != nil {
-			return "", fmt.Errorf("error translating vector (%v): %w", inst.X, err)
+			return nil, err
 		}
-		index, err := FormatValue(inst.Index)
+		index, err := translateOp(inst.Index, "index")
 		if err != nil {
-			return "", fmt.Errorf("error translating index (%v): %w", inst.Index, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s[%s]", VariableName(inst), x, index), nil
+		return one(assign(VariableName(inst), jen.Add(x).Index(index))), nil
 
 	case *ir.InstExtractValue:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "aggregate")
 		if err != nil {
-			return "", fmt.Errorf("error translating aggregate (%v): %w", inst.X, err)
+			return nil, err
 		}
 		expr, err := formatAggregateIndex(x, inst.X.Type(), inst.Indices)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s", VariableName(inst), expr), nil
+		return one(assign(VariableName(inst), expr)), nil
 
 	case *ir.InstInsertValue:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "aggregate")
 		if err != nil {
-			return "", fmt.Errorf("error translating aggregate (%v): %w", inst.X, err)
+			return nil, err
 		}
-		elem, err := FormatValue(inst.Elem)
+		elem, err := translateOp(inst.Elem, "element")
 		if err != nil {
-			return "", fmt.Errorf("error translating element (%v): %w", inst.Elem, err)
+			return nil, err
 		}
-		dest, err := formatAggregateIndex(VariableName(inst), inst.Typ, inst.Indices)
+		dest, err := formatAggregateIndex(jen.Id(VariableName(inst)), inst.Typ, inst.Indices)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		// Copy aggregate then assign the field/element.
-		return fmt.Sprintf("%s = %s; %s = %s", VariableName(inst), x, dest, elem), nil
+		return []jen.Code{
+			assign(VariableName(inst), x),
+			jen.Add(dest).Op("=").Add(elem),
+		}, nil
 
 	case *ir.InstFAdd:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s + %s", VariableName(inst), x, y), nil
+		return translateBinAssign(inst, llvmBin{op: "+", x: inst.X, y: inst.Y})
 
 	case *ir.InstFCmp:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		y, err := FormatValue(inst.Y)
+		y, err := translateOp(inst.Y, "right operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, err
 		}
-
-		var op string
+		name := VariableName(inst)
 		switch inst.Pred {
 		case enum.FPredOEQ:
-			op = "=="
+			return one(assign(name, bin(x, "==", y))), nil
 		case enum.FPredOGE:
-			op = ">="
+			return one(assign(name, bin(x, ">=", y))), nil
 		case enum.FPredOGT:
-			op = ">"
+			return one(assign(name, bin(x, ">", y))), nil
 		case enum.FPredOLE:
-			op = "<="
+			return one(assign(name, bin(x, "<=", y))), nil
 		case enum.FPredOLT:
-			op = "<"
+			return one(assign(name, bin(x, "<", y))), nil
 		case enum.FPredUNE:
-			op = "!="
+			return one(assign(name, bin(x, "!=", y))), nil
 		case enum.FPredORD:
-			return fmt.Sprintf("%s = %s == %s && %s == %s", VariableName(inst), x, x, y, y), nil
+			return one(assign(name, bin(bin(x, "==", x), "&&", bin(y, "==", y)))), nil
 		case enum.FPredUNO:
-			return fmt.Sprintf("%s = %s != %s || %s != %s", VariableName(inst), x, x, y, y), nil
+			return one(assign(name, bin(bin(x, "!=", x), "||", bin(y, "!=", y)))), nil
 		case enum.FPredUEQ:
-			return fmt.Sprintf("%s = %s != %s || %s != %s || %s == %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "==", y)))), nil
 		case enum.FPredUGT:
-			return fmt.Sprintf("%s = %s != %s || %s != %s || %s > %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, ">", y)))), nil
 		case enum.FPredUGE:
-			return fmt.Sprintf("%s = %s != %s || %s != %s || %s >= %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, ">=", y)))), nil
 		case enum.FPredULT:
-			return fmt.Sprintf("%s = %s != %s || %s != %s || %s < %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "<", y)))), nil
 		case enum.FPredULE:
-			return fmt.Sprintf("%s = %s != %s || %s != %s || %s <= %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "<=", y)))), nil
 		case enum.FPredONE:
-			return fmt.Sprintf("%s = %s == %s && %s == %s && %s != %s", VariableName(inst), x, x, y, y, x, y), nil
+			return one(assign(name, bin(bin(bin(x, "==", x), "&&", bin(y, "==", y)), "&&", bin(x, "!=", y)))), nil
 		default:
-			return "", fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
+			return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
 		}
-
-		return fmt.Sprintf("%s = %s %s %s", VariableName(inst), x, op, y), nil
 
 	case *ir.InstFDiv:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
+		return translateBinAssign(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
 
 	case *ir.InstFMul:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s * %s", VariableName(inst), x, y), nil
+		return translateBinAssign(inst, llvmBin{op: "*", x: inst.X, y: inst.Y})
 
 	case *ir.InstFNeg:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = - %s", VariableName(inst), x), nil
+		return one(assign(VariableName(inst), jen.Op("-").Add(x))), nil
 
-	case *ir.InstFPExt:
-		from, err := FormatValue(inst.From)
-		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
-		}
-		to, err := TypeSpec(inst.To)
-		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
-		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
+	case *ir.InstFPExt, *ir.InstFPTrunc:
+		return translateConvInst(inst)
 
 	case *ir.InstFPToSI:
-		from, err := FormatValue(inst.From)
+		from, err := translateOp(inst.From, "source")
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, err
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		if to == "byte" {
-			return fmt.Sprintf("%s = byte(int8(%s))", VariableName(inst), from), nil
+		name := VariableName(inst)
+		if it, ok := inst.To.(*types.IntType); ok && it.BitSize <= 8 && it.BitSize > 1 {
+			return one(assign(name, jen.Byte().Call(jen.Int8().Call(from)))), nil
 		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
-
-	case *ir.InstFPTrunc:
-		from, err := FormatValue(inst.From)
-		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
-		}
-		to, err := TypeSpec(inst.To)
-		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
-		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
+		return one(assign(name, conv(to, from))), nil
 
 	case *ir.InstFSub:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s - %s", VariableName(inst), x, y), nil
+		return translateBinAssign(inst, llvmBin{op: "-", x: inst.X, y: inst.Y})
 
 	case *ir.InstGetElementPtr:
 		result, err := GetElementPtr(inst.ElemType, inst.Src, inst.Indices)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s", VariableName(inst), result), nil
+		return one(assign(VariableName(inst), result.code)), nil
 
 	case *ir.InstICmp:
 		cmp, err := formatICmp(inst.Pred, inst.X, inst.Y)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s", VariableName(inst), cmp), nil
+		return one(assign(VariableName(inst), cmp)), nil
 
 	case *ir.InstInsertElement:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "initial vector")
 		if err != nil {
-			return "", fmt.Errorf("error translating initial vector (%v): %w", inst.X, err)
+			return nil, err
 		}
-		elem, err := FormatValue(inst.Elem)
+		elem, err := translateOp(inst.Elem, "new element")
 		if err != nil {
-			return "", fmt.Errorf("error translating new element (%v): %w", inst.Elem, err)
+			return nil, err
 		}
-		index, err := FormatValue(inst.Index)
+		index, err := translateOp(inst.Index, "index")
 		if err != nil {
-			return "", fmt.Errorf("error translating index (%v): %w", inst.Index, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if _, ok := inst.X.(*constant.Undef); ok {
-			return fmt.Sprintf("%s[%s] = %s", VariableName(inst), index, elem), nil
+			return one(jen.Id(name).Index(index).Op("=").Add(elem)), nil
 		}
-		return fmt.Sprintf("%s = %s; %s[%s] = %s", VariableName(inst), x, VariableName(inst), index, elem), nil
+		return []jen.Code{
+			assign(name, x),
+			jen.Id(name).Index(index).Op("=").Add(elem),
+		}, nil
 
 	case *ir.InstIntToPtr:
-		// Needed for tagged pointers (e.g. tree-sitter heap/subtree bits).
-		// Go allows uintptr ↔ unsafe.Pointer conversion for this pattern.
-		from, err := FormatValue(inst.From)
+		from, err := translateOp(inst.From, "source")
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, err
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = (%s)(unsafe.Pointer(uintptr(%s)))", VariableName(inst), to, from), nil
+		return one(assign(VariableName(inst), jen.Parens(to).Call(unsafePtr(jen.Uintptr().Call(from))))), nil
 
 	case *ir.InstLoad:
-		src, err := FormatValue(inst.Src)
+		src, err := formatExpr(inst.Src)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.Src, err)
+			return nil, fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
-		if strings.HasPrefix(src, "&") {
-			return fmt.Sprintf("%s = %s", VariableName(inst), strings.TrimPrefix(src, "&")), nil
-		}
-		return fmt.Sprintf("%s = *%s", VariableName(inst), src), nil
+		return one(assign(VariableName(inst), src.load())), nil
 
 	case *ir.InstLShr:
 		x, err := FormatUnsigned(inst.X)
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s >> %s)", VariableName(inst), goIntBits(t.BitSize), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s >> %s", VariableName(inst), x, y), nil
-
-	case *ir.InstMul:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s * %s", VariableName(inst), x, y), nil
-
-	case *ir.InstOr:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return fmt.Sprintf("for i, v := range %s { %s[i] = v | %s[i] }", x, VariableName(inst), y), nil
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return fmt.Sprintf("%s = %s || %s", VariableName(inst), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s | %s", VariableName(inst), x, y), nil
-
-	case *ir.InstPtrToInt:
-		from, err := FormatValue(inst.From)
-		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
-		}
-		to, err := TypeSpec(inst.To)
-		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
-		}
-		return fmt.Sprintf("%s = %s(uintptr(unsafe.Pointer(%s)))", VariableName(inst), to, from), nil
-
-	case *ir.InstSDiv:
-		x, err := FormatSigned(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatSigned(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
-			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
-
-	case *ir.InstUDiv:
-		x, err := FormatUnsigned(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatUnsigned(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
-			return fmt.Sprintf("%s = byte(%s / %s)", VariableName(inst), x, y), nil
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s / %s)", VariableName(inst), goIntBits(intType.BitSize), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s / %s", VariableName(inst), x, y), nil
-
-	case *ir.InstSelect:
-		cond, err := FormatValue(inst.Cond)
-		if err != nil {
-			return "", fmt.Errorf("error translating condition (%v): %w", inst.Cond, err)
-		}
-		valueTrue, err := FormatValue(inst.ValueTrue)
-		if err != nil {
-			return "", fmt.Errorf("error translating first operand (%v): %w", inst.ValueTrue, err)
-		}
-		valueFalse, err := FormatValue(inst.ValueFalse)
-		if err != nil {
-			return "", fmt.Errorf("error translating second operand (%v): %w", inst.ValueFalse, err)
+			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		name := VariableName(inst)
-		return fmt.Sprintf("if %s { %s = %s } else { %s = %s }", cond, name, valueTrue, name, valueFalse), nil
+		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
+			return one(assign(name, conv(goIntType(t.BitSize), bin(x, ">>", y)))), nil
+		}
+		return one(assign(name, bin(x, ">>", y))), nil
+
+	case *ir.InstMul:
+		return translateBinAssign(inst, llvmBin{op: "*", x: inst.X, y: inst.Y})
+
+	case *ir.InstOr:
+		x, err := translateOp(inst.X, "left operand")
+		if err != nil {
+			return nil, err
+		}
+		y, err := translateOp(inst.Y, "right operand")
+		if err != nil {
+			return nil, err
+		}
+		name := VariableName(inst)
+		if _, ok := inst.Typ.(*types.VectorType); ok {
+			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
+		}
+		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
+			return one(assign(name, bin(x, "||", y))), nil
+		}
+		return one(assign(name, bin(x, "|", y))), nil
+
+	case *ir.InstPtrToInt:
+		from, err := translateOp(inst.From, "source")
+		if err != nil {
+			return nil, err
+		}
+		to, err := translateType(inst.To, "type")
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), conv(to, uintptrOfPtr(from)))), nil
+
+	case *ir.InstSDiv:
+		return translateSignedDivRem(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
+
+	case *ir.InstUDiv:
+		return translateUnsignedDivRem(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
+
+	case *ir.InstSelect:
+		cond, err := translateOp(inst.Cond, "condition")
+		if err != nil {
+			return nil, err
+		}
+		valueTrue, err := translateOp(inst.ValueTrue, "first operand")
+		if err != nil {
+			return nil, err
+		}
+		valueFalse, err := translateOp(inst.ValueFalse, "second operand")
+		if err != nil {
+			return nil, err
+		}
+		name := VariableName(inst)
+		return one(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
 
 	case *ir.InstSExt:
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
-			return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
+			return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
 		}
 		from, err := FormatSigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
-		return fmt.Sprintf("%s = int%d(%s)", VariableName(inst), goIntBits(toType.BitSize), from), nil
+		return one(assign(VariableName(inst), conv(goIntType(toType.BitSize), from))), nil
 
 	case *ir.InstShl:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
-		return fmt.Sprintf("%s = %s << %s", VariableName(inst), x, y), nil
+		return one(assign(VariableName(inst), bin(x, "<<", y))), nil
 
 	case *ir.InstShuffleVector:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		y, err := FormatValue(inst.Y)
+		y, err := translateOp(inst.Y, "right operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, err
 		}
-		mask, err := FormatValue(inst.Mask)
+		mask, err := translateOp(inst.Mask, "mask")
 		if err != nil {
-			return "", fmt.Errorf("error translating mask (%v): %w", inst.Mask, err)
+			return nil, err
 		}
-		length := inst.Typ.Len
-		return fmt.Sprintf("for i, m := range %s { if m < %d { %s[i] = %s[m] } else { %s[i] = %s[m - %d] } }", mask, length, VariableName(inst), x, VariableName(inst), y, length), nil
+		length := int64(inst.Typ.Len)
+		name := VariableName(inst)
+		return one(jen.For(jen.List(jen.Id("i"), jen.Id("m")).Op(":=").Range().Add(mask)).Block(
+			jen.If(jen.Id("m").Op("<").Lit(int(length))).Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(x).Index(jen.Id("m")),
+			).Else().Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(y).Index(jen.Id("m").Op("-").Lit(int(length))),
+			),
+		)), nil
 
 	case *ir.InstSIToFP:
 		from, err := FormatSigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
+		return one(assign(VariableName(inst), conv(to, from))), nil
 
 	case *ir.InstSRem:
-		x, err := FormatSigned(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatSigned(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
-			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s %% %s", VariableName(inst), x, y), nil
+		return translateSignedDivRem(inst, llvmBin{op: "%", x: inst.X, y: inst.Y})
 
 	case *ir.InstURem:
-		x, err := FormatUnsigned(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatUnsigned(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 8 {
-			return fmt.Sprintf("%s = byte(%s %% %s)", VariableName(inst), x, y), nil
-		}
-		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize > 8 {
-			return fmt.Sprintf("%s = int%d(%s %% %s)", VariableName(inst), goIntBits(intType.BitSize), x, y), nil
-		}
-		return fmt.Sprintf("%s = %s %% %s", VariableName(inst), x, y), nil
+		return translateUnsignedDivRem(inst, llvmBin{op: "%", x: inst.X, y: inst.Y})
 
 	case *ir.InstStore:
-		dest, err := FormatValue(inst.Dst)
+		dest, err := formatExpr(inst.Dst)
 		if err != nil {
-			return "", fmt.Errorf("error translating destination (%v): %w", inst.Dst, err)
+			return nil, fmt.Errorf("error translating destination (%v): %w", inst.Dst, err)
 		}
-		src, err := FormatValue(inst.Src)
+		src, err := translateOp(inst.Src, "source")
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.Src, err)
+			return nil, err
 		}
-		if strings.HasPrefix(dest, "&") {
-			return fmt.Sprintf("%s = %s", strings.TrimPrefix(dest, "&"), src), nil
-		}
-		return fmt.Sprintf("*%s = %s", dest, src), nil
+		return one(dest.store(src)), nil
 
 	case *ir.InstSub:
-		x, err := FormatValue(inst.X)
-		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
-		}
-		y, err := FormatValue(inst.Y)
-		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
-		}
-		return fmt.Sprintf("%s = %s - %s", VariableName(inst), x, y), nil
+		return translateBinAssign(inst, llvmBin{op: "-", x: inst.X, y: inst.Y})
 
 	case *ir.InstTrunc:
 		if vt, ok := inst.To.(*types.VectorType); ok {
 			toType, ok := vt.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
 			}
-			to, err := TypeSpec(toType)
+			to, err := translateType(toType, "To type")
 			if err != nil {
-				return "", fmt.Errorf("error translating To type (%v): %w", toType, err)
+				return nil, err
 			}
-			from, err := FormatValue(inst.From)
+			from, err := translateOp(inst.From, "source")
 			if err != nil {
-				return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+				return nil, err
 			}
-			return fmt.Sprintf("for i, v := range %s { %s[i] = %s(v) }", from, VariableName(inst), to), nil
+			name := VariableName(inst)
+			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(to).Call(jen.Id("v")),
+			)), nil
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "To type")
 		if err != nil {
-			return "", fmt.Errorf("error translating To type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		from, err := FormatValue(inst.From)
+		from, err := translateOp(inst.From, "source")
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize == 1 {
-			// trunc … to i1 → bool (not byte(x & 1))
-			return fmt.Sprintf("%s = (%s & 1) != 0", VariableName(inst), from), nil
+			return one(assign(name, jen.Parens(bin(from, "&", jen.Lit(1))).Op("!=").Lit(0))), nil
 		}
 		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize < 8 {
-			return fmt.Sprintf("%s = byte(%s & %d)", VariableName(inst), from, 255>>(8-intType.BitSize)), nil
+			return one(assign(name, jen.Byte().Call(bin(from, "&", litUntyped(int64(255>>(8-intType.BitSize))))))), nil
 		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
+		return one(assign(name, conv(to, from))), nil
 
 	case *ir.InstUIToFP:
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
-		to, err := TypeSpec(inst.To)
+		to, err := translateType(inst.To, "type")
 		if err != nil {
-			return "", fmt.Errorf("error translating type (%v): %w", inst.To, err)
+			return nil, err
 		}
-		return fmt.Sprintf("%s = %s(%s)", VariableName(inst), to, from), nil
+		return one(assign(VariableName(inst), conv(to, from))), nil
 
 	case *ir.InstXor:
-		x, err := FormatValue(inst.X)
+		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
+			return nil, err
 		}
-		y, err := FormatValue(inst.Y)
+		y, err := translateOp(inst.Y, "right operand")
 		if err != nil {
-			return "", fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+			return nil, err
 		}
+		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return fmt.Sprintf("for i, v := range %s { %s[i] = v ^ %s[i] }", x, VariableName(inst), y), nil
+			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return fmt.Sprintf("%s = %s != %s", VariableName(inst), x, y), nil
+			return one(assign(name, bin(x, "!=", y))), nil
 		}
-		return fmt.Sprintf("%s = %s ^ %s", VariableName(inst), x, y), nil
+		return one(assign(name, bin(x, "^", y))), nil
 
 	case *ir.InstZExt:
 		if vt, ok := inst.To.(*types.VectorType); ok {
 			toType, ok := vt.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
 			}
 			ft, ok := inst.From.Type().(*types.VectorType)
 			if !ok {
-				return "", fmt.Errorf("%w: %v and %v", errMismatchedZextTypes, inst.To, inst.From.Type())
+				return nil, fmt.Errorf("%w: %v and %v", errMismatchedZextTypes, inst.To, inst.From.Type())
 			}
 			fromType, ok := ft.ElemType.(*types.IntType)
 			if !ok {
-				return "", fmt.Errorf("%w: %v", errUnsupportedZextFrom, inst.From.Type())
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextFrom, inst.From.Type())
 			}
-			from, err := FormatValue(inst.From)
+			from, err := translateOp(inst.From, "source")
 			if err != nil {
-				return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+				return nil, err
 			}
+			name := VariableName(inst)
 			tw, fw := goIntBits(toType.BitSize), goIntBits(fromType.BitSize)
-			return fmt.Sprintf("for i, v := range %s { %s[i] = int%d(uint%d(uint%d(v))) }", from, VariableName(inst), tw, tw, fw), nil
+			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(tw)).Call(
+					goUintType(tw).Call(goUintType(fw).Call(jen.Id("v"))),
+				),
+			)), nil
 		}
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
-			return "", fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
+			return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
 		}
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
-			return "", fmt.Errorf("error translating source (%v): %w", inst.From, err)
+			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
+		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			return fmt.Sprintf("if %s { %s = 1 } else { %s = 0 }", from, VariableName(inst), VariableName(inst)), nil
+			return one(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
 		w := goIntBits(toType.BitSize)
-		return fmt.Sprintf("%s = int%d(uint%d(%s))", VariableName(inst), w, w, from), nil
+		return one(assign(name, conv(goIntType(w), conv(goUintType(w), from)))), nil
 
 	default:
-		return "", fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
+		return nil, fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
 	}
 }
 
-// atomicAddFunc returns sync/atomic Add* for the LLVM integer type.
-func atomicAddFunc(t types.Type) (string, bool) {
+type llvmBin struct {
+	op   string
+	x, y value.Value
+}
+
+func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	xv, err := translateOp(b.x, "left operand")
+	if err != nil {
+		return nil, err
+	}
+	yv, err := translateOp(b.y, "right operand")
+	if err != nil {
+		return nil, err
+	}
+	return one(assign(VariableName(inst), bin(xv, b.op, yv))), nil
+}
+
+func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
+	var fromV value.Value
+	var toT types.Type
+	var named value.Named
+	switch inst := inst.(type) {
+	case *ir.InstFPExt:
+		fromV, toT, named = inst.From, inst.To, inst
+	case *ir.InstFPTrunc:
+		fromV, toT, named = inst.From, inst.To, inst
+	default:
+		return nil, fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
+	}
+	from, err := translateOp(fromV, "source")
+	if err != nil {
+		return nil, err
+	}
+	to, err := translateType(toT, "type")
+	if err != nil {
+		return nil, err
+	}
+	return one(assign(VariableName(named), conv(to, from))), nil
+}
+
+func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	xv, err := FormatSigned(b.x)
+	if err != nil {
+		return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
+	}
+	yv, err := FormatSigned(b.y)
+	if err != nil {
+		return nil, fmt.Errorf("error translating right operand (%v): %w", b.y, err)
+	}
+	name := VariableName(inst)
+	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize == 8 {
+		return one(assign(name, jen.Byte().Call(bin(xv, b.op, yv)))), nil
+	}
+	return one(assign(name, bin(xv, b.op, yv))), nil
+}
+
+func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	xv, err := FormatUnsigned(b.x)
+	if err != nil {
+		return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
+	}
+	yv, err := FormatUnsigned(b.y)
+	if err != nil {
+		return nil, fmt.Errorf("error translating right operand (%v): %w", b.y, err)
+	}
+	name := VariableName(inst)
+	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize == 8 {
+		return one(assign(name, jen.Byte().Call(bin(xv, b.op, yv)))), nil
+	}
+	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize > 8 {
+		return one(assign(name, conv(goIntType(intType.BitSize), bin(xv, b.op, yv)))), nil
+	}
+	return one(assign(name, bin(xv, b.op, yv))), nil
+}
+
+func calleeLLVMName(v value.Value) string {
+	if n, ok := v.(value.Named); ok {
+		return VariableName(n)
+	}
+	return ""
+}
+
+func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
+	llvmName := calleeLLVMName(inst.Callee)
+	args := make([]jen.Code, len(inst.Args))
+	for i, a := range inst.Args {
+		v, err := FormatValue(a)
+		if err != nil {
+			return nil, fmt.Errorf("error translating argument %d (%v): %w", i, a, err)
+		}
+		args[i] = v
+	}
+
+	var callee *jen.Statement
+	switch llvmName {
+	case "calloc", "malloc":
+		callee = jen.Id(llvmName)
+		if pt, ok := inst.Typ.(*types.PointerType); ok {
+			if et, err := TypeSpec(pt.ElemType); err == nil {
+				callee = libc(strings.Title(llvmName)).Types(et)
+			}
+		}
+	case "leaven_va_start":
+		if len(args) == 1 {
+			return one(deref(args[0]).Op("=").Add(ptrCast(ptrTyp(jen.Byte()), addrOf(jen.Id("varargs"))))), nil
+		}
+	case "llvm_va_start":
+		if len(args) == 1 {
+			return one(deref(jen.Parens(ptrTyp(jen.Qual("unsafe", "Pointer")))).Call(
+				jen.Qual("unsafe", "Add").Call(unsafePtr(args[0]), jen.Lit(8)),
+			).Op("=").Add(unsafePtr(addrOf(jen.Id("varargs"))))), nil
+		}
+	case "llvm_va_end", "llvm_lifetime_start", "llvm_lifetime_end", "llvm_stackrestore":
+		return nil, nil
+	case "vsnprintf":
+		if len(args) == 4 {
+			return one(assign(VariableName(inst), libc("Vsnprintf").Call(
+				args[0], args[1], args[2],
+				ptrCast(ptrTyp(jen.Byte()), args[3]),
+			))), nil
+		}
+	case "ldexp":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), jen.Qual("math", "Ldexp").Call(args[0], jen.Int().Call(args[1])))), nil
+		}
+	case "llvm_fabs_f32":
+		if len(args) == 1 {
+			return one(assign(VariableName(inst), jen.Float32().Call(jen.Qual("math", "Abs").Call(jen.Float64().Call(args[0]))))), nil
+		}
+	case "llvm_fmuladd_f64", "llvm_fmuladd_f32":
+		if len(args) == 3 {
+			return one(assign(VariableName(inst), bin(bin(args[0], "*", args[1]), "+", args[2]))), nil
+		}
+	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64":
+		return one(libc("Memmove").Call(args[0], args[1], args[2])), nil
+	case "llvm_memset_p0i8_i64":
+		return one(libc("Memset").Call(args[0], args[1], args[2])), nil
+	case "llvm_objectsize_i64_p0i8":
+		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
+	case "llvm_stacksave":
+		return one(assign(VariableName(inst), jen.Nil())), nil
+	}
+
+	if callee == nil {
+		if ref, ok := libraryFunctions[llvmName]; ok {
+			callee = ref.code()
+		} else {
+			var err error
+			callee, err = FormatValue(inst.Callee)
+			if err != nil {
+				return nil, fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
+			}
+		}
+	}
+
+	callExpr := jen.Add(callee).Call(args...)
+	if types.Equal(inst.Type(), types.Void) {
+		return one(callExpr), nil
+	}
+	if isTaggedPointerType(inst.Type()) && (llvmName == "malloc" || llvmName == "calloc" || llvmName == "realloc") {
+		callExpr = uintptrOfPtr(callExpr)
+	}
+	return one(assign(VariableName(inst), callExpr)), nil
+}
+
+func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 	it, ok := t.(*types.IntType)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	switch goIntBits(it.BitSize) {
 	case 32:
-		return "atomic.AddInt32", true
+		return jen.Qual("sync/atomic", "AddInt32"), true
 	case 64:
-		return "atomic.AddInt64", true
+		return jen.Qual("sync/atomic", "AddInt64"), true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
-// atomicSwapFunc returns sync/atomic Swap* for the LLVM integer type.
-func atomicSwapFunc(t types.Type) (string, bool) {
+func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 	it, ok := t.(*types.IntType)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	switch goIntBits(it.BitSize) {
 	case 32:
-		return "atomic.SwapInt32", true
+		return jen.Qual("sync/atomic", "SwapInt32"), true
 	case 64:
-		return "atomic.SwapInt64", true
+		return jen.Qual("sync/atomic", "SwapInt64"), true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
-// formatAggregateIndex builds a Go selector/index chain for extractvalue/insertvalue.
-// Struct fields are F0, F1, … (see TypeDefinition); arrays use [i].
-func formatAggregateIndex(base string, t types.Type, indices []uint64) (string, error) {
-	expr := base
+func formatAggregateIndex(base *jen.Statement, t types.Type, indices []uint64) (*jen.Statement, error) {
+	curCode := base
 	cur := t
 	for _, idx := range indices {
 		switch ct := cur.(type) {
 		case *types.StructType:
 			if int(idx) >= len(ct.Fields) {
-				return "", fmt.Errorf("%w: index %d (len %d)", errStructIndexRange, idx, len(ct.Fields))
+				return nil, fmt.Errorf("%w: index %d (len %d)", errStructIndexRange, idx, len(ct.Fields))
 			}
-			expr = fmt.Sprintf("%s.F%d", expr, idx)
+			curCode = jen.Add(curCode).Dot(fieldNameU(idx))
 			cur = ct.Fields[idx]
 		case *types.ArrayType:
-			expr = fmt.Sprintf("%s[%d]", expr, idx)
+			curCode = jen.Add(curCode).Index(litUntyped(int64(idx)))
 			cur = ct.ElemType
 		case *types.VectorType:
-			expr = fmt.Sprintf("%s[%d]", expr, idx)
+			curCode = jen.Add(curCode).Index(litUntyped(int64(idx)))
 			cur = ct.ElemType
 		default:
-			return "", fmt.Errorf("%w: %T", errUnsupportedAggregate, cur)
+			return nil, fmt.Errorf("%w: %T", errUnsupportedAggregate, cur)
 		}
 	}
-	return expr, nil
+	return curCode, nil
 }
 
-var libraryFunctions = map[string]string{
-	"abort":            "libc.Abort",
-	"__assert_fail":    "libc.AssertFail",
-	"fabs":             "math.Abs",
-	"__ctype_b_loc":    "libc.CtypeBLoc",
-	"dup":              "libc.Dup",
-	"fclose":           "libc.Fclose",
-	"fdopen":           "libc.Fdopen",
-	"fprintf":          "libc.Fprintf",
-	"fputc":            "libc.Fputc",
-	"fputs":            "libc.Fputs",
-	"free":             "libc.Free",
-	"getchar":          "libc.Getchar",
-	"exit":             "libc.Exit",
-	"iswalnum":         "libc.Iswalnum",
-	"iswalpha":         "libc.Iswalpha",
-	"iswblank":         "libc.Iswblank",
-	"iswcntrl":         "libc.Iswcntrl",
-	"iswdigit":         "libc.Iswdigit",
-	"iswlower":         "libc.Iswlower",
-	"iswspace":         "libc.Iswspace",
-	"iswupper":         "libc.Iswupper",
-	"iswxdigit":        "libc.Iswxdigit",
-	"leaven_va_arg":    "libc.VAArg",
-	"towlower":         "libc.Towlower",
-	"towupper":         "libc.Towupper",
-	"llvm_fabs_f64":    "math.Abs",
-	"llvm_fabs_f80":    "math.Abs",
-	"llvm_pow_f64":     "math.Pow",
-	"memchr":           "libc.Memchr",
-	"memcmp":           "libc.Memcmp",
-	"__memcpy_chk":     "libc.MemcpyChk",
-	"memmove":          "libc.Memmove",
-	"memset_pattern16": "libc.MemsetPattern16",
-	"__memset_chk":     "libc.MemsetChk",
-	"printf":           "libc.Printf",
-	"putc":             "libc.Putc",
-	"putchar":          "libc.Putchar",
-	"puts":             "libc.Puts",
-	"realloc":          "libc.Realloc",
-	"scanf":            "libc.Scanf",
-	"snprintf":         "libc.Snprintf",
-	"sqrt":             "math.Sqrt",
-	"__strcat_chk":     "libc.StrcatChk",
-	"strchr":           "libc.Strchr",
-	"strcmp":           "libc.Strcmp",
-	"strcpy":           "libc.Strcpy",
-	"strcspn":          "libc.Strcspn",
-	"strlen":           "libc.Strlen",
-	"strncat":          "libc.Strncat",
-	"strncmp":          "libc.Strncmp",
-	"strncpy":          "libc.Strncpy",
-	"strrchr":          "libc.Strrchr",
-	"strspn":           "libc.Strspn",
-	"strstr":           "libc.Strstr",
+var libraryFunctions = map[string]goRef{
+	"abort":            {libcPath, "Abort"},
+	"__assert_fail":    {libcPath, "AssertFail"},
+	"fabs":             {"math", "Abs"},
+	"__ctype_b_loc":    {libcPath, "CtypeBLoc"},
+	"dup":              {libcPath, "Dup"},
+	"fclose":           {libcPath, "Fclose"},
+	"fdopen":           {libcPath, "Fdopen"},
+	"fprintf":          {libcPath, "Fprintf"},
+	"fputc":            {libcPath, "Fputc"},
+	"fputs":            {libcPath, "Fputs"},
+	"free":             {libcPath, "Free"},
+	"getchar":          {libcPath, "Getchar"},
+	"exit":             {libcPath, "Exit"},
+	"iswalnum":         {libcPath, "Iswalnum"},
+	"iswalpha":         {libcPath, "Iswalpha"},
+	"iswblank":         {libcPath, "Iswblank"},
+	"iswcntrl":         {libcPath, "Iswcntrl"},
+	"iswdigit":         {libcPath, "Iswdigit"},
+	"iswlower":         {libcPath, "Iswlower"},
+	"iswspace":         {libcPath, "Iswspace"},
+	"iswupper":         {libcPath, "Iswupper"},
+	"iswxdigit":        {libcPath, "Iswxdigit"},
+	"leaven_va_arg":    {libcPath, "VAArg"},
+	"towlower":         {libcPath, "Towlower"},
+	"towupper":         {libcPath, "Towupper"},
+	"llvm_fabs_f64":    {"math", "Abs"},
+	"llvm_fabs_f80":    {"math", "Abs"},
+	"llvm_pow_f64":     {"math", "Pow"},
+	"memchr":           {libcPath, "Memchr"},
+	"memcmp":           {libcPath, "Memcmp"},
+	"__memcpy_chk":     {libcPath, "MemcpyChk"},
+	"memmove":          {libcPath, "Memmove"},
+	"memset_pattern16": {libcPath, "MemsetPattern16"},
+	"__memset_chk":     {libcPath, "MemsetChk"},
+	"printf":           {libcPath, "Printf"},
+	"putc":             {libcPath, "Putc"},
+	"putchar":          {libcPath, "Putchar"},
+	"puts":             {libcPath, "Puts"},
+	"realloc":          {libcPath, "Realloc"},
+	"scanf":            {libcPath, "Scanf"},
+	"snprintf":         {libcPath, "Snprintf"},
+	"sqrt":             {"math", "Sqrt"},
+	"__strcat_chk":     {libcPath, "StrcatChk"},
+	"strchr":           {libcPath, "Strchr"},
+	"strcmp":           {libcPath, "Strcmp"},
+	"strcpy":           {libcPath, "Strcpy"},
+	"strcspn":          {libcPath, "Strcspn"},
+	"strlen":           {libcPath, "Strlen"},
+	"strncat":          {libcPath, "Strncat"},
+	"strncmp":          {libcPath, "Strncmp"},
+	"strncpy":          {libcPath, "Strncpy"},
+	"strrchr":          {libcPath, "Strrchr"},
+	"strspn":           {libcPath, "Strspn"},
+	"strstr":           {libcPath, "Strstr"},
 }

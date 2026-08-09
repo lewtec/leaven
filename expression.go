@@ -2,21 +2,21 @@ package leaven
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/llir/llvm/ir/constant"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
 
 // GetElementPtr translates a getelementptr expression.
-func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (string, error) {
+func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (expr, error) {
 	srcPointerType, ok := src.Type().(*types.PointerType)
 	if !ok {
-		return "", fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
+		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
 	if !types.Equal(srcPointerType.ElemType, elemType) {
-		return "", errMismatchedSrcElem
+		return expr{}, errMismatchedSrcElem
 	}
 
 	zeroFirstIndex := false
@@ -32,30 +32,30 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	}
 	takeAddress := false
 
-	source, err := FormatValue(src)
+	srcExpr, err := formatExpr(src)
 	if err != nil {
-		return "", fmt.Errorf("error translating source pointer (%q): %w", src, err)
+		return expr{}, fmt.Errorf("error translating source pointer (%q): %w", src, err)
 	}
-	result := source
+	result := srcExpr.dropAddr()
+	source := result
 
 	// Tagged union pointers are uintptr in Go; cast to real pointer before GEP.
 	if pt, ok := src.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-		elemName, err := taggedPointerElemName(pt)
+		elem, err := taggedPointerElem(pt)
 		if err != nil {
-			return "", err
+			return expr{}, err
 		}
-		result = fmt.Sprintf("(*%s)(unsafe.Pointer(%s))", elemName, result)
+		result = ptrCast(ptrTyp(elem), result)
 		source = result
 	}
 
 	if !zeroFirstIndex {
-		firstIndex, err := FormatValue(indices[0])
+		idx, err := FormatValue(indices[0])
 		if err != nil {
-			return "", fmt.Errorf("error translating first index (%v): %w", indices[0], err)
+			return expr{}, fmt.Errorf("error translating first index (%v): %w", indices[0], err)
 		}
-		result = fmt.Sprintf("libc.AddPointer(%s, int(%s))", source, firstIndex)
+		result = libc("AddPointer").Call(source, jen.Int().Call(idx))
 	}
-	result = strings.TrimPrefix(result, "&")
 
 	currentType := elemType
 
@@ -67,29 +67,28 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		case *types.ArrayType:
 			v, err := FormatValue(index)
 			if err != nil {
-				return "", fmt.Errorf("error translating index (%v): %w", index, err)
+				return expr{}, fmt.Errorf("error translating index (%v): %w", index, err)
 			}
-			result = fmt.Sprintf("%s[%s]", result, v)
+			result = jen.Add(result).Index(v)
 			currentType = ct.ElemType
 			takeAddress = true
 
 		case *types.StructType:
 			ci, ok := index.(*constant.Int)
 			if !ok {
-				return "", fmt.Errorf("%w: %v %T", errNonConstantStructIdx, index, index)
+				return expr{}, fmt.Errorf("%w: %v %T", errNonConstantStructIdx, index, index)
 			}
-			result = fmt.Sprintf("%s.F%v", result, ci.X)
+			result = jen.Add(result).Dot(fieldNameU(ci.X.Uint64()))
 			currentType = ct.Fields[ci.X.Int64()]
 			takeAddress = true
 
 		default:
-			return "", fmt.Errorf("%w: %v", errUnsupportedIndexType, currentType)
+			return expr{}, fmt.Errorf("%w: %v", errUnsupportedIndexType, currentType)
 		}
 	}
 
 	if takeAddress {
-		result = "&" + result
+		return addrExpr(result), nil
 	}
-
-	return result, nil
+	return val(result), nil
 }

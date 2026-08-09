@@ -1,10 +1,10 @@
 package leaven
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/types"
 )
@@ -52,28 +52,27 @@ func isTaggedPointerType(t types.Type) bool {
 	return false
 }
 
-// taggedPointerElemName returns the Go type name of the pointee for casts
-// from uintptr back to a real pointer (e.g. SubtreeHeapData).
-func taggedPointerElemName(t types.Type) (string, error) {
+// taggedPointerElem returns the Go type of the pointee for casts from uintptr
+// back to a real pointer (e.g. SubtreeHeapData).
+func taggedPointerElem(t types.Type) (*jen.Statement, error) {
 	pt, ok := t.(*types.PointerType)
 	if !ok {
-		return "", fmt.Errorf("%w: %v", errNotPointerType, t)
+		return nil, fmt.Errorf("%w: %v", errNotPointerType, t)
 	}
-	// Temporarily ignore tagged map so we get the real struct name / def.
 	return typeSpecIgnoringTagged(pt.ElemType)
 }
 
-// typeSpecIgnoringTagged is TypeSpec without rewriting tagged pointers to
-// uintptr (used when we need the real pointee type for a cast).
-func typeSpecIgnoringTagged(t types.Type) (string, error) {
+func typeSpecIgnoringTagged(t types.Type) (*jen.Statement, error) {
+	if ref, ok := libraryTypeRef(t); ok {
+		return ref.code(), nil
+	}
 	if name := TypeName(t); name != "" {
-		return name, nil
+		return jen.Id(name), nil
 	}
 	return typeDefinitionIgnoringTagged(t)
 }
 
-func typeDefinitionIgnoringTagged(t types.Type) (string, error) {
-	// Only need struct/int/pointer names for pointee of tagged types.
+func typeDefinitionIgnoringTagged(t types.Type) (*jen.Statement, error) {
 	switch t := t.(type) {
 	case *types.PointerType:
 		if _, ok := t.ElemType.(*types.FuncType); ok {
@@ -81,78 +80,69 @@ func typeDefinitionIgnoringTagged(t types.Type) (string, error) {
 		}
 		elem, err := typeSpecIgnoringTagged(t.ElemType)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return "*" + elem, nil
+		return ptrTyp(elem), nil
 	default:
 		return TypeDefinition(t)
 	}
 }
 
 // TypeDefinition returns the definition (not just the name) of t.
-func TypeDefinition(t types.Type) (string, error) {
+func TypeDefinition(t types.Type) (*jen.Statement, error) {
 	switch t := t.(type) {
 	case *types.ArrayType:
 		elemType, err := TypeSpec(t.ElemType)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("[%d]%s", t.Len, elemType), nil
+		return jen.Index(litUntyped(int64(t.Len))).Add(elemType), nil
 
 	case *types.FloatType:
 		switch t.Kind {
 		case types.FloatKindFloat:
-			return "float32", nil
+			return jen.Float32(), nil
 		case types.FloatKindDouble, types.FloatKindX86_FP80:
-			return "float64", nil
+			return jen.Float64(), nil
 		default:
-			return "", fmt.Errorf("%w: %v", errUnsupportedFloatType, t.Kind)
+			return nil, fmt.Errorf("%w: %v", errUnsupportedFloatType, t.Kind)
 		}
 
 	case *types.FuncType:
-		b := new(bytes.Buffer)
-		b.WriteString("func(")
+		params := make([]jen.Code, 0, len(t.Params)+1)
 		for i, p := range t.Params {
-			if i != 0 {
-				b.WriteString(", ")
-			}
 			pt, err := TypeSpec(p)
 			if err != nil {
-				return "", fmt.Errorf("error converting type of parameter %d (%v): %w", i, p, err)
+				return nil, fmt.Errorf("error converting type of parameter %d (%v): %w", i, p, err)
 			}
-			b.WriteString(pt)
+			params = append(params, pt)
 		}
 		if t.Variadic {
-			if len(t.Params) > 0 {
-				b.WriteString(", ")
-			}
-			// Match function definitions (varargs ...interface{}).
-			b.WriteString("...interface{}")
+			params = append(params, jen.Op("...").Interface())
 		}
-		b.WriteString(")")
+		s := jen.Func().Params(params...)
 		if !types.Equal(t.RetType, types.Void) {
-			b.WriteString(" ")
 			rt, err := TypeSpec(t.RetType)
 			if err != nil {
-				return "", fmt.Errorf("error converting return type (%v): %w", t.RetType, err)
+				return nil, fmt.Errorf("error converting return type (%v): %w", t.RetType, err)
 			}
-			b.WriteString(rt)
+			s.Add(rt)
 		}
-		return b.String(), nil
+		return s, nil
 
 	case *types.IntType:
 		switch {
 		case t.BitSize == 1:
-			return "bool", nil
+			return jen.Bool(), nil
 		case t.BitSize <= 8:
-			return "byte", nil
+			return jen.Byte(), nil
 		case t.BitSize <= 64:
 			// Bitfields and other non-power-of-two widths (e.g. i24) map to the
 			// next wider Go integer type (int16/int32/int64).
-			return fmt.Sprintf("int%d", goIntBits(t.BitSize)), nil
+			return goIntType(t.BitSize), nil
 		default:
 			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
-			return "", fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
+			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
 		}
 
 	case *types.PointerType:
@@ -162,43 +152,44 @@ func TypeDefinition(t types.Type) (string, error) {
 		}
 		// Tagged union pointer field: bag-of-bits, not a GC pointer.
 		if isTaggedPointerType(t) {
-			return "uintptr", nil
+			return jen.Uintptr(), nil
 		}
 		elemType, err := TypeSpec(t.ElemType)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return "*" + elemType, nil
+		return ptrTyp(elemType), nil
 
 	case *types.StructType:
-		b := new(bytes.Buffer)
-		b.WriteString("struct {\n")
+		var fields []jen.Code
 		for i, field := range t.Fields {
 			fieldType, err := TypeSpec(field)
 			if err != nil {
-				return "", fmt.Errorf("error converting type of field %d: %w", i, err)
+				return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
 			}
-			fmt.Fprintf(b, "\tF%d %s\n", i, fieldType)
+			fields = append(fields, jen.Id(fieldName(i)).Add(fieldType))
 		}
-		b.WriteString("}")
-		return b.String(), nil
+		return jen.Struct(fields...), nil
 
 	case *types.VectorType:
 		elemType, err := TypeSpec(t.ElemType)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("[%d]%s", t.Len, elemType), nil
+		return jen.Index(litUntyped(int64(t.Len))).Add(elemType), nil
 
 	default:
-		return "", fmt.Errorf("%w: %T", errUnsupportedType, t)
+		return nil, fmt.Errorf("%w: %T", errUnsupportedType, t)
 	}
 }
 
 // TypeSpec returns the name (if it has one) or the definition of t.
-func TypeSpec(t types.Type) (string, error) {
+func TypeSpec(t types.Type) (*jen.Statement, error) {
+	if ref, ok := libraryTypeRef(t); ok {
+		return ref.code(), nil
+	}
 	if name := TypeName(t); name != "" {
-		return name, nil
+		return jen.Id(name), nil
 	}
 	return TypeDefinition(t)
 }
@@ -220,21 +211,34 @@ func goIntBits(bits uint64) uint64 {
 	}
 }
 
-// TypeName returns t's name, or the empty string if t is not a named type.
-// Clang anonymous structs become names like "anon.1"; those are sanitized to
-// legal Go identifiers (anon_1). Library renames (e.g. FILE → os.File) are
-// returned as-is so callers can detect the package-qualified form.
-func TypeName(t types.Type) string {
+func clangTypeName(t types.Type) string {
 	name := t.Name()
 	name = strings.TrimPrefix(name, "struct.")
 	name = strings.TrimPrefix(name, "union.")
+	return name
+}
+
+func libraryTypeRef(t types.Type) (goRef, bool) {
+	name := clangTypeName(t)
+	if name == "" {
+		return goRef{}, false
+	}
+	ref, ok := libraryTypes[name]
+	return ref, ok
+}
+
+// TypeName returns t's local Go name, or the empty string if t is unnamed or
+// mapped to a standard-library type. Clang anonymous structs become names like
+// "anon.1"; those are sanitized to legal Go identifiers (anon_1).
+func TypeName(t types.Type) string {
+	name := clangTypeName(t)
 
 	if name == "" || name == "anon" {
 		return ""
 	}
 
-	if renamed, ok := libraryTypes[name]; ok {
-		return renamed
+	if _, ok := libraryTypes[name]; ok {
+		return ""
 	}
 
 	// Sanitize remaining punctuation from LLVM/clang type names.
@@ -252,9 +256,9 @@ func TypeName(t types.Type) string {
 	return name
 }
 
-var libraryTypes = map[string]string{
-	"FILE":     "os.File",
-	"_IO_FILE": "os.File", // glibc / clang struct name for FILE
+var libraryTypes = map[string]goRef{
+	"FILE":     {pkg: "os", name: "File"},
+	"_IO_FILE": {pkg: "os", name: "File"}, // glibc / clang struct name for FILE
 }
 
 // compatiblePointerTypes returns whether casting t1 to t2 is allowed.
