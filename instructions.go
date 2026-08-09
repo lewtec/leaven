@@ -834,6 +834,7 @@ var libraryFunctions = map[string]string{
 	"exit":             "libc.Exit",
 	"iswalnum":         "libc.Iswalnum",
 	"iswalpha":         "libc.Iswalpha",
+	"iswblank":         "libc.Iswblank",
 	"iswcntrl":         "libc.Iswcntrl",
 	"iswdigit":         "libc.Iswdigit",
 	"iswlower":         "libc.Iswlower",
