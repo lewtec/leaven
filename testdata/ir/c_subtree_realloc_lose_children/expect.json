@@ -17,5 +17,8 @@
       "inline=1",
       "ok child_count=1"
     ]
+  },
+  "parse": {
+    "22": false
   }
 }

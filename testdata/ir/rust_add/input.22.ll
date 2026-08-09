@@ -3,8 +3,8 @@ source_filename = "source.ddb5a00486c70246-cgu.0"
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-@alloc_6527b820e4e9f905401ba0a9fe450cdb = private unnamed_addr constant [29 x i8] c"testdata/ir/add_rs/source.rs\00", align 1
-@alloc_6a1104fa7a530e0968b5baca584056b7 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_6527b820e4e9f905401ba0a9fe450cdb, [16 x i8] c"\1C\00\00\00\00\00\00\00\03\00\00\00\05\00\00\00" }>, align 8
+@alloc_fae6be5744a40d7485552c134bd2e362 = private unnamed_addr constant [31 x i8] c"testdata/ir/rust_add/source.rs\00", align 1
+@alloc_9a73f36d4b9165f707b56159f9b1052a = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_fae6be5744a40d7485552c134bd2e362, [16 x i8] c"\1E\00\00\00\00\00\00\00\03\00\00\00\05\00\00\00" }>, align 8
 
 ; source::add
 ; Function Attrs: nonlazybind uwtable
@@ -20,7 +20,7 @@ bb1:                                              ; preds = %start
 
 panic:                                            ; preds = %start
 ; call core::panicking::panic_const::panic_const_add_overflow
-  call void @_RNvNtNtCs4NRVxsYgnAr_4core9panicking11panic_const24panic_const_add_overflow(ptr align 8 @alloc_6a1104fa7a530e0968b5baca584056b7) #3
+  call void @_RNvNtNtCs4NRVxsYgnAr_4core9panicking11panic_const24panic_const_add_overflow(ptr align 8 @alloc_9a73f36d4b9165f707b56159f9b1052a) #3
   unreachable
 }
 

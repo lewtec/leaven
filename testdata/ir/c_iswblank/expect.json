@@ -3,9 +3,18 @@
     {
       "name": "package-p",
       "package": "p",
-      "contains": ["libc.Iswblank"],
-      "not_contains": [" = iswblank("]
+      "contains": [
+        "libc.Iswblank"
+      ],
+      "not_contains": [
+        " = iswblank("
+      ]
     }
   ],
-  "run": { "stdout_contains": [] }
+  "run": {
+    "stdout_contains": []
+  },
+  "parse": {
+    "22": false
+  }
 }
