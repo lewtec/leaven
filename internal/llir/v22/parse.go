@@ -3,6 +3,7 @@ package v22
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
@@ -145,6 +146,9 @@ func (p *parser) parseTop() error {
 		case "attributes":
 			return p.parseAttrGroup()
 		default:
+			if strings.HasPrefix(t.s, "$") {
+				return p.skipComdatDef()
+			}
 			return p.errorf("unexpected %q", t.s)
 		}
 	case kLocal:
@@ -228,7 +232,6 @@ func (p *parser) parseGlobal() error {
 		return err
 	}
 	g := ir.NewGlobal(name, types.I8)
-	g.Typ = p.ptr
 	p.globals[name] = g
 	p.m.Globals = append(p.m.Globals, g)
 
@@ -297,7 +300,7 @@ typ:
 		return err
 	}
 	g.ContentType = ct
-	g.Typ = p.ptr
+	g.Typ = types.NewPointer(ct)
 	if p.startsValue() {
 		init, err := p.parseValue(ct)
 		if err != nil {
@@ -446,7 +449,21 @@ ret:
 				unnamed = enum.UnnamedAddrLocalUnnamedAddr
 				p.next()
 				continue
-			case "section", "comdat", "align", "gc", "prefix", "prologue", "personality":
+			case "comdat":
+				p.next()
+				if p.tok.kind == kLParen {
+					if err := p.skipBalanced(kLParen, kRParen); err != nil {
+						return err
+					}
+				}
+				continue
+			case "align":
+				p.next()
+				if p.tok.kind == kInt {
+					p.next()
+				}
+				continue
+			case "section", "gc", "prefix", "prologue":
 				p.next()
 				if p.tok.kind == kLParen {
 					if err := p.skipBalanced(kLParen, kRParen); err != nil {
@@ -454,6 +471,12 @@ ret:
 					}
 				} else if p.tok.kind == kString || p.tok.kind == kInt || p.tok.kind == kIdent {
 					p.next()
+				}
+				continue
+			case "personality":
+				p.next()
+				if _, err := p.parseTypedValue(); err != nil {
+					return err
 				}
 				continue
 			}
@@ -515,7 +538,7 @@ func (p *parser) parseParams() ([]*ir.Param, bool, error) {
 			name = p.tok.s
 			p.next()
 		}
-		params = append(params, ir.NewParam(name, t))
+		params = append(params, newParam(name, t))
 		if p.tok.kind != kComma {
 			break
 		}
@@ -533,7 +556,7 @@ func (p *parser) parseBody(f *ir.Func) error {
 	p.blocks = make(map[string]*ir.Block)
 	p.phis = nil
 	for _, param := range f.Params {
-		p.locals[param.Name()] = param
+		p.locals[localKey(param)] = param
 	}
 	// First pass: collect labels so br/phi can resolve blocks.
 	if err := p.collectBlocks(f); err != nil {
@@ -677,6 +700,8 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseCast(block, ident, name, op)
 	case "phi":
 		return p.parsePhi(block, ident, name)
+	case "switch":
+		return p.parseSwitch(block)
 	case "select":
 		return p.parseSelect(block, ident, name)
 	case "extractvalue":
@@ -699,7 +724,6 @@ func (p *parser) parseAlloca(block *ir.Block, ident ir.LocalIdent, name string) 
 	}
 	inst := ir.NewAlloca(elem)
 	inst.LocalIdent = ident
-	inst.Typ = p.ptr
 	if p.tok.kind == kComma {
 		p.next()
 		if p.isIdent("align") {
@@ -1010,6 +1034,64 @@ func (p *parser) parseRet(block *ir.Block) error {
 	if err := p.skipInstMD(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (p *parser) parseSwitch(block *ir.Block) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	if err := p.wantIdent("label"); err != nil {
+		return err
+	}
+	if p.tok.kind != kLocal {
+		return p.errorf("expected default label")
+	}
+	def := p.blocks[p.tok.s]
+	p.next()
+	if def == nil {
+		return p.errorf("unknown default block")
+	}
+	if err := p.expect(kLBrack); err != nil {
+		return err
+	}
+	var cases []*ir.Case
+	for p.tok.kind != kRBrack && !p.done() {
+		cv, err := p.parseTypedValue()
+		if err != nil {
+			return err
+		}
+		c, ok := cv.(constant.Constant)
+		if !ok {
+			return p.errorf("switch case is not a constant")
+		}
+		if err := p.expect(kComma); err != nil {
+			return err
+		}
+		if err := p.wantIdent("label"); err != nil {
+			return err
+		}
+		if p.tok.kind != kLocal {
+			return p.errorf("expected case label")
+		}
+		tgt := p.blocks[p.tok.s]
+		p.next()
+		if tgt == nil {
+			return p.errorf("unknown switch target")
+		}
+		cases = append(cases, ir.NewCase(c, tgt))
+	}
+	if err := p.expect(kRBrack); err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	block.Term = ir.NewSwitch(x, def, cases...)
 	return nil
 }
 
@@ -1850,6 +1932,39 @@ func (p *parser) parseVectorConst(typ types.Type) (constant.Constant, error) {
 }
 
 // --- attributes / metadata ---------------------------------------------------
+
+func (p *parser) skipComdatDef() error {
+	p.next()
+	if err := p.expect(kEq); err != nil {
+		return err
+	}
+	if err := p.wantIdent("comdat"); err != nil {
+		return err
+	}
+	if p.tok.kind == kIdent {
+		p.next()
+	}
+	return nil
+}
+
+func newParam(name string, typ types.Type) *ir.Param {
+	if name == "" {
+		return ir.NewParam("", typ)
+	}
+	if id, err := strconv.ParseInt(name, 10, 64); err == nil {
+		p := &ir.Param{Typ: typ}
+		p.SetID(id)
+		return p
+	}
+	return ir.NewParam(name, typ)
+}
+
+func localKey(param *ir.Param) string {
+	if param.IsUnnamed() {
+		return strconv.FormatInt(param.LocalID, 10)
+	}
+	return param.LocalName
+}
 
 func (p *parser) parseAttrGroup() error {
 	p.next() // attributes

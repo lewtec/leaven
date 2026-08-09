@@ -92,6 +92,27 @@ type expectCase struct {
 type expectRun struct {
 	StdoutContains []string `json:"stdout_contains"`
 	StderrContains []string `json:"stderr_contains"`
+	// Majors, if set, limits which input.<n>.ll files run the program.
+	// Default: LLVM 14 when present, otherwise every parsed major.
+	Majors []string `json:"majors,omitempty"`
+}
+
+func (r *expectRun) enabled(ver, dir string) bool {
+	if r == nil {
+		return false
+	}
+	if len(r.Majors) > 0 {
+		for _, m := range r.Majors {
+			if m == ver {
+				return true
+			}
+		}
+		return false
+	}
+	if hasIRMajor(dir, "14") {
+		return ver == "14"
+	}
+	return true
 }
 
 // TestIRSanity walks testdata/ir/<fixture>/{input.<n>.ll,expect.json}.
@@ -141,11 +162,8 @@ func TestIRSanity(t *testing.T) {
 						if _, err := format.Source(buf.Bytes()); err != nil {
 							t.Fatalf("go/format: %v\n%s", err, buf.String())
 						}
-						return
-					}
-
-					// 14 goldens do not apply to opaque-ptr IR; require parse+compile only.
-					if ver != "14" && len(table.Cases) > 0 {
+					} else if ver != "14" && hasIRMajor(dir, "14") {
+						// 14 goldens do not apply to opaque-ptr IR.
 						var buf bytes.Buffer
 						pkg := table.Cases[0].Package
 						if pkg == "" {
@@ -157,47 +175,46 @@ func TestIRSanity(t *testing.T) {
 						if _, err := format.Source(buf.Bytes()); err != nil {
 							t.Fatalf("go/format: %v\n%s", err, buf.String())
 						}
-						return
+					} else {
+						for _, tc := range table.Cases {
+							tc := tc
+							name := tc.Name
+							if name == "" {
+								name = tc.Package
+							}
+							if name == "" {
+								name = "default"
+							}
+							t.Run(name, func(t *testing.T) {
+								pkg := tc.Package
+								if pkg == "" {
+									pkg = "main"
+								}
+								var buf bytes.Buffer
+								if err := Compile(&buf, m, pkg); err != nil {
+									t.Fatalf("compile package=%s: %v", pkg, err)
+								}
+								got := buf.String()
+
+								if _, err := format.Source(buf.Bytes()); err != nil {
+									t.Fatalf("go/format: %v\n---- generated ----\n%s", err, got)
+								}
+
+								for _, s := range tc.Contains {
+									if !strings.Contains(got, s) {
+										t.Errorf("missing %q in:\n%s", s, got)
+									}
+								}
+								for _, s := range tc.NotContains {
+									if strings.Contains(got, s) {
+										t.Errorf("unexpected %q in:\n%s", s, got)
+									}
+								}
+							})
+						}
 					}
 
-					for _, tc := range table.Cases {
-						tc := tc
-						name := tc.Name
-						if name == "" {
-							name = tc.Package
-						}
-						if name == "" {
-							name = "default"
-						}
-						t.Run(name, func(t *testing.T) {
-							pkg := tc.Package
-							if pkg == "" {
-								pkg = "main"
-							}
-							var buf bytes.Buffer
-							if err := Compile(&buf, m, pkg); err != nil {
-								t.Fatalf("compile package=%s: %v", pkg, err)
-							}
-							got := buf.String()
-
-							if _, err := format.Source(buf.Bytes()); err != nil {
-								t.Fatalf("go/format: %v\n---- generated ----\n%s", err, got)
-							}
-
-							for _, s := range tc.Contains {
-								if !strings.Contains(got, s) {
-									t.Errorf("missing %q in:\n%s", s, got)
-								}
-							}
-							for _, s := range tc.NotContains {
-								if strings.Contains(got, s) {
-									t.Errorf("unexpected %q in:\n%s", s, got)
-								}
-							}
-						})
-					}
-
-					if table.Run != nil {
+					if table.Run.enabled(ver, dir) {
 						t.Run("run", func(t *testing.T) {
 							runFixtureProgram(t, m, table.Run)
 						})
@@ -325,6 +342,11 @@ func fixtureIRFiles(dir string) ([]string, error) {
 		return nil, errFixtureIRMissing
 	}
 	return out, nil
+}
+
+func hasIRMajor(dir, ver string) bool {
+	_, err := os.Stat(filepath.Join(dir, "input."+ver+".ll"))
+	return err == nil
 }
 
 func irFileVersion(path string) string {
