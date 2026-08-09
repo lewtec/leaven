@@ -1,28 +1,34 @@
 package libc
 
-import "unsafe"
+import (
+	"sync"
+	"unsafe"
+)
 
-// retained pins heap objects whose only live handle may be a uintptr
-// (tagged-pointer unions such as tree-sitter Subtree). Without this the GC
-// reclaims the object and later loads see freed memory.
-var retained []any
+// allocRec pins p (so GC cannot collect a block whose only handle is a
+// uintptr, e.g. tree-sitter Subtree) and records the requested size for Realloc.
+type allocRec struct {
+	p any
+	n int64
+}
 
-// allocBytes records the requested size of each allocation for Realloc copy.
-// Key is the pointer as uintptr.
-var allocBytes = map[uintptr]int64{}
+// allocs is uintptr → *allocRec. Keys are distinct heap addresses, so
+// sync.Map is the right concurrent map (disjoint writes, grow-only).
+var allocs sync.Map
 
 // Retain keeps p reachable for the rest of the process. Returns p for chaining.
 func Retain[T any](p *T) *T {
 	if p != nil {
-		retained = append(retained, p)
+		allocs.LoadOrStore(uintptr(unsafe.Pointer(p)), &allocRec{p: p})
 	}
 	return p
 }
 
-func rememberAlloc(p unsafe.Pointer, n int64) {
-	if p != nil && n > 0 {
-		allocBytes[uintptr(p)] = n
+func allocSize(p unsafe.Pointer) int64 {
+	if v, ok := allocs.Load(uintptr(p)); ok {
+		return v.(*allocRec).n
 	}
+	return 0
 }
 
 // Malloc allocates n bytes of memory. It informs the garbage collector that
@@ -41,8 +47,7 @@ func Malloc[T any](n int64) *T {
 		count := uintptr(n)/unsafe.Sizeof(*p) + 1
 		out = &make([]T, count)[0]
 	}
-	out = Retain(out)
-	rememberAlloc(unsafe.Pointer(out), n)
+	allocs.Store(uintptr(unsafe.Pointer(out)), &allocRec{p: out, n: n})
 	return out
 }
 
@@ -62,7 +67,7 @@ func Realloc(p *byte, n int64) *byte {
 	if p == nil {
 		return Malloc[byte](n)
 	}
-	oldN := allocBytes[uintptr(unsafe.Pointer(p))]
+	oldN := allocSize(unsafe.Pointer(p))
 	out := Malloc[byte](n)
 	if out == nil {
 		return nil
@@ -74,10 +79,10 @@ func Realloc(p *byte, n int64) *byte {
 	if copyN > 0 {
 		copy(unsafe.Slice(out, copyN), unsafe.Slice(p, copyN))
 	}
-	// Leave p in retained; C free is a no-op under GC.
+	// Leave p in allocs; C free is a no-op under GC.
 	return out
 }
 
 // Free is C free(p). Go is GC'd; this is a no-op so call sites typecheck.
-// (Objects stay in retained; we do not reclaim.)
+// (Objects stay in allocs; we do not reclaim.)
 func Free(p *byte) {}
