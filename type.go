@@ -149,22 +149,13 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		}
 
 	case *types.PointerType:
-		if t.IsOpaque() {
-			return jen.Qual("unsafe", "Pointer"), nil
-		}
-		if _, ok := t.ElemType.(*types.FuncType); ok {
-			// Translate a C function pointer type as a Go function type.
-			return TypeDefinition(t.ElemType)
-		}
 		// Tagged union pointer field: bag-of-bits, not a GC pointer.
 		if isTaggedPointerType(t) {
 			return jen.Uintptr(), nil
 		}
-		elemType, err := TypeSpec(t.ElemType)
-		if err != nil {
-			return nil, err
-		}
-		return ptrTyp(elemType), nil
+		// Every LLVM pointer value is unsafe.Pointer. Pointee type lives on
+		// load/store/gep, not on the pointer.
+		return jen.Qual("unsafe", "Pointer"), nil
 
 	case *types.StructType:
 		var fields []jen.Code
@@ -279,17 +270,6 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 	_, ok1 := t1.(*types.PointerType)
 	_, ok2 := t2.(*types.PointerType)
 	return ok1 && ok2
-}
-
-// isFuncPointerType reports whether t is an LLVM pointer-to-function
-// (emitted as a Go func type).
-func isFuncPointerType(t types.Type) bool {
-	pt, ok := t.(*types.PointerType)
-	if !ok || pt.IsOpaque() {
-		return false
-	}
-	_, ok = pt.ElemType.(*types.FuncType)
-	return ok
 }
 
 // hasPointers returns whether t contains pointers.

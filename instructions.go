@@ -65,6 +65,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
 		}
+		elem, err := TypeSpec(inst.Type())
+		if err != nil {
+			return nil, err
+		}
+		dst = ptrCast(ptrTyp(elem), dst)
 		switch inst.Op {
 		case enum.AtomicOpAdd:
 			// atomicrmw returns the old value; Add* returns the new value.
@@ -90,28 +95,28 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if inst.NElems == nil {
 			if _, ok := inst.ElemType.(*types.ArrayType); ok {
 				// If it's an array, allocate an extra byte to allow indexing off the end.
-				return one(assign(name, addrOf(jen.New(jen.Struct(
+				return one(assign(name, unsafePtr(addrOf(jen.New(jen.Struct(
 					jen.Id("v").Add(t),
 					jen.Id("b").Byte(),
-				)).Dot("v")))), nil
+				)).Dot("v"))))), nil
 			}
 			newExpr := jen.New(t)
-			// Alloca of T yields *T; if *T is a tagged union pointer, store as uintptr.
+			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
 				return one(assign(name, uintptrOfPtr(libc("Retain").Call(newExpr)))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				return one(assign(name, jen.New(jen.Uintptr()))), nil
+				return one(assign(name, unsafePtr(jen.New(jen.Uintptr())))), nil
 			}
-			return one(assign(name, newExpr)), nil
+			return one(assign(name, unsafePtr(newExpr))), nil
 		}
 		nElems, err := translateOp(inst.NElems, "NElems")
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(name, addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0))))), nil
+		return one(assign(name, unsafePtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")
@@ -154,18 +159,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		to, err := translateType(inst.To, "type")
-		if err != nil {
-			return nil, err
-		}
 		name := VariableName(inst)
-		if isFuncPointerType(inst.To) || isFuncPointerType(inst.From.Type()) {
-			return one(assign(name, fnPtrBitcast(to, from))), nil
-		}
 		if isTaggedPointerType(inst.To) {
 			return one(assign(name, uintptrOfPtr(from))), nil
 		}
-		return one(assign(name, ptrCast(to, from))), nil
+		if isTaggedPointerType(inst.From.Type()) {
+			to, err := translateType(inst.To, "type")
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(name, ptrCast(to, from))), nil
+		}
+		return one(assign(name, from)), nil
 
 	case *ir.InstCall:
 		return translateCall(inst)
@@ -356,7 +361,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
-		val, err := typedLoad(src, inst.Src, inst.ElemType)
+		val, err := typedLoad(src, inst.ElemType)
 		if err != nil {
 			return nil, err
 		}
@@ -502,7 +507,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		st, err := typedStore(dest, inst.Dst, inst.Src.Type(), src)
+		st, err := typedStore(dest, inst.Src.Type(), src)
 		if err != nil {
 			return nil, err
 		}
@@ -701,12 +706,42 @@ func asBytePtr(x jen.Code) *jen.Statement {
 	return jen.Parens(ptrTyp(jen.Byte())).Call(x)
 }
 
-func coerceCallArg(inst *ir.InstCall, i int, a value.Value, got *jen.Statement) *jen.Statement {
-	fn, ok := inst.Callee.(*ir.Func)
-	if !ok || i >= len(fn.Params) {
-		return got
+func asFilePtr(x jen.Code) *jen.Statement {
+	return jen.Parens(ptrTyp(jen.Qual("os", "File"))).Call(x)
+}
+
+func libcCallArg(name string, i int, a value.Value, got jen.Code) *jen.Statement {
+	if _, ok := a.Type().(*types.PointerType); !ok {
+		if s, ok := got.(*jen.Statement); ok {
+			return s
+		}
+		return jen.Add(got)
 	}
-	return coerceOpaquePtr(fn.Params[i].Typ, a, got)
+	switch name {
+	case "fprintf":
+		if i == 0 {
+			return asFilePtr(got)
+		}
+		if i == 1 {
+			return asBytePtr(got)
+		}
+	case "fputs":
+		if i == 0 {
+			return asBytePtr(got)
+		}
+		if i == 1 {
+			return asFilePtr(got)
+		}
+	case "fputc", "putc", "fclose":
+		if i == 1 || (name == "fclose" && i == 0) {
+			return asFilePtr(got)
+		}
+	case "fdopen":
+		if i == 1 {
+			return asBytePtr(got)
+		}
+	}
+	return asBytePtr(got)
 }
 
 func calleeLLVMName(v value.Value) string {
@@ -730,18 +765,19 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating argument %d (%v): %w", i, a, err)
 		}
-		args[i] = coerceCallArg(inst, i, a, v)
+		args[i] = v
 	}
 
 	var callee *jen.Statement
 	switch llvmName {
 	case "calloc", "malloc":
-		callee = jen.Id(llvmName)
+		et := jen.Byte()
 		if pt, ok := inst.Typ.(*types.PointerType); ok && !pt.IsOpaque() && pt.ElemType != nil {
-			if et, err := TypeSpec(pt.ElemType); err == nil {
-				callee = libc(strings.Title(llvmName)).Types(et)
+			if t, err := TypeSpec(pt.ElemType); err == nil {
+				et = t
 			}
 		}
+		callee = libc(strings.Title(llvmName)).Types(et)
 	case "leaven_va_start":
 		if len(args) == 1 {
 			return one(deref(args[0]).Op("=").Add(ptrCast(ptrTyp(jen.Byte()), addrOf(jen.Id("varargs"))))), nil
@@ -757,7 +793,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	case "vsnprintf":
 		if len(args) == 4 {
 			return one(assign(VariableName(inst), libc("Vsnprintf").Call(
-				args[0], args[1], args[2],
+				asBytePtr(args[0]), args[1], asBytePtr(args[2]),
 				ptrCast(ptrTyp(jen.Byte()), args[3]),
 			))), nil
 		}
@@ -804,19 +840,12 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		return one(assign(VariableName(inst), jen.Nil())), nil
 	}
 
-	if llvmName == "printf" && len(args) > 0 {
-		args[0] = asBytePtr(args[0])
-	}
-	switch llvmName {
-	case "strlen", "strcpy", "strchr", "strcmp":
-		for i := range args {
-			args[i] = asBytePtr(args[i])
-		}
-	}
-
 	if callee == nil {
 		if ref, ok := libraryFunctions[llvmName]; ok {
 			callee = ref.code()
+			for i, a := range inst.Args {
+				args[i] = libcCallArg(llvmName, i, a, args[i])
+			}
 		} else if strings.Contains(llvmName, "panicking") ||
 			strings.Contains(llvmName, "handle_error") ||
 			strings.Contains(llvmName, "throw_logic_error") ||
@@ -836,12 +865,21 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			return one(assign(VariableName(inst), libc("RustAlloc").Call(args[0], jen.Lit(1)))), nil
 		} else if strings.HasPrefix(llvmName, "_Zdl") || strings.HasPrefix(llvmName, "_Zda") {
 			return one(libc("RustDealloc").Call(args[0], jen.Lit(0), jen.Lit(1))), nil
+		} else if _, ok := inst.Callee.(*ir.Func); ok {
+			callee = jen.Id(VariableName(inst.Callee.(value.Named)))
+			if c, ok := namedRef(llvmName); ok {
+				callee = c
+			}
 		} else {
-			var err error
-			callee, err = FormatValue(inst.Callee)
+			ft, err := TypeDefinition(inst.Sig())
+			if err != nil {
+				return nil, fmt.Errorf("error translating callee type (%v): %w", inst.Callee, err)
+			}
+			fn, err := FormatValue(inst.Callee)
 			if err != nil {
 				return nil, fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
 			}
+			callee = fnPtrBitcast(ft, fn)
 		}
 	}
 
@@ -849,8 +887,12 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	if types.Equal(inst.Type(), types.Void) {
 		return one(callExpr), nil
 	}
-	if isTaggedPointerType(inst.Type()) && (llvmName == "malloc" || llvmName == "calloc" || llvmName == "realloc") {
-		callExpr = uintptrOfPtr(callExpr)
+	if _, ok := inst.Type().(*types.PointerType); ok {
+		if isTaggedPointerType(inst.Type()) {
+			callExpr = uintptrOfPtr(callExpr)
+		} else {
+			callExpr = unsafePtr(callExpr)
+		}
 	}
 	return one(assign(VariableName(inst), callExpr)), nil
 }

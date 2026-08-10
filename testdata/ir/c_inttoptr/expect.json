@@ -6,8 +6,8 @@
       "contains": [
         "package p",
         "import \"unsafe\"",
-        "func int_to_ptr(x int64) *byte",
-        "func ptr_to_int(p *byte) int64",
+        "func int_to_ptr(x int64) unsafe.Pointer",
+        "func ptr_to_int(p unsafe.Pointer) int64",
         "unsafe.Pointer(uintptr(",
         "uintptr(unsafe.Pointer("
       ],

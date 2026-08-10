@@ -153,24 +153,6 @@ func fnPtrBitcast(to, from *jen.Statement) *jen.Statement {
 	).Call()
 }
 
-// coerceOpaquePtr converts code to unsafe.Pointer when want is an opaque ptr
-// and have is a typed pointer or a function. No-op otherwise.
-// Functions go through fnPtrBitcast; Go rejects unsafe.Pointer(fn).
-func coerceOpaquePtr(want types.Type, have value.Value, code *jen.Statement) *jen.Statement {
-	wantPtr, ok := want.(*types.PointerType)
-	if !ok || !wantPtr.IsOpaque() || have == nil || code == nil {
-		return code
-	}
-	if isFuncPointerType(have.Type()) {
-		return fnPtrBitcast(jen.Qual("unsafe", "Pointer"), code)
-	}
-	havePtr, ok := have.Type().(*types.PointerType)
-	if !ok || havePtr.IsOpaque() {
-		return code
-	}
-	return unsafePtr(code)
-}
-
 // FormatValue formats a constant or variable as it should appear in an expression.
 func FormatValue(v value.Value) (*jen.Statement, error) {
 	e, err := formatExpr(v)
@@ -182,13 +164,22 @@ func FormatValue(v value.Value) (*jen.Statement, error) {
 
 func formatExpr(v value.Value) (expr, error) {
 	switch v := v.(type) {
+	case *ir.Func:
+		name := VariableName(v)
+		fn := jen.Id(name)
+		if c, ok := namedRef(name); ok {
+			fn = c
+		}
+		return val(fnPtrBitcast(jen.Qual("unsafe", "Pointer"), fn)), nil
+
 	case *ir.Global:
 		name := VariableName(v)
 		if types.IsFunc(v.ContentType) {
+			fn := jen.Id(name)
 			if c, ok := namedRef(name); ok {
-				return val(c), nil
+				fn = c
 			}
-			return ident(name), nil
+			return val(fnPtrBitcast(jen.Qual("unsafe", "Pointer"), fn)), nil
 		}
 		if ref, ok := libraryGlobals[name]; ok {
 			return addrExpr(ref.code()), nil
@@ -216,9 +207,6 @@ func formatExpr(v value.Value) (expr, error) {
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 			}
-			if v.Typ != nil {
-				e = coerceOpaquePtr(v.Typ.ElemType, c, e)
-			}
 			elems[i] = e
 		}
 		return val(formatComposite(t, elems)), nil
@@ -239,17 +227,18 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
-		to, err := TypeSpec(v.To)
-		if err != nil {
-			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
-		}
-		if isFuncPointerType(v.To) || isFuncPointerType(v.From.Type()) {
-			return val(fnPtrBitcast(to, from)), nil
-		}
 		if isTaggedPointerType(v.To) {
 			return val(uintptrOfPtr(from)), nil
 		}
-		return val(ptrCast(to, from)), nil
+		if isTaggedPointerType(v.From.Type()) {
+			to, err := TypeSpec(v.To)
+			if err != nil {
+				return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
+			}
+			return val(ptrCast(to, from)), nil
+		}
+		// Pointer values are already unsafe.Pointer.
+		return val(from), nil
 
 	case *constant.ExprIntToPtr:
 		from, err := FormatValue(v.From)
@@ -405,9 +394,6 @@ func formatExpr(v value.Value) (expr, error) {
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}
-			if v.Typ != nil && i < len(v.Typ.Fields) {
-				e = coerceOpaquePtr(v.Typ.Fields[i], c, e)
-			}
 			elems[i] = e
 		}
 		return val(formatComposite(t, elems)), nil
@@ -427,9 +413,6 @@ func formatExpr(v value.Value) (expr, error) {
 			e, err := FormatValue(c)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating element %d (%v): %w", i, c, err)
-			}
-			if v.Typ != nil {
-				e = coerceOpaquePtr(v.Typ.ElemType, c, e)
 			}
 			elems[i] = e
 		}

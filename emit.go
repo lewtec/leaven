@@ -152,7 +152,7 @@ func ident(name string) expr {
 }
 
 func addrExpr(base *jen.Statement) expr {
-	return expr{code: addrOf(base), base: base}
+	return expr{code: unsafePtr(addrOf(base)), base: base}
 }
 
 func (e expr) load() *jen.Statement {

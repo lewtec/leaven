@@ -10,99 +10,66 @@ import (
 )
 
 // GetElementPtr translates a getelementptr expression.
+// The LLVM pointer value is always unsafe.Pointer. *T exists only while
+// indexing into a struct/array or as AddPointer's type argument.
 func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (expr, error) {
-	srcPointerType, ok := src.Type().(*types.PointerType)
-	if !ok {
+	if _, ok := src.Type().(*types.PointerType); !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
-	// Typed-pointer IR: src is usually elemType*. LLVM 15+ also uses
-	// `gep i8, T*, i64 n` (bytes) and `gep ptr, [N x ptr]*, i64 n` (pointer stride).
-	byteGEP := types.Equal(elemType, types.I8)
-	_, elemStruct := elemType.(*types.StructType)
-	_, elemArray := elemType.(*types.ArrayType)
-	matched := srcPointerType.IsOpaque() || types.Equal(srcPointerType.ElemType, elemType)
-	// First index is always pointer arithmetic in units of elemType.
-	strideGEP := byteGEP || (!matched && !elemStruct && !elemArray)
-
-	zeroFirstIndex := false
-	firstIndex := indices[0]
-	if ci, ok := firstIndex.(*constant.Index); ok {
-		firstIndex = ci.Constant
+	if len(indices) == 0 {
+		return expr{}, fmt.Errorf("%w: no indices", errUnsupportedIndexType)
 	}
-	if fi, ok := firstIndex.(*constant.Int); ok {
-		switch fi.X.Sign() {
-		case 0:
-			zeroFirstIndex = true
-		}
-	}
-	takeAddress := false
 
 	srcExpr, err := formatExpr(src)
 	if err != nil {
 		return expr{}, fmt.Errorf("error translating source pointer (%q): %w", src, err)
 	}
-	// Keep &src for AddPointer (needs *T). Drop it only when we index into
-	// the pointee, matching the old strings.TrimPrefix after that call.
-	result := srcExpr.code
-	rewrote := false
 
-	// Tagged union pointers are uintptr in Go; cast to real pointer before GEP.
-	if pt, ok := src.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-		elem, err := taggedPointerElem(pt)
-		if err != nil {
-			return expr{}, err
-		}
-		result = ptrCast(ptrTyp(elem), result)
-		rewrote = true
+	firstIndex := indices[0]
+	if ci, ok := firstIndex.(*constant.Index); ok {
+		firstIndex = ci.Constant
+	}
+	zeroFirst := false
+	if fi, ok := firstIndex.(*constant.Int); ok && fi.X.Sign() == 0 {
+		zeroFirst = true
 	}
 
-	// Opaque/mismatched src: cast to *elemType before field/array indexing.
-	switch elemType.(type) {
-	case *types.StructType, *types.ArrayType:
-		if srcPointerType.IsOpaque() || !types.Equal(srcPointerType.ElemType, elemType) {
-			et, err := TypeSpec(elemType)
+	if len(indices) == 1 && zeroFirst {
+		return val(srcExpr.code), nil
+	}
+
+	et, err := TypeSpec(elemType)
+	if err != nil {
+		return expr{}, err
+	}
+
+	var result *jen.Statement
+	if zeroFirst && srcExpr.base != nil && len(indices) > 1 {
+		result = srcExpr.dropAddr()
+	} else {
+		base := srcExpr.code
+		if isTaggedPointerType(src.Type()) {
+			telem, err := taggedPointerElem(src.Type())
 			if err != nil {
 				return expr{}, err
 			}
-			result = ptrCast(ptrTyp(et), result)
-			rewrote = true
-		}
-	}
-
-	if !zeroFirstIndex {
-		idx, err := FormatValue(firstIndex)
-		if err != nil {
-			return expr{}, fmt.Errorf("error translating first index (%v): %w", firstIndex, err)
-		}
-		if strideGEP {
-			et := jen.Byte()
-			if !byteGEP {
-				et, err = TypeSpec(elemType)
-				if err != nil {
-					return expr{}, err
-				}
-			}
-			add := libc("AddPointer").Types(et).Call(
-				ptrCast(ptrTyp(et), result),
-				jen.Int().Call(idx),
-			)
-			// gep of an opaque ptr elem is still `ptr` in LLVM 15+.
-			if pt, ok := elemType.(*types.PointerType); ok && pt.IsOpaque() {
-				result = unsafePtr(add)
-			} else {
-				result = add
-			}
+			base = ptrCast(ptrTyp(telem), base)
 		} else {
-			result = libc("AddPointer").Call(result, jen.Int().Call(idx))
+			base = ptrCast(ptrTyp(et), base)
 		}
-		rewrote = true
-	}
-	if !rewrote {
-		result = srcExpr.dropAddr()
+		if zeroFirst {
+			result = base
+		} else {
+			idx, err := FormatValue(firstIndex)
+			if err != nil {
+				return expr{}, fmt.Errorf("error translating first index (%v): %w", firstIndex, err)
+			}
+			result = libc("AddPointer").Types(et).Call(base, jen.Int().Call(idx))
+		}
 	}
 
 	currentType := elemType
-
+	takeAddress := false
 	for _, index := range indices[1:] {
 		if ind, ok := index.(*constant.Index); ok {
 			index = ind.Constant
@@ -134,23 +101,18 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if takeAddress {
 		return addrExpr(result), nil
 	}
-	return val(result), nil
+	return val(unsafePtr(result)), nil
 }
 
-func pointerElem(t types.Type) (types.Type, bool) {
-	pt, ok := t.(*types.PointerType)
-	if !ok {
-		return nil, false
-	}
-	if pt.IsOpaque() {
-		return nil, false
-	}
-	return pt.ElemType, true
-}
-
-func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, error) {
-	if got, ok := pointerElem(srcVal.Type()); ok && types.Equal(got, elem) {
-		return src.load(), nil
+func typedLoad(src expr, elem types.Type) (*jen.Statement, error) {
+	if src.base != nil {
+		loaded := src.load()
+		// Library FILE* globals are *os.File; LLVM pointer values are
+		// unsafe.Pointer. unsafe.Pointer(unsafe.Pointer) is a no-op convert.
+		if pt, ok := elem.(*types.PointerType); ok && !isTaggedPointerType(pt) {
+			return unsafePtr(loaded), nil
+		}
+		return loaded, nil
 	}
 	t, err := TypeSpec(elem)
 	if err != nil {
@@ -159,8 +121,8 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	return deref(ptrCast(ptrTyp(t), src.code)), nil
 }
 
-func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
-	if got, ok := pointerElem(dstVal.Type()); ok && types.Equal(got, elem) {
+func typedStore(dst expr, elem types.Type, src jen.Code) (*jen.Statement, error) {
+	if dst.base != nil {
 		return dst.store(src), nil
 	}
 	t, err := TypeSpec(elem)

@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "tmp := destroy",
-        "*(*func(*byte))(unsafe.Pointer(&tmp))",
+        "*(*unsafe.Pointer)(unsafe.Pointer(&tmp))",
         "var h Hooks"
       ],
       "not_contains": [

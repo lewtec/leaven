@@ -234,7 +234,6 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 			if isGoMain {
 				g.Qual("os", "Exit").Call(jen.Int().Call(retVal))
 			} else {
-				retVal = coerceOpaquePtr(fn.Sig.RetType, term.X, retVal)
 				g.Return(retVal)
 			}
 

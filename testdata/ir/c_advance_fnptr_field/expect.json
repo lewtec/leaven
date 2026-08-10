@@ -4,10 +4,10 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "func advance(lexer *TSLexer)",
+        "func advance(lexer unsafe.Pointer)",
         "local_advance",
-        "v1 = *local_advance",
-        "v1(v2, 0)"
+        "v1 = *(*unsafe.Pointer)(unsafe.Pointer(local_advance))",
+        "func() func(unsafe.Pointer, int32)"
       ],
       "not_contains": [
         "local_advance(v2"

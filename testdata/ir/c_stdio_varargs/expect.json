@@ -6,8 +6,8 @@
       "contains": [
         "package p",
         "\"github.com/lewtec/leaven/libc\"",
-        "func logf(fmt *byte, varargs ...interface{})",
-        "func file_bits(path *byte)",
+        "func logf(fmt unsafe.Pointer, varargs ...interface{})",
+        "func file_bits(path unsafe.Pointer)",
         "libc.Vsnprintf",
         "libc.Snprintf",
         "libc.Fdopen",

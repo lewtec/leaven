@@ -12,6 +12,7 @@ entry:
 }
 
 @vt = constant [4 x ptr] [ptr @str, ptr @typeinfo, ptr @dtor, ptr null]
+@p = global ptr @str
 
 define i32 @main() {
 entry:
