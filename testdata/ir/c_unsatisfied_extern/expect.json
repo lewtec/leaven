@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "var _ZTVN10__cxxabiv117__class_type_infoE",
+        "var _ZTVN10__cxxabiv120__si_class_type_infoE",
+        "panic(\"unsatisfied: __cxa_pure_virtual\")",
+        "unsafe.Pointer(&_ZTVN10__cxxabiv117__class_type_infoE)"
+      ],
+      "not_contains": [
+        "undefined:",
+        "func printf"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

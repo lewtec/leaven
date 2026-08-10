@@ -137,6 +137,22 @@ func namedRef(name string) (*jen.Statement, bool) {
 	return nil, false
 }
 
+// hasRuntimeDef reports whether name is provided by libc, a rust shim, or an
+// llvm.* intrinsic that translateCall handles. Declare-only IR symbols with
+// no runtime def become panic/zero stubs.
+func hasRuntimeDef(name string) bool {
+	if _, ok := libraryFunctions[name]; ok {
+		return true
+	}
+	if _, ok := libraryGlobals[name]; ok {
+		return true
+	}
+	if _, ok := namedRef(name); ok {
+		return true
+	}
+	return strings.HasPrefix(name, "llvm_")
+}
+
 func compositeValues(elems []jen.Code) *jen.Statement {
 	return jen.Values(elems...)
 }
@@ -171,6 +187,12 @@ func formatExpr(v value.Value) (expr, error) {
 			fn = c
 		}
 		return val(fnPtrBitcast(jen.Qual("unsafe", "Pointer"), fn)), nil
+
+	case *ir.Alias:
+		if v.Aliasee == nil {
+			return expr{}, fmt.Errorf("alias %s has no aliasee", v.Name())
+		}
+		return formatExpr(v.Aliasee)
 
 	case *ir.Global:
 		name := VariableName(v)

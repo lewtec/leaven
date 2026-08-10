@@ -28,6 +28,7 @@ func ParseString(path, content string) (*ir.Module, error) {
 		types:   make(map[string]types.Type),
 		globals: make(map[string]*ir.Global),
 		funcs:   make(map[string]*ir.Func),
+		aliases: make(map[string]*ir.Alias),
 		ptr:     types.NewOpaquePointer(),
 	}
 	if len(toks) > 0 {
@@ -49,6 +50,7 @@ type parser struct {
 	types   map[string]types.Type
 	globals map[string]*ir.Global
 	funcs   map[string]*ir.Func
+	aliases map[string]*ir.Alias
 	ptr     *types.PointerType
 	tok     token
 
@@ -435,6 +437,7 @@ func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption,
 	a.Visibility = vis
 	a.UnnamedAddr = unnamed
 	p.m.Aliases = append(p.m.Aliases, a)
+	p.aliases[name] = a
 	switch t := val.(type) {
 	case *ir.Func:
 		p.funcs[name] = t
@@ -2371,6 +2374,12 @@ func (p *parser) refAt(name string) (value.Value, error) {
 	p.next()
 	if f, ok := p.funcs[name]; ok {
 		return f, nil
+	}
+	if g, ok := p.globals[name]; ok {
+		return g, nil
+	}
+	if a, ok := p.aliases[name]; ok {
+		return a, nil
 	}
 	return p.ensureGlobal(name), nil
 }

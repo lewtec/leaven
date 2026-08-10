@@ -37,30 +37,35 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	}
 
 	for _, g := range m.Globals {
-		if g.Init == nil {
-			// Just a declaration; skip it.
+		name := VariableName(g)
+		if g.Init == nil && hasRuntimeDef(name) {
 			continue
 		}
 		t, err := TypeSpec(g.ContentType)
 		if err != nil {
 			return fmt.Errorf("error translating type (%v): %w", g.ContentType, err)
 		}
+		if g.Init == nil {
+			f.Var().Id(name).Add(t)
+			continue
+		}
 		val, err := FormatValue(g.Init)
 		if err != nil {
 			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
-		f.Var().Id(VariableName(g)).Add(t).Op("=").Add(val)
+		f.Var().Id(name).Add(t).Op("=").Add(val)
 	}
 
 	for _, fn := range m.Funcs {
-		if fn.Blocks == nil {
-			// Just a declaration, not a definition; skip it.
+		name := VariableName(fn)
+		if fn.Blocks == nil && hasRuntimeDef(name) {
 			continue
 		}
 
-		fixMalloc(fn)
+		if fn.Blocks != nil {
+			fixMalloc(fn)
+		}
 
-		name := VariableName(fn)
 		// Only package main gets a Go program entry point from C main.
 		isGoMain := name == "main" && packageName == "main"
 
@@ -71,7 +76,13 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 				if err != nil {
 					return fmt.Errorf("error translating type for parameter %d of %s: %w", i, fn.Name(), err)
 				}
-				params = append(params, jen.Id(VariableName(p)).Add(pt))
+				// Declares often have several unnamed ptr params; VariableName
+				// would make them all arg_v0.
+				pname := VariableName(p)
+				if fn.Blocks == nil {
+					pname = fmt.Sprintf("a%d", i)
+				}
+				params = append(params, jen.Id(pname).Add(pt))
 			}
 			if fn.Sig.Variadic {
 				params = append(params, jen.Id("varargs").Op("...").Interface())
@@ -90,11 +101,15 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			}
 		}
 
-		var bodyErr error
 		decl := f.Func().Id(name).Params(params...)
 		if ret != nil {
 			decl.Add(ret)
 		}
+		if fn.Blocks == nil {
+			decl.Block(jen.Panic(jen.Lit("unsatisfied: " + fn.Name())))
+			continue
+		}
+		var bodyErr error
 		decl.BlockFunc(func(g *jen.Group) {
 			if err := writeFuncBody(g, fn, isGoMain); err != nil {
 				bodyErr = err
