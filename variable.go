@@ -118,7 +118,8 @@ var invalidNames = map[string]bool{
 	"func": true, "go": true, "goto": true, "if": true, "import": true,
 	"interface": true, "map": true, "package": true, "range": true, "return": true,
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
-	// Common predeclared / special
+	// Common predeclared / special. "_" is the blank identifier (not a value).
+	"_":    true,
 	"init": true, "true": true, "false": true, "iota": true, "nil": true,
 	"bool": true, "byte": true, "error": true, "int": true, "int8": true,
 	"int16": true, "int32": true, "int64": true, "rune": true, "string": true,
@@ -441,6 +442,9 @@ func formatExpr(v value.Value) (expr, error) {
 		return val(formatComposite(t, elems)), nil
 
 	case *constant.ZeroInitializer:
+		if it, ok := v.Typ.(*types.IntType); ok && it.BitSize == 1 {
+			return val(jen.False()), nil
+		}
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
@@ -453,14 +457,19 @@ func formatExpr(v value.Value) (expr, error) {
 }
 
 func zeroOf(typ types.Type) (expr, error) {
-	switch typ.(type) {
+	switch t := typ.(type) {
 	case *types.ArrayType, *types.StructType, *types.VectorType:
-		t, err := TypeSpec(typ)
+		ts, err := TypeSpec(typ)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", typ, err)
 		}
-		return val(jen.Add(t).Values()), nil
-	case *types.IntType, *types.FloatType:
+		return val(jen.Add(ts).Values()), nil
+	case *types.IntType:
+		if t.BitSize == 1 {
+			return val(jen.False()), nil
+		}
+		return val(jen.Lit(0)), nil
+	case *types.FloatType:
 		return val(jen.Lit(0)), nil
 	case *types.PointerType:
 		return val(jen.Nil()), nil

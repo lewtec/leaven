@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "return false",
+        "func use_blank",
+        "var __ int32",
+        "__ = 1 + 2"
+      ],
+      "not_contains": [
+        "cannot use _"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
