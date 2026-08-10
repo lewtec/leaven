@@ -129,25 +129,37 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 	}
 	groups := make(map[string]*varGroup)
 	var allVars []string
+	addNamed := func(v value.Named) error {
+		if types.Equal(v.Type(), types.Void) {
+			return nil
+		}
+		t, err := TypeSpec(v.Type())
+		if err != nil {
+			return fmt.Errorf("error translating type of %s in %s: %w", v.Ident(), fn.Name(), err)
+		}
+		key := v.Type().String()
+		if groups[key] == nil {
+			groups[key] = &varGroup{typ: t}
+		}
+		groups[key].names = append(groups[key].names, VariableName(v))
+		allVars = append(allVars, VariableName(v))
+		return nil
+	}
 	for _, b := range fn.Blocks {
 		for _, inst := range b.Insts {
-			inst, ok := inst.(value.Named)
+			n, ok := inst.(value.Named)
 			if !ok {
 				continue
 			}
-			if types.Equal(inst.Type(), types.Void) {
-				continue
+			if err := addNamed(n); err != nil {
+				return err
 			}
-			t, err := TypeSpec(inst.Type())
-			if err != nil {
-				return fmt.Errorf("error translating type of %s in %s: %w", inst.Ident(), fn.Name(), err)
+		}
+		// invoke's result is the terminator, not an inst.
+		if n, ok := b.Term.(value.Named); ok {
+			if err := addNamed(n); err != nil {
+				return err
 			}
-			key := inst.Type().String()
-			if groups[key] == nil {
-				groups[key] = &varGroup{typ: t}
-			}
-			groups[key].names = append(groups[key].names, VariableName(inst))
-			allVars = append(allVars, VariableName(inst))
 		}
 	}
 	varTypes := make([]string, 0, len(groups))

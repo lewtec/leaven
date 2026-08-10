@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "func make_impl() struct",
+        "v = make_impl()",
+        "libc.RustAlloc"
+      ],
+      "not_contains": [
+        "unsafe.Pointer(make_impl())",
+        "cannot use"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

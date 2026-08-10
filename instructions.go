@@ -802,6 +802,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	}
 
 	var callee *jen.Statement
+	typedPtr := false // Go callee returns *T; LLVM dest is unsafe.Pointer
 	switch llvmName {
 	case "calloc", "malloc":
 		et := jen.Byte()
@@ -811,6 +812,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			}
 		}
 		callee = libc(strings.Title(llvmName)).Types(et)
+		typedPtr = true
 	case "leaven_va_start":
 		if len(args) == 1 {
 			return one(deref(args[0]).Op("=").Add(ptrCast(ptrTyp(jen.Byte()), addrOf(jen.Id("varargs"))))), nil
@@ -921,6 +923,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			for i, a := range inst.Args {
 				args[i] = libcCallArg(llvmName, i, a, args[i])
 			}
+			typedPtr = libcReturnsTypedPtr(llvmName)
 		} else if strings.Contains(llvmName, "panicking") ||
 			strings.Contains(llvmName, "handle_error") ||
 			strings.Contains(llvmName, "throw_logic_error") ||
@@ -959,17 +962,35 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	}
 
 	callExpr := jen.Add(callee).Call(args...)
-	if types.Equal(inst.Type(), types.Void) {
+	return finishCall(inst, callExpr, typedPtr)
+}
+
+// finishCall assigns a call to its SSA name. The call instruction's type is
+// the LangRef result. unsafe.Pointer(...) is only for our libc *T returns
+// (Malloc, Strchr, …), not a conversion of a struct value into a pointer.
+func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]jen.Code, error) {
+	dest := inst.Type()
+	if types.Equal(dest, types.Void) {
 		return one(callExpr), nil
 	}
-	if _, ok := inst.Type().(*types.PointerType); ok {
-		if isTaggedPointerType(inst.Type()) {
-			callExpr = uintptrOfPtr(callExpr)
-		} else {
-			callExpr = unsafePtr(callExpr)
-		}
+	if isTaggedPointerType(dest) {
+		return one(assign(VariableName(inst), uintptrOfPtr(callExpr))), nil
+	}
+	if _, ok := dest.(*types.PointerType); ok && typedPtr {
+		callExpr = unsafePtr(callExpr)
 	}
 	return one(assign(VariableName(inst), callExpr)), nil
+}
+
+func libcReturnsTypedPtr(name string) bool {
+	switch name {
+	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
+		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
+		"memset", "memcpy":
+		return true
+	default:
+		return false
+	}
 }
 
 func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
