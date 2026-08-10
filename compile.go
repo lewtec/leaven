@@ -122,6 +122,17 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	return nil
 }
 
+// writeCMainArgs binds C main(int argc, char **argv) from os.Args.
+// argc includes argv[0], same as C.
+func writeCMainArgs(g *jen.Group, fn *ir.Func) {
+	if len(fn.Params) >= 1 {
+		g.Id(VariableName(fn.Params[0])).Op("=").Int32().Call(jen.Len(jen.Qual("os", "Args")))
+	}
+	if len(fn.Params) >= 2 {
+		g.Id(VariableName(fn.Params[1])).Op("=").Add(libc("Argv").Call())
+	}
+}
+
 func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 	type varGroup struct {
 		typ   *jen.Statement
@@ -144,6 +155,13 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		groups[key].names = append(groups[key].names, VariableName(v))
 		allVars = append(allVars, VariableName(v))
 		return nil
+	}
+	if isGoMain {
+		for _, p := range fn.Params {
+			if err := addNamed(p); err != nil {
+				return err
+			}
+		}
 	}
 	for _, b := range fn.Blocks {
 		for _, inst := range b.Insts {
@@ -184,6 +202,9 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		}
 		g.List(lhs...).Op("=").List(rhs...)
 		g.Line()
+	}
+	if isGoMain {
+		writeCMainArgs(g, fn)
 	}
 
 	gotoTargets := blockGotoTargets(fn)

@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": [
+        "func main()",
+        "argc = int32(len(os.Args))",
+        "argv = libc.Argv()"
+      ],
+      "not_contains": [
+        "undefined: argc",
+        "undefined: argv",
+        "func main(argc"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
