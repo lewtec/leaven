@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dave/jennifer/jen"
+	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
@@ -104,8 +105,28 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	return val(unsafePtr(result)), nil
 }
 
-func typedLoad(src expr, elem types.Type) (*jen.Statement, error) {
-	if src.base != nil {
+// wholeVarAccess reports whether addrExpr.base is the entire LLVM object of
+// type elem. A store T to @g when g is a struct is a first-field overlay
+// (LangRef: store T at that address), not `g = T`.
+func wholeVarAccess(v value.Value, elem types.Type) bool {
+	g, ok := v.(*ir.Global)
+	if !ok {
+		return true
+	}
+	return types.Equal(g.ContentType, elem)
+}
+
+func overlayMem(addr *jen.Statement, elem types.Type) (*jen.Statement, error) {
+	t, err := TypeSpec(elem)
+	if err != nil {
+		return nil, err
+	}
+	// addr is already an LLVM pointer value (unsafe.Pointer).
+	return deref(jen.Parens(ptrTyp(t)).Call(addr)), nil
+}
+
+func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, error) {
+	if src.base != nil && wholeVarAccess(srcVal, elem) {
 		loaded := src.load()
 		// Library FILE* globals are *os.File; LLVM pointer values are
 		// unsafe.Pointer. unsafe.Pointer(unsafe.Pointer) is a no-op convert.
@@ -114,20 +135,20 @@ func typedLoad(src expr, elem types.Type) (*jen.Statement, error) {
 		}
 		return loaded, nil
 	}
-	t, err := TypeSpec(elem)
+	slot, err := overlayMem(src.code, elem)
 	if err != nil {
 		return nil, err
 	}
-	return deref(ptrCast(ptrTyp(t), src.code)), nil
+	return slot, nil
 }
 
-func typedStore(dst expr, elem types.Type, src jen.Code) (*jen.Statement, error) {
-	if dst.base != nil {
+func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
+	if dst.base != nil && wholeVarAccess(dstVal, elem) {
 		return dst.store(src), nil
 	}
-	t, err := TypeSpec(elem)
+	slot, err := overlayMem(dst.code, elem)
 	if err != nil {
 		return nil, err
 	}
-	return deref(ptrCast(ptrTyp(t), dst.code)).Op("=").Add(src), nil
+	return jen.Add(slot).Op("=").Add(src), nil
 }

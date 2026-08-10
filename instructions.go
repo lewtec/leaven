@@ -361,7 +361,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
-		val, err := typedLoad(src, inst.ElemType)
+		val, err := typedLoad(src, inst.Src, inst.ElemType)
 		if err != nil {
 			return nil, err
 		}
@@ -507,7 +507,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		st, err := typedStore(dest, inst.Src.Type(), src)
+		st, err := typedStore(dest, inst.Dst, inst.Src.Type(), src)
 		if err != nil {
 			return nil, err
 		}

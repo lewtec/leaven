@@ -6,8 +6,8 @@
       "contains": [
         "package p",
         "func renumber(self unsafe.Pointer, arg_v1 int32, arg_v2 int32)",
-        "*(*int32)(unsafe.Pointer(v1_addr)) = arg_v1",
-        "*(*int32)(unsafe.Pointer(v2_addr)) = arg_v2"
+        "*(*int32)(v1_addr) = arg_v1",
+        "*(*int32)(v2_addr) = arg_v2"
       ],
       "not_contains": [
         "func renumber(self unsafe.Pointer, v1 int32, v2 int32)"
