@@ -11,8 +11,8 @@ go = "1.26.5"
 "github:lucasew/workspaced" = "0.14.3"
 
 [tasks.test]
-description = "IR-only tests (committed input.<n>.ll; no clang)"
-run = "go test -v -count=1 -timeout 10m ./..."
+description = "IR fixtures (committed input.<n>.ll; skips TestAssimilate)"
+run = "go test -v -count=1 -timeout 10m -skip TestAssimilate ./..."
 
 [tasks."ir:gen"]
 description = "Regenerate testdata/ir/*/input.<n>.ll (clang 14 + clang 22 + rustc)"
@@ -48,5 +48,5 @@ fi
 """
 
 [tasks."test:assimilate"]
-description = "Emit IR from testdata/projects and run leaven (needs projects:sync)"
-run = "go test -tags=assimilate -count=1 -timeout 30m -run TestAssimilate -v ."
+description = "Assimilate csmith + rhai only (places testdata/projects if needed)"
+run = "go test -count=1 -timeout 30m -run TestAssimilate -v ."

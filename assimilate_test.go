@@ -1,5 +1,3 @@
-//go:build assimilate
-
 package leaven
 
 import (
@@ -13,11 +11,9 @@ import (
 	"testing"
 )
 
-// TestAssimilate emits LLVM IR from workspaced-placed upstream trees and
-// runs leaven on it. Skip when testdata/projects is missing:
-//
-//	mise run projects:sync
-//	go test -tags=assimilate -count=1 -timeout 30m -run TestAssimilate -v .
+// TestAssimilate places testdata/projects (if needed), emits LLVM IR, and
+// runs leaven. Skips when workspaced/clang 22/cargo are missing.
+// Under -short, skips the slow rhai cargo emit.
 func TestAssimilate(t *testing.T) {
 	t.Run("csmith", testAssimilateCsmith)
 	t.Run("rhai", testAssimilateRhai)
@@ -68,6 +64,9 @@ func testAssimilateCsmith(t *testing.T) {
 }
 
 func testAssimilateRhai(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: skip rhai cargo emit")
+	}
 	root := requireProject(t, "rhai", "Cargo.toml")
 	clang, sysroot, libdir := clang22LinkEnv(t)
 	cmd := exec.Command("mise", "exec", "--", "cargo", "rustc", "--bin", "rhai-run", "--release",
@@ -108,14 +107,30 @@ func assimilateLL(t *testing.T, ll string) {
 func requireProject(t *testing.T, name, marker string) string {
 	t.Helper()
 	root := filepath.Join("testdata", "projects", name)
-	if _, err := os.Stat(filepath.Join(root, marker)); err != nil {
-		t.Skipf("%s not placed (%v); run: mise run projects:sync", root, err)
+	mark := filepath.Join(root, marker)
+	if _, err := os.Stat(mark); err != nil {
+		syncProjects(t)
+	}
+	if _, err := os.Stat(mark); err != nil {
+		t.Skipf("%s not placed after workspaced apply: %v", root, err)
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return abs
+}
+
+func syncProjects(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("workspaced"); err != nil {
+		t.Skip("workspaced not on PATH; mise install")
+	}
+	cmd := exec.Command("workspaced", "codebase", "apply")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Skipf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
+	}
 }
 
 func writeCsmithConfig(t *testing.T, dir string) {
@@ -146,7 +161,7 @@ func clangXX22(t *testing.T) (bin string, isystem []string) {
 	t.Helper()
 	out, err := exec.Command("mise", "exec", "conda:clangxx@22.1.8", "--", "sh", "-c", "command -v clang++").CombinedOutput()
 	if err != nil {
-		t.Fatalf("mise clang++ 22: %v\n%s", err, out)
+		t.Skipf("mise clang++ 22: %v\n%s", err, out)
 	}
 	bin = strings.TrimSpace(string(out))
 	prefix := filepath.Dir(filepath.Dir(bin))
@@ -166,7 +181,7 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 	t.Helper()
 	out, err := exec.Command("mise", "exec", "conda:clangxx@22.1.8", "--", "sh", "-c", "command -v clang").CombinedOutput()
 	if err != nil {
-		t.Fatalf("mise clang 22: %v\n%s", err, out)
+		t.Skipf("mise clang 22: %v\n%s", err, out)
 	}
 	clang = strings.TrimSpace(string(out))
 	prefix := filepath.Dir(filepath.Dir(clang))
