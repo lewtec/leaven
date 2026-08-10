@@ -46,3 +46,7 @@ if git ls-files --error-unmatch workspaced.lock.json >/dev/null 2>&1; then
   git checkout -- workspaced.lock.json
 fi
 """
+
+[tasks."test:assimilate"]
+description = "Emit IR from testdata/projects and run leaven (needs projects:sync)"
+run = "go test -tags=assimilate -count=1 -timeout 30m -run TestAssimilate -v ."
