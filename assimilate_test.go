@@ -37,7 +37,8 @@ func testAssimilateCsmith(t *testing.T) {
 	}
 	srcs = append(srcs, gitV)
 
-	var emitted, clangFail int
+	var lls []string
+	var clangFail int
 	for _, src := range srcs {
 		base := strings.TrimSuffix(filepath.Base(src), ".cpp")
 		ll := filepath.Join(build, base+".ll")
@@ -54,13 +55,19 @@ func testAssimilateCsmith(t *testing.T) {
 			t.Logf("clang++ skip %s: %s", filepath.Base(src), lastErrorLine(out))
 			continue
 		}
-		emitted++
-		assimilateLL(t, ll)
+		lls = append(lls, ll)
 	}
-	if emitted == 0 {
+	if len(lls) == 0 {
 		t.Fatalf("clang++ emitted 0/%d TUs (%d skipped)", len(srcs), clangFail)
 	}
-	t.Logf("leaven ok on %d TUs (%d clang++ skipped)", emitted, clangFail)
+	linked := filepath.Join(build, "csmith.ll")
+	linkArgs := append([]string{"-S", "-o", linked}, lls...)
+	cmd := exec.Command(llvmLink22(t), linkArgs...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("llvm-link %d TUs: %v\n%s", len(lls), err, tailBytes(out, 4000))
+	}
+	t.Logf("llvm-link %d TUs (%d clang++ skipped) -> %s", len(lls), clangFail, filepath.Base(linked))
+	assimilateLL(t, linked)
 }
 
 func testAssimilateRhai(t *testing.T) {
@@ -175,6 +182,15 @@ func clangXX22(t *testing.T) (bin string, isystem []string) {
 		flags = append(flags, "-isystem", ts[0])
 	}
 	return bin, flags
+}
+
+func llvmLink22(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("mise", "exec", "conda:llvm-tools@22.1.8", "--", "sh", "-c", "command -v llvm-link").CombinedOutput()
+	if err != nil {
+		t.Skipf("mise llvm-link 22: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {

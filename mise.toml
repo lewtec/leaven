@@ -3,6 +3,7 @@
 # Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
 "conda:clang" = "14.0.6"
 "conda:clangxx" = "14.0.6"
+"conda:llvm-tools" = "22.1.8"
 "conda:rust" = "1.97.1"
 # Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
