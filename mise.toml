@@ -8,6 +8,7 @@
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
+"github:lucasew/workspaced" = "0.14.3"
 
 [tasks.test]
 description = "IR-only tests (committed input.<n>.ll; no clang)"
@@ -32,3 +33,16 @@ run = "go test -tags=live -v -count=1 -timeout 10m ./..."
 [tasks."test:csmith"]
 description = "Csmith smoke: known-good seed=1"
 run = "go test -tags=csmith -count=1 -timeout 10m -run 'TestCsmithFixedSeeds/seed=1$'"
+
+[tasks."projects:lock"]
+description = "Refresh workspaced.lock.json for csmith + rhai"
+run = "workspaced mod lock"
+
+[tasks."projects:sync"]
+description = "Place csmith + rhai under testdata/projects/ via core:place (gitignored)"
+run = """
+workspaced codebase apply
+if git ls-files --error-unmatch workspaced.lock.json >/dev/null 2>&1; then
+  git checkout -- workspaced.lock.json
+fi
+"""
