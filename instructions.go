@@ -706,15 +706,7 @@ func coerceCallArg(inst *ir.InstCall, i int, a value.Value, got *jen.Statement) 
 	if !ok || i >= len(fn.Params) {
 		return got
 	}
-	want, ok := fn.Params[i].Typ.(*types.PointerType)
-	if !ok || !want.IsOpaque() {
-		return got
-	}
-	have, ok := a.Type().(*types.PointerType)
-	if !ok || have.IsOpaque() {
-		return got
-	}
-	return unsafePtr(got)
+	return coerceOpaquePtr(fn.Params[i].Typ, a, got)
 }
 
 func calleeLLVMName(v value.Value) string {

@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "[4]unsafe.Pointer",
+        "unsafe.Pointer(&str)",
+        "unsafe.Pointer(&typeinfo)",
+        "tmp := dtor",
+        "*(*unsafe.Pointer)(unsafe.Pointer(&tmp))"
+      ],
+      "not_contains": [
+        "unsafe.Pointer(dtor)",
+        "unsafe.Pointer(str)"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
