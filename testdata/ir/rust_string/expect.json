@@ -3,7 +3,7 @@
     {
       "name": "main",
       "package": "main",
-      "contains": ["func main", "libc.Printf"]
+      "contains": ["func main", "libc.RustPrint"]
     }
   ],
   "run": {

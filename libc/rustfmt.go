@@ -1,0 +1,82 @@
+package libc
+
+import (
+	"fmt"
+	"os"
+	"unsafe"
+)
+
+// rustArg is core::fmt::rt::Argument: { value, formatter }.
+// rustc 1.97 stores a 16-byte placeholder (no tag) for Display args.
+const rustArgSize = 16
+
+type rustFmtFn func(val, formatter unsafe.Pointer) bool
+
+// RustPrint is std::io::stdio::_print(template, args).
+// Template encoding: rustc 1.97 fmt::Arguments (byte pieces + 0xC0 placeholders).
+func RustPrint(tmpl, args unsafe.Pointer) {
+	if tmpl == nil {
+		return
+	}
+	p := tmpl
+	next := 0
+	for {
+		n := *(*byte)(p)
+		p = unsafe.Add(p, 1)
+		if n == 0 {
+			return
+		}
+		if n < 128 {
+			os.Stdout.Write(unsafe.Slice((*byte)(p), int(n)))
+			p = unsafe.Add(p, int(n))
+			continue
+		}
+		if n == 128 {
+			lenb := unsafe.Slice((*byte)(p), 2)
+			nlen := int(lenb[0]) | int(lenb[1])<<8
+			p = unsafe.Add(p, 2)
+			os.Stdout.Write(unsafe.Slice((*byte)(p), nlen))
+			p = unsafe.Add(p, nlen)
+			continue
+		}
+		if n < 0xC0 {
+			panic("invalid rust fmt template")
+		}
+		skip := 0
+		if n&1 != 0 {
+			skip += 4
+		}
+		if n&2 != 0 {
+			skip += 2
+		}
+		if n&4 != 0 {
+			skip += 2
+		}
+		idx := next
+		if n&8 != 0 {
+			ib := unsafe.Slice((*byte)(unsafe.Add(p, skip)), 2)
+			idx = int(ib[0]) | int(ib[1])<<8
+			skip += 2
+		} else {
+			next++
+		}
+		p = unsafe.Add(p, skip)
+		slot := unsafe.Add(args, idx*rustArgSize)
+		val := *(*unsafe.Pointer)(slot)
+		fn := *(*rustFmtFn)(unsafe.Add(slot, 8))
+		var dummy [24]byte
+		fn(val, unsafe.Pointer(&dummy[0]))
+	}
+}
+
+// RustFmtI32 is <i32 as core::fmt::Display>::fmt. Ok is false (i1 0).
+func RustFmtI32(val, _ unsafe.Pointer) bool {
+	fmt.Fprint(os.Stdout, *(*int32)(val))
+	return false
+}
+
+// RustFmtUsize is <usize as core::fmt::Display>::fmt.
+func RustFmtUsize(val, _ unsafe.Pointer) bool {
+	fmt.Fprint(os.Stdout, *(*uint64)(val))
+	return false
+}

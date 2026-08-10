@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "name": "main",
+      "package": "main",
+      "contains": ["func main", "libc.RustPrint", "libc.RustAlloc"]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["10"]
+  }
+}

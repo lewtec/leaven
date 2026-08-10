@@ -5,7 +5,7 @@ target triple = "x86_64-unknown-linux-gnu"
 
 @alloc_3aef7c697f52c5a3e9548cf3d170303c = private unnamed_addr constant [3 x i8] c"foo", align 1
 @alloc_d4d3cbd0d4712cfcd6657cf295c08ada = private unnamed_addr constant [3 x i8] c"bar", align 1
-@alloc_7e13ca7afcb9bc97c802a7e9556bade4 = private unnamed_addr constant [5 x i8] c"%zu\0A\00", align 1
+@alloc_61247b90e1706a3f65e71312b599d3d1 = private unnamed_addr constant [4 x i8] c"\C0\01\0A\00", align 1
 
 ; <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
 ; Function Attrs: cold nounwind nonlazybind uwtable
@@ -24,7 +24,7 @@ bb9.i:                                            ; preds = %start
   %..i15.i = tail call noundef i64 @llvm.umax.i64(i64 %..i.i, i64 8)
   call void @llvm.lifetime.start.p0(ptr nonnull %self3.i), !noalias !3
 ; call <alloc::raw_vec::RawVecInner>::finish_grow
-  call fastcc void @_RNvMs4_NtCscdodAO9FK5_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsj29zdfijJxG_6source(ptr noalias noundef sret([24 x i8]) align 8 captures(none) dereferenceable(24) %self3.i, ptr noalias noundef nonnull readonly align 8 captures(address, read_provenance) dereferenceable(16) %slf, i64 noundef %..i15.i) #12
+  call fastcc void @_RNvMs4_NtCscdodAO9FK5_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsj29zdfijJxG_6source(ptr noalias noundef sret([24 x i8]) align 8 captures(none) dereferenceable(24) %self3.i, ptr noalias noundef nonnull readonly align 8 captures(address, read_provenance) dereferenceable(16) %slf, i64 noundef %..i15.i) #11
   %_37.i = load i64, ptr %self3.i, align 8, !range !8, !noalias !3, !noundef !7
   %0 = trunc nuw i64 %_37.i to i1
   %1 = getelementptr inbounds nuw i8, ptr %self3.i, i64 8
@@ -41,7 +41,7 @@ bb2:                                              ; preds = %bb18.i, %start
   %_0.sroa.5.0.i.ph = phi i64 [ undef, %start ], [ %e.1.i, %bb18.i ]
   %_0.sroa.0.0.i.ph = phi i64 [ 0, %start ], [ %e.0.i, %bb18.i ]
 ; call alloc::raw_vec::handle_error
-  tail call void @_RNvNtCscdodAO9FK5_5alloc7raw_vec12handle_error(i64 noundef %_0.sroa.0.0.i.ph, i64 %_0.sroa.5.0.i.ph) #13
+  tail call void @_RNvNtCscdodAO9FK5_5alloc7raw_vec12handle_error(i64 noundef %_0.sroa.0.0.i.ph, i64 %_0.sroa.5.0.i.ph) #12
   unreachable
 
 bb3:                                              ; preds = %bb9.i
@@ -73,7 +73,7 @@ _RNvXs_NtCscdodAO9FK5_5alloc5allocNtB4_6GlobalNtNtCs4NRVxsYgnAr_4core5alloc9Allo
   %cond.i.i = icmp samesign uge i64 %cap, %self1.i
   tail call void @llvm.assume(i1 %cond.i.i)
 ; call __rustc::__rust_realloc
-  %raw_ptr.i.i = tail call noundef ptr @_RNvCs9wFQrvczXsK_7___rustc14___rust_realloc(ptr noundef nonnull %self3.i, i64 noundef %self1.i, i64 noundef 1, i64 noundef range(i64 0, -9223372036854775808) %cap) #12
+  %raw_ptr.i.i = tail call noundef ptr @_RNvCs9wFQrvczXsK_7___rustc14___rust_realloc(ptr noundef nonnull %self3.i, i64 noundef %self1.i, i64 noundef 1, i64 noundef range(i64 0, -9223372036854775808) %cap) #11
   br label %bb7
 
 bb5:                                              ; preds = %bb15
@@ -82,9 +82,9 @@ bb5:                                              ; preds = %bb15
 
 bb4.i.i:                                          ; preds = %bb5
 ; call __rustc::__rust_no_alloc_shim_is_unstable_v2
-  tail call void @_RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2() #12
+  tail call void @_RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2() #11
 ; call __rustc::__rust_alloc
-  %3 = tail call noundef ptr @_RNvCs9wFQrvczXsK_7___rustc12___rust_alloc(i64 noundef range(i64 0, -9223372036854775808) %cap, i64 noundef 1) #12
+  %3 = tail call noundef ptr @_RNvCs9wFQrvczXsK_7___rustc12___rust_alloc(i64 noundef range(i64 0, -9223372036854775808) %cap, i64 noundef 1) #11
   br label %bb7
 
 bb7:                                              ; preds = %bb4.i.i, %_RNvXs_NtCscdodAO9FK5_5alloc5allocNtB4_6GlobalNtNtCs4NRVxsYgnAr_4core5alloc9Allocator4grow.exit
@@ -116,50 +116,61 @@ bb11:                                             ; preds = %start, %bb9, %bb8
 ; Function Attrs: cold nounwind nonlazybind uwtable
 define noundef i32 @main() unnamed_addr #0 personality ptr @rust_eh_personality {
 start:
+  %args = alloca [16 x i8], align 8
+  %_5 = alloca [8 x i8], align 8
   %s = alloca [24 x i8], align 8
   call void @llvm.lifetime.start.p0(ptr nonnull %s)
 ; call __rustc::__rust_no_alloc_shim_is_unstable_v2
-  tail call void @_RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2() #12, !noalias !15
+  tail call void @_RNvCs9wFQrvczXsK_7___rustc35___rust_no_alloc_shim_is_unstable_v2() #11, !noalias !15
 ; call __rustc::__rust_alloc
-  %0 = tail call noundef dereferenceable_or_null(3) ptr @_RNvCs9wFQrvczXsK_7___rustc12___rust_alloc(i64 noundef range(i64 0, -9223372036854775808) 3, i64 noundef 1) #12, !noalias !15
+  %0 = tail call noundef dereferenceable_or_null(3) ptr @_RNvCs9wFQrvczXsK_7___rustc12___rust_alloc(i64 noundef range(i64 0, -9223372036854775808) 3, i64 noundef 1) #11, !noalias !15
   %1 = icmp eq ptr %0, null
   br i1 %1, label %bb7, label %_RNvMs_NtCscdodAO9FK5_5alloc3vecINtB4_3VechE15append_elementsCsj29zdfijJxG_6source.exit, !prof !18
 
 bb7:                                              ; preds = %start
 ; call alloc::raw_vec::handle_error
-  tail call void @_RNvNtCscdodAO9FK5_5alloc7raw_vec12handle_error(i64 noundef 1, i64 3) #13
+  tail call void @_RNvNtCscdodAO9FK5_5alloc7raw_vec12handle_error(i64 noundef 1, i64 3) #12
   unreachable
 
 _RNvMs_NtCscdodAO9FK5_5alloc3vecINtB4_3VechE15append_elementsCsj29zdfijJxG_6source.exit: ; preds = %start
   tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(3) %0, ptr noundef nonnull align 1 dereferenceable(3) @alloc_3aef7c697f52c5a3e9548cf3d170303c, i64 3, i1 false)
   store i64 3, ptr %s, align 8
-  %_6.sroa.4.0.s.sroa_idx = getelementptr inbounds nuw i8, ptr %s, i64 8
-  store ptr %0, ptr %_6.sroa.4.0.s.sroa_idx, align 8
-  %_6.sroa.6.0.s.sroa_idx = getelementptr inbounds nuw i8, ptr %s, i64 16
-  store i64 3, ptr %_6.sroa.6.0.s.sroa_idx, align 8
+  %_9.sroa.4.0.s.sroa_idx = getelementptr inbounds nuw i8, ptr %s, i64 8
+  store ptr %0, ptr %_9.sroa.4.0.s.sroa_idx, align 8
+  %_9.sroa.6.0.s.sroa_idx = getelementptr inbounds nuw i8, ptr %s, i64 16
+  store i64 3, ptr %_9.sroa.6.0.s.sroa_idx, align 8
   tail call void @llvm.experimental.noalias.scope.decl(metadata !19)
 ; call <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
-  call fastcc void @_RINvNvMs2_NtCscdodAO9FK5_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsj29zdfijJxG_6source(ptr noalias noundef nonnull align 8 dereferenceable(24) %s, i64 noundef 3) #12
-  %len.pre.i = load i64, ptr %_6.sroa.6.0.s.sroa_idx, align 8, !alias.scope !19
+  call fastcc void @_RINvNvMs2_NtCscdodAO9FK5_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsj29zdfijJxG_6source(ptr noalias noundef nonnull align 8 dereferenceable(24) %s, i64 noundef 3) #11
+  %len.pre.i = load i64, ptr %_9.sroa.6.0.s.sroa_idx, align 8, !alias.scope !19
   %_10.i = icmp sgt i64 %len.pre.i, -1
   tail call void @llvm.assume(i1 %_10.i)
-  %_11.i = load ptr, ptr %_6.sroa.4.0.s.sroa_idx, align 8, !alias.scope !19, !nonnull !7, !noundef !7
+  %_11.i = load ptr, ptr %_9.sroa.4.0.s.sroa_idx, align 8, !alias.scope !19, !nonnull !7, !noundef !7
   %dst.i = getelementptr inbounds nuw i8, ptr %_11.i, i64 %len.pre.i
   tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(3) %dst.i, ptr noundef nonnull align 1 dereferenceable(3) @alloc_d4d3cbd0d4712cfcd6657cf295c08ada, i64 3, i1 false), !noalias !19
   %2 = add nuw nsw i64 %len.pre.i, 3
-  %_2 = tail call noundef i32 (ptr, ...) @printf(ptr noundef nonnull dereferenceable(1) @alloc_7e13ca7afcb9bc97c802a7e9556bade4, i64 noundef %2) #12
-  tail call void @llvm.experimental.noalias.scope.decl(metadata !22)
-  tail call void @llvm.experimental.noalias.scope.decl(metadata !25)
-  tail call void @llvm.experimental.noalias.scope.decl(metadata !28)
-  tail call void @llvm.experimental.noalias.scope.decl(metadata !31)
-  tail call void @llvm.experimental.noalias.scope.decl(metadata !34)
+  call void @llvm.lifetime.start.p0(ptr nonnull %_5)
+  store i64 %2, ptr %_5, align 8
+  call void @llvm.lifetime.start.p0(ptr nonnull %args)
+  store ptr %_5, ptr %args, align 8
+  %_7.sroa.4.0..sroa_idx = getelementptr inbounds nuw i8, ptr %args, i64 8
+  store ptr @_RNvXsi_NtNtNtCs4NRVxsYgnAr_4core3fmt3num3impjNtB9_7Display3fmt, ptr %_7.sroa.4.0..sroa_idx, align 8
+; call std::io::stdio::_print
+  call void @_RNvNtNtCs2AWtUsOyxgP_3std2io5stdio6__print(ptr noundef nonnull @alloc_61247b90e1706a3f65e71312b599d3d1, ptr noundef nonnull %args) #11
+  call void @llvm.lifetime.end.p0(ptr nonnull %args)
+  call void @llvm.lifetime.end.p0(ptr nonnull %_5)
+  call void @llvm.experimental.noalias.scope.decl(metadata !22)
+  call void @llvm.experimental.noalias.scope.decl(metadata !25)
+  call void @llvm.experimental.noalias.scope.decl(metadata !28)
+  call void @llvm.experimental.noalias.scope.decl(metadata !31)
+  call void @llvm.experimental.noalias.scope.decl(metadata !34)
   %self1.i.i.i.i.i.i = load i64, ptr %s, align 8, !range !6, !alias.scope !37, !noalias !40, !noundef !7
   %3 = icmp eq i64 %self1.i.i.i.i.i.i, 0
   br i1 %3, label %_RINvNtCs4NRVxsYgnAr_4core3ptr9drop_glueNtNtCscdodAO9FK5_5alloc6string6StringECsj29zdfijJxG_6source.exit, label %_RNvXs_NtCscdodAO9FK5_5alloc5allocNtB4_6GlobalNtNtCs4NRVxsYgnAr_4core5alloc9Allocator10deallocate.exit.i.i.i.i.i
 
 _RNvXs_NtCscdodAO9FK5_5alloc5allocNtB4_6GlobalNtNtCs4NRVxsYgnAr_4core5alloc9Allocator10deallocate.exit.i.i.i.i.i: ; preds = %_RNvMs_NtCscdodAO9FK5_5alloc3vecINtB4_3VechE15append_elementsCsj29zdfijJxG_6source.exit
 ; call __rustc::__rust_dealloc
-  tail call void @_RNvCs9wFQrvczXsK_7___rustc14___rust_dealloc(ptr noundef nonnull %_11.i, i64 noundef %self1.i.i.i.i.i.i, i64 noundef range(i64 1, -9223372036854775807) 1) #12, !noalias !42
+  call void @_RNvCs9wFQrvczXsK_7___rustc14___rust_dealloc(ptr noundef nonnull %_11.i, i64 noundef %self1.i.i.i.i.i.i, i64 noundef range(i64 1, -9223372036854775807) 1) #11, !noalias !42
   br label %_RINvNtCs4NRVxsYgnAr_4core3ptr9drop_glueNtNtCscdodAO9FK5_5alloc6string6StringECsj29zdfijJxG_6source.exit
 
 _RINvNtCs4NRVxsYgnAr_4core3ptr9drop_glueNtNtCscdodAO9FK5_5alloc6string6StringECsj29zdfijJxG_6source.exit: ; preds = %_RNvMs_NtCscdodAO9FK5_5alloc3vecINtB4_3VechE15append_elementsCsj29zdfijJxG_6source.exit, %_RNvXs_NtCscdodAO9FK5_5alloc5allocNtB4_6GlobalNtNtCs4NRVxsYgnAr_4core5alloc9Allocator10deallocate.exit.i.i.i.i.i
@@ -202,14 +213,19 @@ declare noalias noundef ptr @_RNvCs9wFQrvczXsK_7___rustc12___rust_alloc(i64 noun
 ; Function Attrs: nounwind nonlazybind uwtable
 declare noundef range(i32 0, 10) i32 @rust_eh_personality(i32 noundef, i32 noundef, i64 noundef, ptr noundef, ptr noundef) unnamed_addr #7
 
-; Function Attrs: nofree nounwind nonlazybind uwtable
-declare noundef i32 @printf(ptr noundef readonly captures(none), ...) unnamed_addr #9
+; <usize as core::fmt::Display>::fmt
+; Function Attrs: nounwind nonlazybind uwtable
+declare noundef zeroext i1 @_RNvXsi_NtNtNtCs4NRVxsYgnAr_4core3fmt3num3impjNtB9_7Display3fmt(ptr noalias noundef readonly align 8 captures(address, read_provenance) dereferenceable(8), ptr noalias noundef align 8 dereferenceable(24)) unnamed_addr #7
+
+; std::io::stdio::_print
+; Function Attrs: nounwind nonlazybind uwtable
+declare void @_RNvNtNtCs2AWtUsOyxgP_3std2io5stdio6__print(ptr noundef nonnull, ptr noundef nonnull) unnamed_addr #7
 
 ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite)
-declare void @llvm.experimental.noalias.scope.decl(metadata) #10
+declare void @llvm.experimental.noalias.scope.decl(metadata) #9
 
 ; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
-declare i64 @llvm.umax.i64(i64, i64) #11
+declare i64 @llvm.umax.i64(i64, i64) #10
 
 attributes #0 = { cold nounwind nonlazybind uwtable "probe-stack"="inline-asm" "target-cpu"="x86-64" }
 attributes #1 = { mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite) }
@@ -220,11 +236,10 @@ attributes #5 = { nounwind nonlazybind allockind("free") uwtable "alloc-family"=
 attributes #6 = { nounwind nonlazybind allockind("realloc,aligned") allocsize(3) uwtable "alloc-family"="__rust_alloc" "probe-stack"="inline-asm" "target-cpu"="x86-64" }
 attributes #7 = { nounwind nonlazybind uwtable "probe-stack"="inline-asm" "target-cpu"="x86-64" }
 attributes #8 = { nounwind nonlazybind allockind("alloc,uninitialized,aligned") allocsize(0) uwtable "alloc-family"="__rust_alloc" "alloc-variant-zeroed"="_RNvCs9wFQrvczXsK_7___rustc19___rust_alloc_zeroed" "probe-stack"="inline-asm" "target-cpu"="x86-64" }
-attributes #9 = { nofree nounwind nonlazybind uwtable "probe-stack"="inline-asm" "target-cpu"="x86-64" }
-attributes #10 = { nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite) }
-attributes #11 = { nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none) }
-attributes #12 = { nounwind }
-attributes #13 = { noreturn nounwind }
+attributes #9 = { nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite) }
+attributes #10 = { nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none) }
+attributes #11 = { nounwind }
+attributes #12 = { noreturn nounwind }
 
 !llvm.module.flags = !{!0, !1}
 !llvm.ident = !{!2}

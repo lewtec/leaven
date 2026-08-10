@@ -128,6 +128,9 @@ func namedRef(name string) (*jen.Statement, bool) {
 	if ref, ok := libraryFunctions[name]; ok {
 		return ref.code(), true
 	}
+	if c := rustRuntime(name); c != nil {
+		return c, true
+	}
 	return nil, false
 }
 
@@ -371,20 +374,9 @@ func formatExpr(v value.Value) (expr, error) {
 		return val(formatComposite(t, elems)), nil
 
 	case *constant.Undef:
-		switch v.Typ.(type) {
-		case *types.ArrayType, *types.StructType, *types.VectorType:
-			t, err := TypeSpec(v.Typ)
-			if err != nil {
-				return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
-			}
-			return val(jen.Add(t).Values()), nil
-		case *types.IntType, *types.FloatType:
-			return val(jen.Lit(0)), nil
-		case *types.PointerType:
-			return val(jen.Nil()), nil
-		default:
-			return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, v.Typ)
-		}
+		return zeroOf(v.Typ)
+	case *constant.Poison:
+		return zeroOf(v.Typ)
 
 	case *constant.Vector:
 		t, err := TypeSpec(v.Typ)
@@ -410,6 +402,23 @@ func formatExpr(v value.Value) (expr, error) {
 
 	default:
 		return expr{}, fmt.Errorf("%w: %T", errUnsupportedValueType, v)
+	}
+}
+
+func zeroOf(typ types.Type) (expr, error) {
+	switch typ.(type) {
+	case *types.ArrayType, *types.StructType, *types.VectorType:
+		t, err := TypeSpec(typ)
+		if err != nil {
+			return expr{}, fmt.Errorf("error translating type (%v): %w", typ, err)
+		}
+		return val(jen.Add(t).Values()), nil
+	case *types.IntType, *types.FloatType:
+		return val(jen.Lit(0)), nil
+	case *types.PointerType:
+		return val(jen.Nil()), nil
+	default:
+		return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, typ)
 	}
 }
 
