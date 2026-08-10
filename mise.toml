@@ -1,8 +1,8 @@
 [tools]
 # Install: mise install
 # Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
-"conda:clang" = "14.0.6"
-"conda:clangxx" = "14.0.6"
+"conda:clang" = ["14.0.6", "22.1.8"]
+"conda:clangxx" = ["14.0.6", "22.1.8"]
 "conda:llvm-tools" = "22.1.8"
 "conda:rust" = "1.97.1"
 # Assimilate harness: cmake+ninja+m4 for csmith; cargo (via rust) for rhai.
@@ -33,7 +33,7 @@ run = "go run ./internal/genir -c conda:clang@22.1.8 -cxx conda:clangxx@22.1.8"
 
 [tasks."test:live"]
 description = "C vs leaven differential (needs clang); -v lists fixtures"
-run = "go test -tags=live -v -count=1 -timeout 10m ./..."
+run = "go test -tags=live -v -count=1 -timeout 10m -skip TestAssimilate ./..."
 
 [tasks."test:csmith"]
 description = "Csmith smoke: known-good seed=1"

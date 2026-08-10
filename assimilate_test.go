@@ -380,13 +380,16 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 
 func miseWhich(t *testing.T, bin, tool string) string {
 	t.Helper()
-	out, err := exec.Command("mise", "which", "--tool", tool, bin).CombinedOutput()
+	// exec TOOL puts that version on PATH even when another version is the
+	// directory default (clang 14 vs 22). `mise which --tool` errors on CI
+	// if the version is installed but not the active one.
+	out, err := exec.Command("mise", "exec", tool, "--", "which", bin).CombinedOutput()
 	if err != nil {
-		t.Fatalf("mise which %s (%s): %v\n%s", bin, tool, err, out)
+		t.Fatalf("mise exec %s -- which %s: %v\n%s", tool, bin, err, out)
 	}
 	p := strings.TrimSpace(string(out))
 	if p == "" {
-		t.Fatalf("mise which %s (%s): empty path", bin, tool)
+		t.Fatalf("mise exec %s -- which %s: empty path", tool, bin)
 	}
 	return p
 }
