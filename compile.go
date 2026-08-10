@@ -290,6 +290,36 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		case *ir.TermUnreachable:
 			g.Panic(jen.Lit("unreachable"))
 
+		case *ir.TermInvoke:
+			call := &ir.InstCall{
+				LocalIdent: term.LocalIdent,
+				Callee:     term.Invokee,
+				Args:       term.Args,
+				Typ:        term.Typ,
+			}
+			translated, err := translateCall(call)
+			if err != nil {
+				return fmt.Errorf("error translating invoke: %w", err)
+			}
+			for _, stmt := range translated {
+				g.Add(stmt)
+			}
+			normal, ok := term.NormalRetTarget.(*ir.Block)
+			if !ok {
+				return fmt.Errorf("invoke normal dest is %T", term.NormalRetTarget)
+			}
+			phis, err := PhiAssignments(b, normal)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			if phis != nil {
+				g.Add(phis)
+			}
+			g.Goto().Id(BlockName(normal))
+
+		case *ir.TermResume:
+			g.Panic(jen.Lit("resume"))
+
 		default:
 			return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
 		}
@@ -318,6 +348,9 @@ func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
 			for _, c := range term.Cases {
 				add(c.Target)
 			}
+		case *ir.TermInvoke:
+			add(term.NormalRetTarget)
+			add(term.ExceptionRetTarget)
 		}
 	}
 	return targets

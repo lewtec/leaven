@@ -284,6 +284,25 @@ func formatExpr(v value.Value) (expr, error) {
 		}
 		return val(c), nil
 
+	case *constant.ExprAdd:
+		return formatBinConst("+", v.X, v.Y)
+	case *constant.ExprSub:
+		return formatBinConst("-", v.X, v.Y)
+	case *constant.ExprMul:
+		return formatBinConst("*", v.X, v.Y)
+	case *constant.ExprAnd:
+		return formatBinConst("&", v.X, v.Y)
+	case *constant.ExprOr:
+		return formatBinConst("|", v.X, v.Y)
+	case *constant.ExprXor:
+		return formatBinConst("^", v.X, v.Y)
+	case *constant.ExprShl:
+		return formatBinConst("<<", v.X, v.Y)
+	case *constant.ExprLShr:
+		return formatBinConst(">>", v.X, v.Y)
+	case *constant.ExprAShr:
+		return formatBinConst(">>", v.X, v.Y)
+
 	case *constant.Float:
 		result := v.X.String()
 		var c *jen.Statement
@@ -525,6 +544,18 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
 	return conv(goIntType(toType.BitSize), src), nil
+}
+
+func formatBinConst(op string, x, y constant.Constant) (expr, error) {
+	l, err := FormatValue(x)
+	if err != nil {
+		return expr{}, fmt.Errorf("error translating left (%v): %w", x, err)
+	}
+	r, err := FormatValue(y)
+	if err != nil {
+		return expr{}, fmt.Errorf("error translating right (%v): %w", y, err)
+	}
+	return val(jen.Parens(bin(l, op, r))), nil
 }
 
 // formatTrunc is the expression form of trunc.

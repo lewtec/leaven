@@ -14,8 +14,10 @@ package workspaced
 }
 
 #project: csmith: {
-	from:    "github:csmith-project/csmith"
-	version: "csmith-2.3.0"
+	from: "github:csmith-project/csmith"
+	// 2.3.0 Filter.h is ill-formed for clang 16+ (enum NTTP out of range).
+	// master is 2.4.0-dev; lock pins the digest clang++ 22 accepts.
+	version: "master"
 	dest:    "testdata/projects/csmith"
 }
 

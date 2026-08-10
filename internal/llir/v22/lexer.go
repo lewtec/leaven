@@ -35,6 +35,7 @@ const (
 	kGt
 	kDots
 	kBang
+	kPipe
 )
 
 type token struct {
@@ -100,6 +101,8 @@ func (t token) String() string {
 		return "..."
 	case kBang:
 		return "!"
+	case kPipe:
+		return "|"
 	default:
 		return fmt.Sprintf("token(%d)", t.kind)
 	}
@@ -172,6 +175,9 @@ func (l *lexer) next() (token, error) {
 		case '>':
 			l.adv()
 			return token{kind: kGt, line: line, col: col}, nil
+		case '|':
+			l.adv()
+			return token{kind: kPipe, line: line, col: col}, nil
 		case '%':
 			l.adv()
 			s, err := l.ident()

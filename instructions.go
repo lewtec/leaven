@@ -170,6 +170,20 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 	case *ir.InstCall:
 		return translateCall(inst)
 
+	case *ir.InstFreeze:
+		x, err := translateOp(inst.X, "freeze operand")
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), x)), nil
+
+	case *ir.InstLandingPad:
+		z, err := zeroOf(inst.ResultType)
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), z.code)), nil
+
 	case *ir.InstExtractElement:
 		x, err := translateOp(inst.X, "vector")
 		if err != nil {

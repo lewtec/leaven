@@ -5,6 +5,10 @@
 "conda:clangxx" = "14.0.6"
 "conda:llvm-tools" = "22.1.8"
 "conda:rust" = "1.97.1"
+# Assimilate harness: cmake+ninja+m4 for csmith; cargo (via rust) for rhai.
+cmake = "4.4.1"
+ninja = "1.13.2"
+"conda:m4" = "1.4.20"
 # Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
@@ -49,5 +53,5 @@ fi
 """
 
 [tasks."test:assimilate"]
-description = "Assimilate csmith + rhai only (places testdata/projects if needed)"
+description = "Native cmake/cargo vs leaven (places testdata/projects if needed)"
 run = "go test -count=1 -timeout 30m -run TestAssimilate -v ."

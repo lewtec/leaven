@@ -12,8 +12,8 @@
       "ref": "github:csmith-project/csmith",
       "depName": "csmith-project/csmith",
       "packageName": "https://github.com/csmith-project/csmith",
-      "currentValue": "csmith-2.3.0",
-      "currentDigest": "30dccd73b78652c4719f36572994778a5b233a4e",
+      "currentValue": "master",
+      "currentDigest": "0cdc710315cfee9035e22ef4363ca479270d1934",
       "datasource": "git-refs"
     },
     {
