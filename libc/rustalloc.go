@@ -11,12 +11,17 @@ func RustAlloc(size, align int64) unsafe.Pointer {
 		return unsafe.Pointer(uintptr(1))
 	}
 	b := make([]byte, int(size))
-	retained = append(retained, b)
-	return unsafe.Pointer(&b[0])
+	out := unsafe.Pointer(&b[0])
+	allocs.Store(uintptr(out), &allocRec{p: b, n: size})
+	return out
 }
 
 // RustDealloc is __rust_dealloc(ptr, size, align).
-func RustDealloc(p unsafe.Pointer, size, align int64) {}
+func RustDealloc(p unsafe.Pointer, size, align int64) {
+	if p != nil {
+		allocs.Delete(uintptr(p))
+	}
+}
 
 // RustRealloc is __rust_realloc(ptr, oldSize, align, newSize).
 func RustRealloc(p unsafe.Pointer, oldSize, align, newSize int64) unsafe.Pointer {
