@@ -36,12 +36,12 @@ run = "go test -tags=csmith -count=1 -timeout 10m -run 'TestCsmithFixedSeeds/see
 
 [tasks."projects:lock"]
 description = "Refresh workspaced.lock.json for csmith + rhai"
-run = "mise exec -- workspaced mod lock"
+run = "workspaced mod lock"
 
 [tasks."projects:sync"]
 description = "Place csmith + rhai under testdata/projects/ via core:place (gitignored)"
 run = """
-mise exec -- workspaced codebase apply
+workspaced codebase apply
 if git ls-files --error-unmatch workspaced.lock.json >/dev/null 2>&1; then
   git checkout -- workspaced.lock.json
 fi
