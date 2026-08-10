@@ -123,10 +123,10 @@ func requireProject(t *testing.T, name, marker string) string {
 
 func syncProjects(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("workspaced"); err != nil {
-		t.Skip("workspaced not on PATH; mise install")
+	if _, err := exec.LookPath("mise"); err != nil {
+		t.Skip("mise not on PATH")
 	}
-	cmd := exec.Command("workspaced", "codebase", "apply")
+	cmd := exec.Command("mise", "exec", "--", "workspaced", "codebase", "apply")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Skipf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
