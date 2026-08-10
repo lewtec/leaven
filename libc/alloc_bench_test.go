@@ -5,8 +5,7 @@ import (
 	"unsafe"
 )
 
-// Baseline allocator benches. No reuse yet: each Malloc is a new Go alloc plus
-// a sync.Map pin; Free only drops the pin.
+// Allocator benches. After warmup, same type+size should hit the pool.
 
 type benchNode struct {
 	F0, F1 *benchNode
