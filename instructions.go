@@ -772,6 +772,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		return one(libc("Memmove").Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
 	case "llvm_memset_p0i8_i64", "llvm_memset_p0_i64":
 		return one(libc("Memset").Call(asBytePtr(args[0]), args[1], args[2])), nil
+	case "llvm_abs_i32":
+		if len(args) >= 1 {
+			return one(assign(VariableName(inst), libc("AbsI32").Call(args[0]))), nil
+		}
 	case "llvm_sadd_with_overflow_i32":
 		if len(args) == 2 {
 			return one(assign(VariableName(inst), libc("SAddWithOverflowI32").Call(args[0], args[1]))), nil
@@ -897,6 +901,33 @@ func formatAggregateIndex(base *jen.Statement, t types.Type, indices []uint64) (
 		}
 	}
 	return curCode, nil
+}
+
+// rustRuntime maps rustc v0-mangled std/core symbols we implement in libc.
+// Crate hashes change; match the stable path suffix.
+func rustRuntime(name string) *jen.Statement {
+	if strings.Contains(name, "stdio6__print") {
+		return libc("RustPrint")
+	}
+	if !strings.Contains(name, "7Display3fmt") {
+		return nil
+	}
+	i := strings.Index(name, "3fmt3num3imp")
+	if i < 0 {
+		return nil
+	}
+	rest := name[i+len("3fmt3num3imp"):]
+	if rest == "" {
+		return nil
+	}
+	switch rest[0] {
+	case 'l': // i32
+		return libc("RustFmtI32")
+	case 'j': // usize
+		return libc("RustFmtUsize")
+	default:
+		return nil
+	}
 }
 
 var libraryFunctions = map[string]goRef{
