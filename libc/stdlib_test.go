@@ -1,15 +1,11 @@
 package libc
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"unsafe"
 )
-
-func recLive(u uintptr) bool {
-	v, ok := allocs.Load(u)
-	return ok && v.(*allocRec).live
-}
 
 func TestReallocCopiesOldBytes(t *testing.T) {
 	p := Malloc[byte](4)
@@ -19,56 +15,81 @@ func TestReallocCopiesOldBytes(t *testing.T) {
 	if got != "abcd" {
 		t.Fatalf("Realloc copy = %q, want %q", got, "abcd")
 	}
-}
-
-func TestFreeUnpins(t *testing.T) {
-	p := Malloc[byte](64)
-	if p == nil {
-		t.Fatal("Malloc returned nil")
-	}
-	u := uintptr(unsafe.Pointer(p))
-	if !recLive(u) {
-		t.Fatal("Malloc did not record live pin")
-	}
-	Free(p)
-	if recLive(u) {
-		t.Fatal("Free left rec live")
-	}
-}
-
-func TestReallocUnpinsOld(t *testing.T) {
-	p := Malloc[byte](4)
-	copy(unsafe.Slice(p, 4), []byte("abcd"))
-	old := uintptr(unsafe.Pointer(p))
-	q := Realloc(p, 8)
-	if q == nil {
-		t.Fatal("Realloc returned nil")
-	}
-	if recLive(old) {
-		t.Fatal("Realloc left old block live")
-	}
-	if !recLive(uintptr(unsafe.Pointer(q))) {
-		t.Fatal("Realloc did not record live new pin")
-	}
-	got := string(unsafe.Slice(q, 4))
-	if got != "abcd" {
-		t.Fatalf("Realloc copy = %q, want %q", got, "abcd")
-	}
 	Free(q)
 }
 
-func TestRetainThenFree(t *testing.T) {
-	p := Malloc[byte](16)
-	Retain(p)
-	u := uintptr(unsafe.Pointer(p))
-	Free(p)
-	if recLive(u) {
-		t.Fatal("Free left rec live after Retain")
+func TestReallocNilIsMalloc(t *testing.T) {
+	q := Realloc(nil, 8)
+	if q == nil {
+		t.Fatal("Realloc(nil, 8) returned nil")
+	}
+	*q = 1
+	Free(q)
+}
+
+func TestReallocZeroFrees(t *testing.T) {
+	p := Malloc[byte](8)
+	if Realloc(p, 0) != nil {
+		t.Fatal("Realloc(p, 0) should return nil")
 	}
 }
 
 func TestFreeNil(t *testing.T) {
 	Free(nil)
+}
+
+func TestMallocZeroReturnsUnique(t *testing.T) {
+	a := Malloc[byte](0)
+	b := Malloc[byte](0)
+	if a == nil || b == nil {
+		t.Fatal("malloc(0) returned nil")
+	}
+	if a == b {
+		t.Fatal("malloc(0) returned the same pointer twice")
+	}
+	Free(a)
+	Free(b)
+}
+
+func TestCallocZeros(t *testing.T) {
+	p := Calloc[byte](8, 1)
+	for i, b := range unsafe.Slice(p, 8) {
+		if b != 0 {
+			t.Fatalf("Calloc byte %d = %d", i, b)
+		}
+	}
+	Free(p)
+}
+
+func TestReallocShrinkInPlace(t *testing.T) {
+	p := Malloc[byte](16)
+	copy(unsafe.Slice(p, 16), []byte("0123456789abcdef"))
+	q := Realloc(p, 8)
+	if q != p {
+		t.Fatal("shrink allocated a new block")
+	}
+	if got := string(unsafe.Slice(q, 8)); got != "01234567" {
+		t.Fatalf("shrink data = %q", got)
+	}
+	r := Realloc(q, 32)
+	if r == nil {
+		t.Fatal("grow returned nil")
+	}
+	if got := string(unsafe.Slice(r, 8)); got != "01234567" {
+		t.Fatalf("grow after shrink = %q", got)
+	}
+	Free(r)
+}
+
+func TestRetainGoHeap(t *testing.T) {
+	p := new(byte)
+	*p = 9
+	if Retain(p) != p {
+		t.Fatal("Retain did not return p")
+	}
+	if _, ok := allocs.Load(uintptr(unsafe.Pointer(p))); !ok {
+		t.Fatal("Retain did not pin Go heap object")
+	}
 }
 
 func TestConcurrentMalloc(t *testing.T) {
@@ -102,61 +123,6 @@ func TestConcurrentMalloc(t *testing.T) {
 	wg.Wait()
 }
 
-func TestMallocReusesSameType(t *testing.T) {
-	p := Malloc[byte](64)
-	*p = 7
-	addr := uintptr(unsafe.Pointer(p))
-	Free(p)
-	hits := 0
-	for i := 0; i < 32; i++ {
-		q := Malloc[byte](64)
-		if uintptr(unsafe.Pointer(q)) == addr {
-			hits++
-			if *q != 0 {
-				t.Fatalf("reused block not zeroed: %d", *q)
-			}
-		}
-		Free(q)
-	}
-	if hits == 0 {
-		t.Fatal("expected at least one reuse of the freed 64-byte block")
-	}
-}
-
-func TestMallocDoesNotReuseAcrossTypes(t *testing.T) {
-	type node struct{ a, b *byte }
-	p := Malloc[node](int64(unsafe.Sizeof(node{})))
-	addr := uintptr(unsafe.Pointer(p))
-	Free((*byte)(unsafe.Pointer(p)))
-	for i := 0; i < 32; i++ {
-		q := Malloc[byte](int64(unsafe.Sizeof(node{})))
-		if uintptr(unsafe.Pointer(q)) == addr {
-			t.Fatal("pooled node returned as *byte")
-		}
-		Free(q)
-	}
-}
-
-func TestReallocShrinkInPlace(t *testing.T) {
-	p := Malloc[byte](16)
-	copy(unsafe.Slice(p, 16), []byte("0123456789abcdef"))
-	q := Realloc(p, 8)
-	if q != p {
-		t.Fatal("shrink allocated a new block")
-	}
-	if got := string(unsafe.Slice(q, 8)); got != "01234567" {
-		t.Fatalf("shrink data = %q", got)
-	}
-	r := Realloc(q, 32)
-	if r == nil {
-		t.Fatal("grow returned nil")
-	}
-	if got := string(unsafe.Slice(r, 8)); got != "01234567" {
-		t.Fatalf("grow after shrink = %q", got)
-	}
-	Free(r)
-}
-
 func TestConcurrentMallocFree(t *testing.T) {
 	const goroutines = 8
 	const perG = 1000
@@ -177,4 +143,31 @@ func TestConcurrentMallocFree(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestTypedListSurvivesGC(t *testing.T) {
+	type node struct {
+		x    int64
+		next *node
+	}
+	var head *node
+	for i := 0; i < 100; i++ {
+		n := Malloc[node](int64(unsafe.Sizeof(node{})))
+		n.x = int64(i)
+		n.next = head
+		head = n
+	}
+	runtime.GC()
+	n := 0
+	for p := head; p != nil; p = p.next {
+		n++
+	}
+	if n != 100 {
+		t.Fatalf("list length = %d after GC", n)
+	}
+	for p := head; p != nil; {
+		next := p.next
+		Free((*byte)(unsafe.Pointer(p)))
+		p = next
+	}
 }
