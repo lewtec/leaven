@@ -751,6 +751,39 @@ func calleeLLVMName(v value.Value) string {
 	return ""
 }
 
+// llvmCallHandled is the llvm.* names translateCall lowers (no-op or libc).
+// hasRuntimeDef uses this instead of a blanket llvm_ prefix.
+func llvmCallHandled(name string) bool {
+	switch name {
+	case "llvm_lifetime_start_p0", "llvm_lifetime_end_p0",
+		"llvm_experimental_noalias_scope_decl", "llvm_assume",
+		"llvm_donothing",
+		"llvm_va_start", "llvm_va_end",
+		"llvm_lifetime_start", "llvm_lifetime_end", "llvm_stackrestore",
+		"llvm_stacksave",
+		"llvm_fabs_f32", "llvm_fmuladd_f64", "llvm_fmuladd_f32",
+		"llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64",
+		"llvm_memcpy_p0_p0_i64", "llvm_memmove_p0_p0_i64",
+		"llvm_memset_p0i8_i64", "llvm_memset_p0_i64",
+		"llvm_abs_i32",
+		"llvm_sadd_with_overflow_i32",
+		"llvm_umax_i64", "llvm_umin_i64",
+		"llvm_umax_i32", "llvm_umin_i32",
+		"llvm_smax_i64", "llvm_smin_i64",
+		"llvm_smax_i32", "llvm_smin_i32",
+		"llvm_ctpop_i64",
+		"llvm_umul_with_overflow_i64",
+		"llvm_objectsize_i64_p0i8",
+		"llvm_trap",
+		"llvm_ceil_f64",
+		"llvm_vector_reduce_add_v4i32",
+		"llvm_load_relative_i64":
+		return true
+	default:
+		return false
+	}
+}
+
 func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	llvmName := calleeLLVMName(inst.Callee)
 	switch llvmName {
@@ -825,6 +858,48 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	case "llvm_umax_i64":
 		if len(args) == 2 {
 			return one(assign(VariableName(inst), libc("UMaxU64").Call(args[0], args[1]))), nil
+		}
+	case "llvm_umin_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("UMinU64").Call(args[0], args[1]))), nil
+		}
+	case "llvm_umax_i32":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("UMaxU32").Call(args[0], args[1]))), nil
+		}
+	case "llvm_umin_i32":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("UMinU32").Call(args[0], args[1]))), nil
+		}
+	case "llvm_smax_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("SMaxI64").Call(args[0], args[1]))), nil
+		}
+	case "llvm_smin_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("SMinI64").Call(args[0], args[1]))), nil
+		}
+	case "llvm_smax_i32":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("SMaxI32").Call(args[0], args[1]))), nil
+		}
+	case "llvm_smin_i32":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("SMinI32").Call(args[0], args[1]))), nil
+		}
+	case "llvm_trap":
+		return one(libc("Abort").Call()), nil
+	case "llvm_ceil_f64":
+		if len(args) == 1 {
+			return one(assign(VariableName(inst), jen.Qual("math", "Ceil").Call(args[0]))), nil
+		}
+	case "llvm_vector_reduce_add_v4i32":
+		if len(args) == 1 {
+			return one(assign(VariableName(inst), libc("VecReduceAddV4I32").Call(args[0]))), nil
+		}
+	case "llvm_load_relative_i64":
+		if len(args) == 2 {
+			return one(assign(VariableName(inst), libc("LoadRelativeI64").Call(args[0], args[1]))), nil
 		}
 	case "llvm_ctpop_i64":
 		if len(args) == 1 {

@@ -150,7 +150,7 @@ func hasRuntimeDef(name string) bool {
 	if _, ok := namedRef(name); ok {
 		return true
 	}
-	return strings.HasPrefix(name, "llvm_")
+	return llvmCallHandled(name)
 }
 
 func compositeValues(elems []jen.Code) *jen.Statement {
