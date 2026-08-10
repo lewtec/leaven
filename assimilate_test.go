@@ -166,11 +166,7 @@ func writeCsmithConfig(t *testing.T, dir string) {
 
 func clangXX22(t *testing.T) (bin string, isystem []string) {
 	t.Helper()
-	out, err := exec.Command("mise", "exec", "conda:clangxx@22.1.8", "--", "sh", "-c", "command -v clang++").CombinedOutput()
-	if err != nil {
-		t.Skipf("mise clang++ 22: %v\n%s", err, out)
-	}
-	bin = strings.TrimSpace(string(out))
+	bin = miseWhich(t, "clang++", "conda:clangxx@22.1.8")
 	prefix := filepath.Dir(filepath.Dir(bin))
 	matches, _ := filepath.Glob(filepath.Join(prefix, "lib", "gcc", "*", "*", "include", "c++"))
 	if len(matches) == 0 {
@@ -186,24 +182,29 @@ func clangXX22(t *testing.T) (bin string, isystem []string) {
 
 func llvmLink22(t *testing.T) string {
 	t.Helper()
-	out, err := exec.Command("mise", "exec", "conda:llvm-tools@22.1.8", "--", "sh", "-c", "command -v llvm-link").CombinedOutput()
-	if err != nil {
-		t.Skipf("mise llvm-link 22: %v\n%s", err, out)
-	}
-	return strings.TrimSpace(string(out))
+	return miseWhich(t, "llvm-link", "conda:llvm-tools@22.1.8")
 }
 
 func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 	t.Helper()
-	out, err := exec.Command("mise", "exec", "conda:clangxx@22.1.8", "--", "sh", "-c", "command -v clang").CombinedOutput()
-	if err != nil {
-		t.Skipf("mise clang 22: %v\n%s", err, out)
-	}
-	clang = strings.TrimSpace(string(out))
+	clang = miseWhich(t, "clang", "conda:clang@22.1.8")
 	prefix := filepath.Dir(filepath.Dir(clang))
 	sysroot = filepath.Join(prefix, "x86_64-conda-linux-gnu", "sysroot")
 	libdir = filepath.Join(prefix, "lib")
 	return clang, sysroot, libdir
+}
+
+func miseWhich(t *testing.T, bin, tool string) string {
+	t.Helper()
+	out, err := exec.Command("mise", "which", "--tool", tool, bin).CombinedOutput()
+	if err != nil {
+		t.Skipf("mise which %s (%s): %v\n%s", bin, tool, err, out)
+	}
+	p := strings.TrimSpace(string(out))
+	if p == "" {
+		t.Skipf("mise which %s (%s): empty path", bin, tool)
+	}
+	return p
 }
 
 func lastErrorLine(b []byte) string {
