@@ -15,16 +15,14 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
-	// Typed-pointer IR: src must be elemType*. LLVM 15+ also uses
-	// `gep i8, T*, i64 n` (byte offset) and `gep %T, ptr, ...` (opaque this).
+	// Typed-pointer IR: src is usually elemType*. LLVM 15+ also uses
+	// `gep i8, T*, i64 n` (bytes) and `gep ptr, [N x ptr]*, i64 n` (pointer stride).
 	byteGEP := types.Equal(elemType, types.I8)
-	if !srcPointerType.IsOpaque() && !types.Equal(srcPointerType.ElemType, elemType) && !byteGEP {
-		if _, agg := elemType.(*types.StructType); !agg {
-			if _, arr := elemType.(*types.ArrayType); !arr {
-				return expr{}, errMismatchedSrcElem
-			}
-		}
-	}
+	_, elemStruct := elemType.(*types.StructType)
+	_, elemArray := elemType.(*types.ArrayType)
+	matched := srcPointerType.IsOpaque() || types.Equal(srcPointerType.ElemType, elemType)
+	// First index is always pointer arithmetic in units of elemType.
+	strideGEP := byteGEP || (!matched && !elemStruct && !elemArray)
 
 	zeroFirstIndex := false
 	firstIndex := indices[0]
@@ -72,15 +70,28 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	}
 
 	if !zeroFirstIndex {
-		idx, err := FormatValue(indices[0])
+		idx, err := FormatValue(firstIndex)
 		if err != nil {
-			return expr{}, fmt.Errorf("error translating first index (%v): %w", indices[0], err)
+			return expr{}, fmt.Errorf("error translating first index (%v): %w", firstIndex, err)
 		}
-		if byteGEP {
-			result = libc("AddPointer").Types(jen.Byte()).Call(
-				ptrCast(ptrTyp(jen.Byte()), result),
+		if strideGEP {
+			et := jen.Byte()
+			if !byteGEP {
+				et, err = TypeSpec(elemType)
+				if err != nil {
+					return expr{}, err
+				}
+			}
+			add := libc("AddPointer").Types(et).Call(
+				ptrCast(ptrTyp(et), result),
 				jen.Int().Call(idx),
 			)
+			// gep of an opaque ptr elem is still `ptr` in LLVM 15+.
+			if pt, ok := elemType.(*types.PointerType); ok && pt.IsOpaque() {
+				result = unsafePtr(add)
+			} else {
+				result = add
+			}
 		} else {
 			result = libc("AddPointer").Call(result, jen.Int().Call(idx))
 		}

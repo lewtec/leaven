@@ -3,6 +3,7 @@ package leaven
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/dave/jennifer/jen"
@@ -93,14 +94,16 @@ func ssaTempName(name string) bool {
 
 func BlockName(v value.Value) string {
 	block := v.(*ir.Block)
-	name := block.Name()
+	// Don't use Name(); numeric labels come back quoted (`"2"`) for LLVM print.
+	name := block.LocalName
 	if name == "" {
-		return "block" + strings.TrimPrefix(block.Ident(), "%")
+		return "block" + strconv.FormatInt(block.LocalID, 10)
 	}
-	if c := name[0]; '0' <= c && c <= '9' {
-		name = "block" + name
+	if _, err := strconv.ParseInt(name, 10, 64); err == nil {
+		return "block" + name
 	}
-	name = strings.Replace(name, ".", "_", -1)
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, "-", "_")
 	if invalidNames[name] {
 		name = "_" + name
 	}
