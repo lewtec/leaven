@@ -78,11 +78,11 @@ func Realloc(p *byte, n int64) *byte {
 }
 
 // Arc4randomBuf is BSD arc4random_buf(buf, n): fill n bytes from the CSPRNG.
-func Arc4randomBuf(buf unsafe.Pointer, n int64) {
+func Arc4randomBuf(buf *byte, n int64) {
 	if buf == nil || n <= 0 {
 		return
 	}
-	if _, err := rand.Read(unsafe.Slice((*byte)(buf), int(n))); err != nil {
+	if _, err := rand.Read(unsafe.Slice(buf, int(n))); err != nil {
 		panic(err)
 	}
 }
