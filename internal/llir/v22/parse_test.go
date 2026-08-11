@@ -179,6 +179,27 @@ entry:
 	}
 }
 
+func TestParseSplat(t *testing.T) {
+	src := `define i1 @f(<16 x i8> %v) {
+entry:
+  %c = icmp eq <16 x i8> %v, splat (i8 -1)
+  ret i1 %c
+}
+`
+	m, err := ParseString("splat.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	icmp, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstICmp)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	vec, ok := icmp.Y.(*constant.Vector)
+	if !ok || len(vec.Elems) != 16 {
+		t.Fatalf("splat %T %#v", icmp.Y, icmp.Y)
+	}
+}
+
 func TestParseUnreachableDbg(t *testing.T) {
 	src := `define void @f() {
 entry:

@@ -17,7 +17,7 @@ func (p *parser) startsValue() bool {
 		return p.peekKind() != kEq
 	case kIdent:
 		switch p.tok.s {
-		case "true", "false", "null", "undef", "poison", "zeroinitializer":
+		case "true", "false", "null", "undef", "poison", "zeroinitializer", "splat":
 			return true
 		}
 		return p.isConstExpr()
@@ -281,6 +281,8 @@ func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
 		case "zeroinitializer":
 			p.next()
 			return constant.NewZeroInitializer(typ), nil
+		case "splat":
+			return p.parseSplat(typ)
 		default:
 			return nil, p.errorf("unexpected constant %q", p.tok.s)
 		}
@@ -303,6 +305,34 @@ func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
 	default:
 		return nil, p.errorf("expected constant, got %s", p.tok)
 	}
+}
+
+// parseSplat is LLVM splat (TY C): a vector of typ.Len copies of C.
+func (p *parser) parseSplat(typ types.Type) (constant.Constant, error) {
+	p.next() // splat
+	if err := p.expect(kLParen); err != nil {
+		return nil, err
+	}
+	et, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	elem, err := p.parseConst(et)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expect(kRParen); err != nil {
+		return nil, err
+	}
+	vt, ok := typ.(*types.VectorType)
+	if !ok {
+		return nil, p.errorf("splat for non-vector type %s", typ)
+	}
+	elems := make([]constant.Constant, vt.Len)
+	for i := range elems {
+		elems[i] = elem
+	}
+	return constant.NewVector(vt, elems...), nil
 }
 
 func (p *parser) parseStructConst(typ types.Type, packed bool) (constant.Constant, error) {
