@@ -9,6 +9,7 @@ import (
 
 	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/enum"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 )
 
@@ -206,6 +207,26 @@ declare i32 @eh(...)
 	}
 	if _, ok := f.Blocks[2].Term.(*ir.TermResume); !ok {
 		t.Fatalf("bad term %T, want resume", f.Blocks[2].Term)
+	}
+}
+
+func TestParseThreadLocal(t *testing.T) {
+	// rustc: @x = internal thread_local unnamed_addr global ...
+	src := `@tls = internal thread_local unnamed_addr global i32 0
+@ie = thread_local(initialexec) global i32 1
+`
+	m, err := ParseString("tls.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Globals) != 2 {
+		t.Fatalf("globals=%d", len(m.Globals))
+	}
+	if m.Globals[0].TLSModel != enum.TLSModelGeneric {
+		t.Fatalf("tls model=%v, want generic", m.Globals[0].TLSModel)
+	}
+	if m.Globals[1].TLSModel != enum.TLSModelInitialExec {
+		t.Fatalf("ie model=%v, want initialexec", m.Globals[1].TLSModel)
 	}
 }
 

@@ -289,6 +289,7 @@ func (p *parser) parseGlobal() error {
 		pre     enum.Preemption
 		vis     enum.Visibility
 		unnamed enum.UnnamedAddr
+		tls     enum.TLSModel
 	)
 	for p.tok.kind == kIdent {
 		switch p.tok.s {
@@ -334,21 +335,28 @@ func (p *parser) parseGlobal() error {
 		case "local_unnamed_addr":
 			unnamed = enum.UnnamedAddrLocalUnnamedAddr
 			p.next()
+		case "thread_local":
+			model, err := p.parseThreadLocal()
+			if err != nil {
+				return err
+			}
+			tls = model
 		case "constant", "global":
 			g := p.ensureGlobal(name)
 			g.Linkage = link
 			g.Preemption = pre
 			g.Visibility = vis
 			g.UnnamedAddr = unnamed
+			g.TLSModel = tls
 			g.Immutable = p.tok.s == "constant"
 			p.next()
 			return p.parseGlobalInit(g)
 		case "alias":
 			p.next()
-			return p.parseAlias(name, link, pre, vis, unnamed)
+			return p.parseAlias(name, link, pre, vis, unnamed, tls)
 		case "ifunc":
 			p.next()
-			return p.parseIFunc(name, link, pre, vis, unnamed)
+			return p.parseIFunc(name, link, pre, vis, unnamed, tls)
 		default:
 			return p.errorf("unexpected global prefix %q", p.tok.s)
 		}
@@ -359,6 +367,7 @@ func (p *parser) parseGlobal() error {
 		g.Preemption = pre
 		g.Visibility = vis
 		g.UnnamedAddr = unnamed
+		g.TLSModel = tls
 		g.Immutable = p.tok.s == "constant"
 		p.next()
 		return p.parseGlobalInit(g)
@@ -403,7 +412,34 @@ func (p *parser) parseGlobalInit(g *ir.Global) error {
 	return nil
 }
 
-func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr) error {
+func (p *parser) parseThreadLocal() (enum.TLSModel, error) {
+	p.next() // thread_local
+	if p.tok.kind != kLParen {
+		return enum.TLSModelGeneric, nil
+	}
+	p.next()
+	if p.tok.kind != kIdent {
+		return enum.TLSModelNone, p.errorf("expected TLS model")
+	}
+	var m enum.TLSModel
+	switch p.tok.s {
+	case "localdynamic":
+		m = enum.TLSModelLocalDynamic
+	case "initialexec":
+		m = enum.TLSModelInitialExec
+	case "localexec":
+		m = enum.TLSModelLocalExec
+	default:
+		return enum.TLSModelNone, p.errorf("unknown TLS model %q", p.tok.s)
+	}
+	p.next()
+	if err := p.expect(kRParen); err != nil {
+		return enum.TLSModelNone, err
+	}
+	return m, nil
+}
+
+func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr, tls enum.TLSModel) error {
 	if _, err := p.parseType(); err != nil {
 		return err
 	}
@@ -436,6 +472,7 @@ func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption,
 	a.Preemption = pre
 	a.Visibility = vis
 	a.UnnamedAddr = unnamed
+	a.TLSModel = tls
 	p.m.Aliases = append(p.m.Aliases, a)
 	p.aliases[name] = a
 	switch t := val.(type) {
@@ -453,7 +490,7 @@ func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption,
 	return nil
 }
 
-func (p *parser) parseIFunc(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr) error {
+func (p *parser) parseIFunc(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr, tls enum.TLSModel) error {
 	if _, err := p.parseType(); err != nil {
 		return err
 	}
@@ -473,6 +510,7 @@ func (p *parser) parseIFunc(name string, link enum.Linkage, pre enum.Preemption,
 	fn.Preemption = pre
 	fn.Visibility = vis
 	fn.UnnamedAddr = unnamed
+	fn.TLSModel = tls
 	p.m.IFuncs = append(p.m.IFuncs, fn)
 	for p.tok.kind == kComma {
 		p.next()
