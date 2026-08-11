@@ -179,6 +179,18 @@ entry:
 	}
 }
 
+func TestParseUnreachableDbg(t *testing.T) {
+	src := `define void @f() {
+entry:
+  unreachable, !dbg !0
+}
+!0 = !{}
+`
+	if _, err := ParseString("unreach.ll", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseGEPInrange(t *testing.T) {
 	src := `@vt = external global [4 x ptr]
 define ptr @f(ptr %p) {

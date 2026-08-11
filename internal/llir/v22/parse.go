@@ -905,7 +905,7 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseBr(block)
 	case "unreachable":
 		block.Term = ir.NewUnreachable()
-		return nil
+		return p.skipInstMD()
 	case "icmp":
 		return p.parseICmp(block, ident, name)
 	case "add", "sub", "mul", "udiv", "sdiv", "urem", "srem", "and", "or", "xor",
