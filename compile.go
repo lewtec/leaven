@@ -36,6 +36,11 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		f.Type().Id(name).Add(def)
 	}
 
+	type deferredInit struct {
+		name string
+		val  *jen.Statement
+	}
+	var deferred []deferredInit
 	for _, g := range m.Globals {
 		name := VariableName(g)
 		if g.Init == nil && hasRuntimeDef(name) {
@@ -53,7 +58,21 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		if err != nil {
 			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
+		// std::string SSO: ptr field is a GEP into this same global.
+		// Go forbids `var x = ...&x`; fill in init() after x exists.
+		if refersToGlobal(g.Init, g) {
+			f.Var().Id(name).Add(t)
+			deferred = append(deferred, deferredInit{name, val})
+			continue
+		}
 		f.Var().Id(name).Add(t).Op("=").Add(val)
+	}
+	if len(deferred) > 0 {
+		f.Func().Id("init").Params().BlockFunc(func(g *jen.Group) {
+			for _, d := range deferred {
+				g.Id(d.name).Op("=").Add(d.val)
+			}
+		})
 	}
 
 	for _, fn := range m.Funcs {

@@ -14,6 +14,12 @@ entry:
   ret i32 %_
 }
 
+define i32 @as_i32(i1 %b) {
+entry:
+  %x = sext i1 %b to i32
+  ret i32 %x
+}
+
 define i32 @main() {
 entry:
   %z = call i1 @zero_i1()

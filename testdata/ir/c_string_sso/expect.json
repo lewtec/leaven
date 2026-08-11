@@ -4,16 +4,11 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "return false",
-        "func use_blank",
-        "var __ int32",
-        "__ = 1 + 2",
-        "if b",
-        "-1"
+        "func init()",
+        "s ="
       ],
       "not_contains": [
-        "cannot use _",
-        "int32(b)"
+        "initialization cycle"
       ]
     }
   ],

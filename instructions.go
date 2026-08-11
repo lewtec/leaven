@@ -445,7 +445,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
 		}
-		return one(assign(VariableName(inst), conv(goIntType(toType.BitSize), from))), nil
+		name := VariableName(inst)
+		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			neg := -1
+			return one(jen.If(from).Block(assign(name, jen.Lit(neg))).Else().Block(assign(name, jen.Lit(0)))), nil
+		}
+		return one(assign(name, conv(goIntType(toType.BitSize), from))), nil
 
 	case *ir.InstShl:
 		x, err := translateOp(inst.X, "left operand")

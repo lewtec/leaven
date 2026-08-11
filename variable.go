@@ -580,7 +580,74 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
+	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+		// Go has no int32(bool). sext i1: true → -1.
+		return boolToInt(src, toType.BitSize, true), nil
+	}
 	return conv(goIntType(toType.BitSize), src), nil
+}
+
+// boolToInt is zext/sext of i1. signed: true→-1; unsigned: true→1.
+func boolToInt(src *jen.Statement, bits uint64, signed bool) *jen.Statement {
+	t := 1
+	if signed {
+		t = -1
+	}
+	return jen.Map(jen.Bool()).Add(goIntType(goIntBits(bits))).Values(jen.Dict{
+		jen.True():  jen.Lit(t),
+		jen.False(): jen.Lit(0),
+	}).Index(src)
+}
+
+// refersToGlobal reports whether c mentions g (e.g. SSO string: ptr GEP into self).
+func refersToGlobal(v value.Value, g *ir.Global) bool {
+	if v == nil || g == nil {
+		return false
+	}
+	switch x := v.(type) {
+	case *ir.Global:
+		return x == g
+	case *constant.Struct:
+		for _, f := range x.Fields {
+			if refersToGlobal(f, g) {
+				return true
+			}
+		}
+	case *constant.Array:
+		for _, e := range x.Elems {
+			if refersToGlobal(e, g) {
+				return true
+			}
+		}
+	case *constant.Vector:
+		for _, e := range x.Elems {
+			if refersToGlobal(e, g) {
+				return true
+			}
+		}
+	case *constant.Index:
+		return refersToGlobal(x.Constant, g)
+	case *constant.ExprGetElementPtr:
+		if refersToGlobal(x.Src, g) {
+			return true
+		}
+		for _, idx := range x.Indices {
+			if refersToGlobal(idx, g) {
+				return true
+			}
+		}
+	case *constant.ExprBitCast:
+		return refersToGlobal(x.From, g)
+	case *constant.ExprIntToPtr:
+		return refersToGlobal(x.From, g)
+	case *constant.ExprPtrToInt:
+		return refersToGlobal(x.From, g)
+	case *constant.ExprAdd:
+		return refersToGlobal(x.X, g) || refersToGlobal(x.Y, g)
+	case *constant.ExprSub:
+		return refersToGlobal(x.X, g) || refersToGlobal(x.Y, g)
+	}
+	return false
 }
 
 func formatBinConst(op string, x, y constant.Constant) (expr, error) {
