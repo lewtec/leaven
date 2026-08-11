@@ -38,6 +38,17 @@ func TestFreeNil(t *testing.T) {
 	Free(nil)
 }
 
+func TestArc4randomBufFills(t *testing.T) {
+	var a, b [16]byte
+	Arc4randomBuf(unsafe.Pointer(&a[0]), 16)
+	Arc4randomBuf(unsafe.Pointer(&b[0]), 16)
+	if a == b {
+		t.Fatal("two fills were identical")
+	}
+	Arc4randomBuf(nil, 8)
+	Arc4randomBuf(unsafe.Pointer(&a[0]), 0)
+}
+
 func TestMallocZeroReturnsUnique(t *testing.T) {
 	a := Malloc[byte](0)
 	b := Malloc[byte](0)

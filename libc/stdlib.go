@@ -1,6 +1,7 @@
 package libc
 
 import (
+	"crypto/rand"
 	"sync"
 	"unsafe"
 
@@ -74,6 +75,16 @@ func Realloc(p *byte, n int64) *byte {
 		return nil
 	}
 	return (*byte)(unsafe.Pointer(q))
+}
+
+// Arc4randomBuf is BSD arc4random_buf(buf, n): fill n bytes from the CSPRNG.
+func Arc4randomBuf(buf unsafe.Pointer, n int64) {
+	if buf == nil || n <= 0 {
+		return
+	}
+	if _, err := rand.Read(unsafe.Slice((*byte)(buf), int(n))); err != nil {
+		panic(err)
+	}
 }
 
 // Free is C free(p).

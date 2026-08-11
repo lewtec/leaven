@@ -1081,6 +1081,7 @@ func rustRuntime(name string) *jen.Statement {
 
 var libraryFunctions = map[string]goRef{
 	"abort":            {libcPath, "Abort"},
+	"arc4random_buf":   {libcPath, "Arc4randomBuf"},
 	"__assert_fail":    {libcPath, "AssertFail"},
 	"fabs":             {"math", "Abs"},
 	"__ctype_b_loc":    {libcPath, "CtypeBLoc"},
