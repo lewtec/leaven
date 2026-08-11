@@ -994,7 +994,8 @@ func libcReturnsTypedPtr(name string) bool {
 	switch name {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
-		"memset", "memcpy":
+		"memset", "memcpy",
+		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":
 		return true
 	default:
 		return false
@@ -1088,8 +1089,9 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                    {libcPath, "IfstreamClose"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                    {libcPath, "IfstreamClose"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                    {libcPath, "IfstreamCloseVTT"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                {libcPath, "IfstreamClose"},
+	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                 {libcPath, "FilebufClose"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                      {libcPath, "IosFail"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                       {libcPath, "IosEof"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                         {libcPath, "IosNot"},

@@ -17,6 +17,36 @@ type fileStream struct {
 
 var streams sync.Map // uintptr → *fileStream
 
+// ifstreamVT is a stand-in Itanium vtable. clang++ -O2 does
+//   off = *(vptr-24); ios = this+off; state = *(ios+32)
+// Offset 0 means fail/eof read iostate at this+32. We do not
+// reconstruct libstdc++ layout beyond that slot.
+var ifstreamVT = [4]int64{}
+
+const (
+	iosEofbit  = 2
+	iosFailbit = 4
+	iosStateOff = 32
+	filebufOff  = 16
+)
+
+func setIfstreamABI(this *byte, fail, eof bool) {
+	if this == nil {
+		return
+	}
+	base := unsafe.Pointer(this)
+	vp := unsafe.Add(unsafe.Pointer(&ifstreamVT[0]), 3*8)
+	*(*unsafe.Pointer)(base) = vp
+	st := int32(0)
+	if fail {
+		st |= iosFailbit
+	}
+	if eof {
+		st |= iosEofbit
+	}
+	*(*int32)(unsafe.Add(base, iosStateOff)) = st
+}
+
 func streamOf(this *byte) *fileStream {
 	if this == nil {
 		return &fileStream{fail: true}
@@ -46,6 +76,7 @@ func IfstreamOpen(this *byte, path *byte, mode int32) {
 		}
 	}
 	streams.Store(uintptr(unsafe.Pointer(this)), st)
+	setIfstreamABI(this, st.fail, st.eof)
 }
 
 func iosOpenFlag(mode int32) (int, bool) {
@@ -83,7 +114,7 @@ func iosOpenFlag(mode int32) (int, bool) {
 	return flag, true
 }
 
-// IfstreamClose is ifstream::close / destructor.
+// IfstreamClose is ifstream::close / D1 destructor.
 func IfstreamClose(this *byte) {
 	if this == nil {
 		return
@@ -93,7 +124,22 @@ func IfstreamClose(this *byte) {
 		if s.f != nil {
 			_ = s.f.Close()
 		}
+		setIfstreamABI(this, true, s.eof)
 	}
+}
+
+// IfstreamCloseVTT is D2(this, vtt).
+func IfstreamCloseVTT(this *byte, vtt *byte) { IfstreamClose(this) }
+
+// FilebufClose is basic_filebuf::close. O2 inlines ifstream::close
+// as filebuf::close(this+16). Return this (non-null) on success.
+func FilebufClose(this *byte) *byte {
+	if this == nil {
+		return nil
+	}
+	owner := (*byte)(unsafe.Add(unsafe.Pointer(this), -filebufOff))
+	IfstreamClose(owner)
+	return this
 }
 
 // IosFail is basic_ios::fail.

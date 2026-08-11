@@ -4,16 +4,27 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"unsafe"
 )
 
 func TestIfstreamMissingFileFails(t *testing.T) {
-	var obj [8]byte
+	var obj [256]byte
 	IfstreamOpen(&obj[0], &[]byte("no-such-leaven-platform.info\x00")[0], 8)
 	if !IosFail(&obj[0]) {
 		t.Fatal("missing file did not set fail")
 	}
 	if IosBool(&obj[0]) {
 		t.Fatal("operator bool true on missing file")
+	}
+	// clang++ -O2: off = *(vptr-24); state = *(this+off+32); fail = state&5
+	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
+	if vp == nil {
+		t.Fatal("vptr not set")
+	}
+	off := *(*int64)(unsafe.Add(vp, -24))
+	state := *(*int32)(unsafe.Add(unsafe.Pointer(&obj[0]), int(off)+iosStateOff))
+	if state&iosFailbit == 0 {
+		t.Fatalf("inlined failbit not set, state=%d off=%d", state, off)
 	}
 	IfstreamClose(&obj[0])
 }
@@ -24,7 +35,7 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte("integer size = 4\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	var obj [8]byte
+	var obj [256]byte
 	IfstreamOpen(&obj[0], &append([]byte(p), 0)[0], 8)
 	if IosFail(&obj[0]) {
 		t.Fatal("existing file set fail")
