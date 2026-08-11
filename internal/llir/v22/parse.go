@@ -1265,7 +1265,7 @@ func (p *parser) parseCallSite() (callSite, error) {
 		fnty = ft
 		typ = ft.RetType
 	}
-	callee, err := p.parseCallee()
+	callee, err := p.parseCallee(typ)
 	if err != nil {
 		return cs, err
 	}
@@ -1434,7 +1434,7 @@ func (p *parser) blockRef() (*ir.Block, error) {
 	return b, nil
 }
 
-func (p *parser) parseCallee() (value.Value, error) {
+func (p *parser) parseCallee(ret types.Type) (value.Value, error) {
 	switch p.tok.kind {
 	case kGlobal:
 		return p.refAt(p.tok.s)
@@ -1442,9 +1442,48 @@ func (p *parser) parseCallee() (value.Value, error) {
 		name := p.tok.s
 		p.next()
 		return p.lookupLocal(name, p.ptr), nil
-	default:
-		return nil, p.errorf("expected callee, got %s", p.tok)
+	case kIdent:
+		if p.tok.s == "asm" {
+			return p.parseInlineAsm(ret)
+		}
 	}
+	return nil, p.errorf("expected callee, got %s", p.tok)
+}
+
+func (p *parser) parseInlineAsm(ret types.Type) (*ir.InlineAsm, error) {
+	p.next() // asm
+	a := ir.NewInlineAsm(types.NewPointer(types.NewFunc(ret)), "", "")
+	for p.tok.kind == kIdent {
+		switch p.tok.s {
+		case "sideeffect":
+			a.SideEffect = true
+			p.next()
+		case "alignstack":
+			a.AlignStack = true
+			p.next()
+		case "inteldialect":
+			a.IntelDialect = true
+			p.next()
+		case "unwind":
+			p.next()
+		default:
+			return nil, p.errorf("unexpected asm flag %q", p.tok.s)
+		}
+	}
+	if p.tok.kind != kString {
+		return nil, p.errorf("expected asm string")
+	}
+	a.Asm = p.tok.s
+	p.next()
+	if err := p.expect(kComma); err != nil {
+		return nil, err
+	}
+	if p.tok.kind != kString {
+		return nil, p.errorf("expected asm constraint")
+	}
+	a.Constraint = p.tok.s
+	p.next()
+	return a, nil
 }
 
 func (p *parser) parseArgs() ([]value.Value, error) {

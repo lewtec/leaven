@@ -179,6 +179,27 @@ entry:
 	}
 }
 
+func TestParseCallAsm(t *testing.T) {
+	src := `define void @f() {
+start:
+  tail call void asm sideeffect "", "~{memory}"()
+  ret void
+}
+`
+	m, err := ParseString("asm.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCall)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	ia, ok := call.Callee.(*ir.InlineAsm)
+	if !ok || !ia.SideEffect || ia.Constraint != "~{memory}" || ia.Asm != "" {
+		t.Fatalf("asm %+v", call.Callee)
+	}
+}
+
 func TestParseSplat(t *testing.T) {
 	src := `define i1 @f(<16 x i8> %v) {
 entry:
