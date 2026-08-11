@@ -1070,12 +1070,13 @@ func (p *parser) parseLoad(block *ir.Block, ident ir.LocalIdent, name string) er
 	inst := ir.NewLoad(elem, src)
 	inst.LocalIdent = ident
 	inst.Atomic = atomic
-	if err := p.parseAlignAndMD(&inst.Align); err != nil {
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
 		return err
 	}
-	if atomic {
-		// ordering already consumed? LLVM: load atomic ty, ptr syncscope? ordering, align
-		// our fixtures don't use atomic load.
+	inst.Ordering = ord
+	if err := p.parseAlignAndMD(&inst.Align); err != nil {
+		return err
 	}
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
@@ -1083,11 +1084,13 @@ func (p *parser) parseLoad(block *ir.Block, ident ir.LocalIdent, name string) er
 }
 
 func (p *parser) parseStore(block *ir.Block) error {
-	if p.isIdent("atomic") || p.isIdent("volatile") {
+	atomic := false
+	if p.isIdent("atomic") {
+		atomic = true
 		p.next()
-		if p.isIdent("volatile") {
-			p.next()
-		}
+	}
+	if p.isIdent("volatile") {
+		p.next()
 	}
 	src, err := p.parseTypedValue()
 	if err != nil {
@@ -1101,11 +1104,37 @@ func (p *parser) parseStore(block *ir.Block) error {
 		return err
 	}
 	inst := ir.NewStore(src, dst)
+	inst.Atomic = atomic
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	inst.Ordering = ord
 	if err := p.parseAlignAndMD(&inst.Align); err != nil {
 		return err
 	}
 	block.Insts = append(block.Insts, inst)
 	return nil
+}
+
+// parseSyncScopeAndOrdering consumes optional syncscope("...") and an
+// atomic ordering. LangRef: load/store atomic … [syncscope] <ordering>, align.
+func (p *parser) parseSyncScopeAndOrdering() (enum.AtomicOrdering, error) {
+	if p.isIdent("syncscope") {
+		p.next()
+		if p.tok.kind == kLParen {
+			if err := p.skipBalanced(kLParen, kRParen); err != nil {
+				return enum.AtomicOrderingNone, err
+			}
+		}
+	}
+	if p.tok.kind == kIdent {
+		if o, ok := atomicOrdering(p.tok.s); ok {
+			p.next()
+			return o, nil
+		}
+	}
+	return enum.AtomicOrderingNone, nil
 }
 
 func (p *parser) skipGEPFlags() (inbounds bool, err error) {

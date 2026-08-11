@@ -155,6 +155,30 @@ entry:
 	}
 }
 
+func TestParseLoadAtomic(t *testing.T) {
+	// rustc once_cell: load atomic ptr, ptr @SEEDS acquire, align 8
+	src := `@seeds = internal global ptr null
+define ptr @f() {
+entry:
+  %p = load atomic ptr, ptr @seeds acquire, align 8
+  store atomic ptr %p, ptr @seeds release, align 8
+  ret ptr %p
+}
+`
+	m, err := ParseString("atomic.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ld, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstLoad)
+	if !ok || !ld.Atomic || ld.Ordering != enum.AtomicOrderingAcquire {
+		t.Fatalf("load %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	st, ok := m.Funcs[0].Blocks[0].Insts[1].(*ir.InstStore)
+	if !ok || !st.Atomic || st.Ordering != enum.AtomicOrderingRelease {
+		t.Fatalf("store %+v", m.Funcs[0].Blocks[0].Insts[1])
+	}
+}
+
 func TestParseGEPInrange(t *testing.T) {
 	src := `@vt = external global [4 x ptr]
 define ptr @f(ptr %p) {
