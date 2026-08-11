@@ -12,7 +12,7 @@ func RustAlloc(size, align int64) unsafe.Pointer {
 	}
 	b := make([]byte, int(size))
 	out := unsafe.Pointer(&b[0])
-	allocs.Store(uintptr(out), &allocRec{p: b, n: size})
+	allocs.Store(uintptr(out), &allocRec{p: b})
 	return out
 }
 
