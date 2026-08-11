@@ -2,6 +2,7 @@ package v22
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -379,6 +380,30 @@ func (l *lexer) number(line, col int) (token, error) {
 	if l.src[l.i] == '-' {
 		l.adv()
 	}
+	// LLVM 0x… hex int, or 0x[KLMHR]… hex float. Keep the lexeme so
+	// parseConst can pick int vs IEEE bits from the expected type.
+	if l.i < len(l.src) && l.src[l.i] == '0' && l.i+1 < len(l.src) && (l.src[l.i+1] == 'x' || l.src[l.i+1] == 'X') {
+		l.adv()
+		l.adv()
+		if l.i < len(l.src) {
+			switch l.src[l.i] {
+			case 'K', 'L', 'M', 'H', 'R':
+				if l.i+1 < len(l.src) && isHex(l.src[l.i+1]) {
+					l.adv()
+					for l.i < len(l.src) && isHex(l.src[l.i]) {
+						l.adv()
+					}
+					return token{kind: kFloat, s: l.src[start:l.i], line: line, col: col}, nil
+				}
+			}
+		}
+		for l.i < len(l.src) && isHex(l.src[l.i]) {
+			l.adv()
+		}
+		s := l.src[start:l.i]
+		n, _ := parseHexInt64(s)
+		return token{kind: kInt, i: n, s: s, line: line, col: col}, nil
+	}
 	for l.i < len(l.src) && isDigit(l.src[l.i]) {
 		l.adv()
 	}
@@ -441,6 +466,14 @@ func (l *lexer) adv() {
 
 func (l *lexer) err(err error) error {
 	return fmt.Errorf("%d:%d: %w", l.line, l.col, err)
+}
+
+func parseHexInt64(s string) (int64, error) {
+	s = strings.TrimPrefix(s, "-")
+	s = strings.TrimPrefix(s, "0x")
+	s = strings.TrimPrefix(s, "0X")
+	u, err := strconv.ParseUint(s, 16, 64)
+	return int64(u), err
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }

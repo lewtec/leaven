@@ -1,6 +1,8 @@
 package v22
 
 import (
+	"strings"
+
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
@@ -239,6 +241,14 @@ func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
 	}
 	switch p.tok.kind {
 	case kInt:
+		if ft, ok := typ.(*types.FloatType); ok && strings.HasPrefix(strings.ToLower(p.tok.s), "0x") {
+			c, err := constant.NewFloatFromString(ft, p.tok.s)
+			if err != nil {
+				return nil, p.errorf("hex float %q: %v", p.tok.s, err)
+			}
+			p.next()
+			return c, nil
+		}
 		it, ok := typ.(*types.IntType)
 		if !ok {
 			return nil, p.errorf("integer constant for non-int type %s", typ)

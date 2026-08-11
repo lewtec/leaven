@@ -179,6 +179,18 @@ entry:
 	}
 }
 
+func TestParseHexDouble(t *testing.T) {
+	src := `define i1 @f(double %x) {
+entry:
+  %c = fcmp ogt double %x, 0x42A2309CE0000000
+  ret i1 %c
+}
+`
+	if _, err := ParseString("hexf.ll", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseCallAsm(t *testing.T) {
 	src := `define void @f() {
 start:
