@@ -601,51 +601,103 @@ func boolToInt(src *jen.Statement, bits uint64, signed bool) *jen.Statement {
 
 // refersToGlobal reports whether c mentions g (e.g. SSO string: ptr GEP into self).
 func refersToGlobal(v value.Value, g *ir.Global) bool {
-	if v == nil || g == nil {
+	return constRefs(v, func(x value.Value) bool {
+		gg, ok := x.(*ir.Global)
+		return ok && gg == g
+	})
+}
+
+// mentionsFunc reports whether a constant mentions a function (vtable slots).
+// Go treats `var vt = dtor` as depending on dtor; if dtor mentions vt, cycle.
+func mentionsFunc(v value.Value) bool {
+	return constRefs(v, func(x value.Value) bool {
+		_, ok := x.(*ir.Func)
+		return ok
+	})
+}
+
+// constRefs walks a constant. Globals and functions are leaves.
+func constRefs(v value.Value, pred func(value.Value) bool) bool {
+	if v == nil {
 		return false
 	}
+	if pred(v) {
+		return true
+	}
 	switch x := v.(type) {
-	case *ir.Global:
-		return x == g
+	case *ir.Alias:
+		return constRefs(x.Aliasee, pred)
+	case *ir.Arg:
+		return constRefs(x.Value, pred)
+	case *ir.IFunc:
+		return constRefs(x.Resolver, pred)
 	case *constant.Struct:
 		for _, f := range x.Fields {
-			if refersToGlobal(f, g) {
+			if constRefs(f, pred) {
 				return true
 			}
 		}
 	case *constant.Array:
 		for _, e := range x.Elems {
-			if refersToGlobal(e, g) {
+			if constRefs(e, pred) {
 				return true
 			}
 		}
 	case *constant.Vector:
 		for _, e := range x.Elems {
-			if refersToGlobal(e, g) {
+			if constRefs(e, pred) {
 				return true
 			}
 		}
 	case *constant.Index:
-		return refersToGlobal(x.Constant, g)
+		return constRefs(x.Constant, pred)
 	case *constant.ExprGetElementPtr:
-		if refersToGlobal(x.Src, g) {
+		if constRefs(x.Src, pred) {
 			return true
 		}
 		for _, idx := range x.Indices {
-			if refersToGlobal(idx, g) {
+			if constRefs(idx, pred) {
 				return true
 			}
 		}
 	case *constant.ExprBitCast:
-		return refersToGlobal(x.From, g)
+		return constRefs(x.From, pred)
 	case *constant.ExprIntToPtr:
-		return refersToGlobal(x.From, g)
+		return constRefs(x.From, pred)
 	case *constant.ExprPtrToInt:
-		return refersToGlobal(x.From, g)
+		return constRefs(x.From, pred)
+	case *constant.ExprTrunc:
+		return constRefs(x.From, pred)
+	case *constant.ExprZExt:
+		return constRefs(x.From, pred)
+	case *constant.ExprSExt:
+		return constRefs(x.From, pred)
 	case *constant.ExprAdd:
-		return refersToGlobal(x.X, g) || refersToGlobal(x.Y, g)
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
 	case *constant.ExprSub:
-		return refersToGlobal(x.X, g) || refersToGlobal(x.Y, g)
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprMul:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprAnd:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprOr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprXor:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprShl:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprLShr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprAShr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprICmp:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprSelect:
+		return constRefs(x.Cond, pred) || constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprExtractValue:
+		return constRefs(x.X, pred)
+	case *constant.ExprInsertValue:
+		return constRefs(x.X, pred) || constRefs(x.Elem, pred)
 	}
 	return false
 }

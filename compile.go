@@ -58,9 +58,10 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		if err != nil {
 			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
-		// std::string SSO: ptr field is a GEP into this same global.
-		// Go forbids `var x = ...&x`; fill in init() after x exists.
-		if refersToGlobal(g.Init, g) {
+		// SSO self-ref (`var x = ...&x`) and C++ vtables (`var vt = dtor`
+		// when dtor stores vt) are Go initialization cycles. Zero the
+		// var and assign in init() after the name exists.
+		if refersToGlobal(g.Init, g) || mentionsFunc(g.Init) {
 			f.Var().Id(name).Add(t)
 			deferred = append(deferred, deferredInit{name, val})
 			continue
