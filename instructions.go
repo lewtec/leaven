@@ -790,6 +790,9 @@ func llvmCallHandled(name string) bool {
 }
 
 func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
+	if ia, ok := inst.Callee.(*ir.InlineAsm); ok {
+		return one(libc("InlineAsm").Call(jen.Lit(ia.Asm), jen.Lit(ia.Constraint))), nil
+	}
 	llvmName := calleeLLVMName(inst.Callee)
 	switch llvmName {
 	case "llvm_lifetime_start_p0", "llvm_lifetime_end_p0",
@@ -1082,6 +1085,15 @@ func rustRuntime(name string) *jen.Statement {
 var libraryFunctions = map[string]goRef{
 	"abort":            {libcPath, "Abort"},
 	"arc4random_buf":   {libcPath, "Arc4randomBuf"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                    {libcPath, "IfstreamClose"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                    {libcPath, "IfstreamClose"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                {libcPath, "IfstreamClose"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                      {libcPath, "IosFail"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                       {libcPath, "IosEof"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                         {libcPath, "IosNot"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                        {libcPath, "IosBool"},
 	"__assert_fail":    {libcPath, "AssertFail"},
 	"fabs":             {"math", "Abs"},
 	"__ctype_b_loc":    {libcPath, "CtypeBLoc"},
