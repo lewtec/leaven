@@ -1,6 +1,7 @@
 package libc
 
 import (
+	"math"
 	"math/bits"
 	"sync/atomic"
 	"unsafe"
@@ -42,6 +43,27 @@ func RustRealloc(p unsafe.Pointer, oldSize, align, newSize int64) unsafe.Pointer
 // as empty asm ~{memory}.
 func Fence() {
 	atomic.AddUint32(&asmMemFence, 1)
+}
+
+// MaximumNumF64 is llvm.maximumnum.f64 (IEEE 754-2019 maximumNumber).
+// rustc emits this for f64::max: NaN is ignored; -0.0 is less than +0.0.
+func MaximumNumF64(a, b float64) float64 {
+	if math.IsNaN(a) {
+		return b
+	}
+	if math.IsNaN(b) {
+		return a
+	}
+	if a == 0 && b == 0 {
+		if math.Signbit(a) && !math.Signbit(b) {
+			return b
+		}
+		return a
+	}
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // UMaxU64 is llvm.umax.i64.

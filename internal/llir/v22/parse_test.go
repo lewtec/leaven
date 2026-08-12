@@ -273,6 +273,31 @@ entry:
 	}
 }
 
+func TestParseCallFastMathNSZ(t *testing.T) {
+	// rustc f64::max: tail call nsz double @llvm.maximumnum.f64
+	src := `declare double @llvm.maximumnum.f64(double, double)
+define double @f(double %a, double %b) {
+entry:
+  %r = tail call nsz double @llvm.maximumnum.f64(double %a, double %b)
+  ret double %r
+}
+`
+	m, err := ParseString("nsz.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := m.Funcs[1].Blocks[0].Insts[0].(*ir.InstCall)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[1].Blocks[0].Insts[0])
+	}
+	if len(call.FastMathFlags) != 1 || call.FastMathFlags[0] != enum.FastMathFlagNSZ {
+		t.Fatalf("flags %+v", call.FastMathFlags)
+	}
+	if call.Typ != types.Double {
+		t.Fatalf("typ %v", call.Typ)
+	}
+}
+
 func TestParseFenceAcquire(t *testing.T) {
 	// rustc Arc drop_slow: fence acquire then load the inner ptr.
 	src := `define void @f(ptr %p) {

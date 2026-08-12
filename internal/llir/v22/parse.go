@@ -1360,10 +1360,14 @@ type callSite struct {
 	callee value.Value
 	args   []value.Value
 	ret    types.Type
+	fast   []enum.FastMathFlag
 }
 
 func (p *parser) parseCallSite() (callSite, error) {
 	var cs callSite
+	// LangRef: call FastMathFlag* CallingConvopt ... Typ
+	// rustc emits `call nsz double @llvm.maximumnum.f64`.
+	cs.fast = p.parseFastMath()
 	p.skipCallingConv()
 	for p.skipRetAttr() {
 	}
@@ -1414,10 +1418,11 @@ func (p *parser) parseCall(block *ir.Block, ident ir.LocalIdent, name string) er
 		return err
 	}
 	inst := &ir.InstCall{
-		LocalIdent: ident,
-		Callee:     cs.callee,
-		Args:       cs.args,
-		Typ:        cs.ret,
+		LocalIdent:    ident,
+		Callee:        cs.callee,
+		Args:          cs.args,
+		Typ:           cs.ret,
+		FastMathFlags: cs.fast,
 	}
 	block.Insts = append(block.Insts, inst)
 	if !types.IsVoid(cs.ret) {
@@ -1786,15 +1791,38 @@ func (p *parser) parseICmp(block *ir.Block, ident ir.LocalIdent, name string) er
 	return nil
 }
 
-func (p *parser) skipFastMath() {
+func (p *parser) parseFastMath() []enum.FastMathFlag {
+	var flags []enum.FastMathFlag
 	for p.tok.kind == kIdent {
+		var f enum.FastMathFlag
 		switch p.tok.s {
-		case "nnan", "ninf", "nsz", "arcp", "contract", "afn", "reassoc", "fast":
-			p.next()
+		case "nnan":
+			f = enum.FastMathFlagNNaN
+		case "ninf":
+			f = enum.FastMathFlagNInf
+		case "nsz":
+			f = enum.FastMathFlagNSZ
+		case "arcp":
+			f = enum.FastMathFlagARcp
+		case "contract":
+			f = enum.FastMathFlagContract
+		case "afn":
+			f = enum.FastMathFlagAFn
+		case "reassoc":
+			f = enum.FastMathFlagReassoc
+		case "fast":
+			f = enum.FastMathFlagFast
 		default:
-			return
+			return flags
 		}
+		flags = append(flags, f)
+		p.next()
 	}
+	return flags
+}
+
+func (p *parser) skipFastMath() {
+	_ = p.parseFastMath()
 }
 
 func (p *parser) parseFNeg(block *ir.Block, ident ir.LocalIdent, name string) error {
