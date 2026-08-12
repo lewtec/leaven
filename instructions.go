@@ -91,9 +91,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		oldName := name + "_old"
 		// Strong CAS. LLVM weak may spuriously fail; strong is still correct
 		// for the usual retry loop and does not hide a failed compare.
+		// Temps use := — they are not SSA names in writeFuncBody.
 		return []jen.Code{
-			assign(okName, casFn.Call(p, cmp, neu)),
-			assign(oldName, cmp),
+			jen.Id(okName).Op(":=").Add(casFn.Call(p, cmp, neu)),
+			jen.Id(oldName).Op(":=").Add(conv(elem, cmp)),
 			jen.If(jen.Op("!").Id(okName)).Block(
 				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
 			),
@@ -1308,6 +1309,9 @@ func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 }
 
 func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
+	if _, ok := t.(*types.PointerType); ok {
+		return jen.Qual("sync/atomic", "CompareAndSwapPointer"), true
+	}
 	it, ok := t.(*types.IntType)
 	if !ok {
 		return nil, false
@@ -1323,6 +1327,9 @@ func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
 }
 
 func atomicLoadFunc(t types.Type) *jen.Statement {
+	if _, ok := t.(*types.PointerType); ok {
+		return jen.Qual("sync/atomic", "LoadPointer")
+	}
 	it, ok := t.(*types.IntType)
 	if !ok {
 		return jen.Qual("sync/atomic", "LoadInt64")

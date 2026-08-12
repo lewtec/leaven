@@ -255,6 +255,28 @@ entry:
 	}
 }
 
+func TestParseCmpXchgPtr(t *testing.T) {
+	// rustc std::sys::exit EXITING_THREAD_ID: cmpxchg of a pointer.
+	src := `@g = global ptr null
+define { ptr, i1 } @f(ptr %p) {
+entry:
+  %r = cmpxchg ptr @g, ptr null, ptr %p acquire monotonic
+  ret { ptr, i1 } %r
+}
+`
+	m, err := ParseString("casptr.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cx, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCmpXchg)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	if _, ok := cx.Cmp.Type().(*types.PointerType); !ok {
+		t.Fatalf("cmp %v", cx.Cmp.Type())
+	}
+}
+
 func TestParseCmpXchgWeak(t *testing.T) {
 	src := `@c = global i64 0
 define void @f() {

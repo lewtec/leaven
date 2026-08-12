@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "atomic.CompareAndSwapPointer"
+      ],
+      "not_contains": [
+        "unsupported instruction type: cmpxchg on ptr"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
