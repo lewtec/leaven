@@ -506,9 +506,12 @@ func zeroOf(typ types.Type) (expr, error) {
 }
 
 var libraryGlobals = map[string]goRef{
-	"stdin":  {pkg: "os", name: "Stdin"},
-	"stdout": {pkg: "os", name: "Stdout"},
-	"stderr": {pkg: "os", name: "Stderr"},
+	"stdin":                                 {pkg: "os", name: "Stdin"},
+	"stdout":                                {pkg: "os", name: "Stdout"},
+	"stderr":                                {pkg: "os", name: "Stderr"},
+	"_ZTVN10__cxxabiv117__class_type_infoE": {pkg: libcPath, name: "ClassTypeInfoVT"},
+	"_ZTVN10__cxxabiv120__si_class_type_infoE":  {pkg: libcPath, name: "SIClassTypeInfoVT"},
+	"_ZTVN10__cxxabiv121__vmi_class_type_infoE": {pkg: libcPath, name: "VMIClassTypeInfoVT"},
 }
 
 // intFromBig truncates x to bitSize bits and returns it as int64 (two's complement).

@@ -1274,6 +1274,7 @@ func libcReturnsTypedPtr(name string) bool {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
+		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":
 		return true
@@ -1642,6 +1643,7 @@ var libraryFunctions = map[string]goRef{
 	"abort":          {libcPath, "Abort"},
 	"arc4random_buf": {libcPath, "Arc4randomBuf"},
 	"__cxa_atexit":   {libcPath, "CxaAtexit"},
+	"__dynamic_cast": {libcPath, "DynamicCast"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                {libcPath, "IfstreamClose"},

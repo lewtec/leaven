@@ -5,6 +5,26 @@ import (
 	"unsafe"
 )
 
+// Itanium type_info vtables. User IR stores GEP(@VT, 2) as the type_info
+// vptr. DynamicCast compares that word to identify class / si / vmi.
+var (
+	ClassTypeInfoVT    [4]unsafe.Pointer
+	SIClassTypeInfoVT  [4]unsafe.Pointer
+	VMIClassTypeInfoVT [4]unsafe.Pointer
+)
+
+const (
+	tiKindUnknown = iota
+	tiKindClass
+	tiKindSI
+	tiKindVMI
+
+	// Itanium __base_class_type_info::__offset_flags
+	tiVirtualMask = 1
+	tiPublicMask  = 2
+	tiOffsetShift = 8
+)
+
 // cxaEnt is one Itanium __cxa_atexit registration.
 type cxaEnt struct {
 	fn  *byte
@@ -46,4 +66,104 @@ func invokeCxa(fn, arg *byte) {
 	words[0] = uintptr(unsafe.Pointer(fn))
 	f := *(*func(unsafe.Pointer))(unsafe.Pointer(&words[0]))
 	f(unsafe.Pointer(arg))
+}
+
+func classTypeInfoVptr() unsafe.Pointer   { return unsafe.Pointer(&ClassTypeInfoVT[2]) }
+func siClassTypeInfoVptr() unsafe.Pointer { return unsafe.Pointer(&SIClassTypeInfoVT[2]) }
+func vmiClassTypeInfoVptr() unsafe.Pointer {
+	return unsafe.Pointer(&VMIClassTypeInfoVT[2])
+}
+
+func typeInfoKind(ti *byte) int {
+	if ti == nil {
+		return tiKindUnknown
+	}
+	vptr := *(*unsafe.Pointer)(unsafe.Pointer(ti))
+	switch vptr {
+	case classTypeInfoVptr():
+		return tiKindClass
+	case siClassTypeInfoVptr():
+		return tiKindSI
+	case vmiClassTypeInfoVptr():
+		return tiKindVMI
+	default:
+		return tiKindUnknown
+	}
+}
+
+// DynamicCast is Itanium __dynamic_cast(src, src_type, dst_type, src2dst).
+// Null src is a null result (ABI). A missing vtable or unknown type_info
+// kind panics so the unsatisfied signal is not turned into a silent null.
+func DynamicCast(src, srcType, dstType *byte, src2dst int64) *byte {
+	if src == nil {
+		return nil
+	}
+	if srcType == nil || dstType == nil {
+		panic("unsatisfied: __dynamic_cast")
+	}
+	vptr := *(*unsafe.Pointer)(unsafe.Pointer(src))
+	if vptr == nil {
+		panic("unsatisfied: __dynamic_cast")
+	}
+	offToTop := *(*int64)(unsafe.Add(vptr, -2*int(unsafe.Sizeof(uintptr(0)))))
+	whole := (*byte)(unsafe.Add(unsafe.Pointer(src), int(offToTop)))
+	wholeTI := *(**byte)(unsafe.Add(vptr, -int(unsafe.Sizeof(uintptr(0)))))
+	_ = src2dst // hint only; the walk is the ABI result
+	return walkType(whole, wholeTI, dstType)
+}
+
+func walkType(obj, ti, want *byte) *byte {
+	if ti == nil || obj == nil {
+		panic("unsatisfied: __dynamic_cast")
+	}
+	if ti == want {
+		return obj
+	}
+	switch typeInfoKind(ti) {
+	case tiKindClass:
+		return nil
+	case tiKindSI:
+		base := *(**byte)(unsafe.Add(unsafe.Pointer(ti), 2*int(unsafe.Sizeof(uintptr(0)))))
+		return walkType(obj, base, want)
+	case tiKindVMI:
+		return walkVMI(obj, ti, want)
+	default:
+		panic("unsatisfied: __dynamic_cast")
+	}
+}
+
+func walkVMI(obj, ti, want *byte) *byte {
+	vptr := *(*unsafe.Pointer)(unsafe.Pointer(obj))
+	if vptr == nil {
+		panic("unsatisfied: __dynamic_cast")
+	}
+	baseCount := *(*uint32)(unsafe.Add(unsafe.Pointer(ti), 16+4))
+	bases := unsafe.Add(unsafe.Pointer(ti), 24)
+	var found *byte
+	for i := uint32(0); i < baseCount; i++ {
+		slot := unsafe.Add(bases, int(i)*16)
+		baseTI := *(**byte)(slot)
+		flags := *(*int64)(unsafe.Add(slot, 8))
+		if flags&tiPublicMask == 0 {
+			continue
+		}
+		off := flags >> tiOffsetShift
+		if flags&tiVirtualMask != 0 {
+			off = *(*int64)(unsafe.Add(vptr, int(off)))
+		}
+		sub := (*byte)(unsafe.Add(unsafe.Pointer(obj), int(off)))
+		got := walkType(sub, baseTI, want)
+		if got == nil {
+			continue
+		}
+		if found == nil {
+			found = got
+			continue
+		}
+		if found != got {
+			// Ambiguous public base: ABI returns null.
+			return nil
+		}
+	}
+	return found
 }

@@ -4,17 +4,17 @@
       "name": "package-p",
       "package": "p",
       "contains": [
+        "libc.DynamicCast",
         "libc.ClassTypeInfoVT",
-        "panic(\"unsatisfied: __cxa_pure_virtual\")"
+        "libc.SIClassTypeInfoVT"
       ],
       "not_contains": [
-        "undefined:",
-        "func printf"
+        "unsatisfied: __dynamic_cast"
       ]
     }
   ],
   "run": {
-    "stdout_contains": [],
+    "stdout_contains": ["ok"],
     "majors": ["22"]
   }
 }
