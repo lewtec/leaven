@@ -294,26 +294,29 @@ func crossCheck(t *testing.T, native, ll string, args []string) {
 
 func runGoDir(t *testing.T, dir string, args ...string) []byte {
 	t.Helper()
-	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
-	cmd.Dir = dir
+	// -O0 csmith Go is huge: typecheck can pass while `go run`'s 30s
+	// still kills the compile. Build first, then exec the binary.
+	bin := filepath.Join(dir, "leaven.bin")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = dir
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("go run: %v", err)
+	build.Stdout = &buf
+	build.Stderr = &buf
+	if err := build.Start(); err != nil {
+		t.Fatalf("go build: %v", err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() { done <- build.Wait() }()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("go run: %v\n%s", err, clipEnds(buf.Bytes(), 4000))
+			t.Fatalf("go build: %v\n%s", err, clipEnds(buf.Bytes(), 4000))
 		}
-	case <-time.After(30 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatalf("go run timeout\n%s", tailBytes(buf.Bytes(), 4000))
+	case <-time.After(3 * time.Minute):
+		_ = build.Process.Kill()
+		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
-	return buf.Bytes()
+	return runTimeout(t, 30*time.Second, bin, args...)
 }
 
 func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byte {
