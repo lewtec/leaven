@@ -974,6 +974,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			typedPtr = libcReturnsTypedPtr(llvmName)
 		} else if cxxNoopDtor(llvmName) {
 			return nil, nil
+		} else if c, adj, ok := cxxTreeCall(llvmName, args); ok {
+			callee = c
+			args = adj
+			typedPtr = true
 		} else if c, adj, ok := cxxIOCall(llvmName, args); ok {
 			callee = c
 			args = adj
@@ -1167,6 +1171,34 @@ const (
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
 // const char* + openmode pair clang used last time.
+func cxxTreeNamed(name string) (*jen.Statement, bool) {
+	fn, _, ok := cxxTreeKind(name)
+	return fn, ok
+}
+
+func cxxTreeCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) {
+	fn, _, ok := cxxTreeKind(name)
+	if !ok {
+		return nil, nil, false
+	}
+	this := jen.Nil()
+	if len(args) > 0 {
+		this = asBytePtr(args[0])
+	}
+	return fn, []jen.Code{this}, true
+}
+
+func cxxTreeKind(name string) (*jen.Statement, int, bool) {
+	switch {
+	case strings.Contains(name, "_Rb_tree_decrement"):
+		return libc("RbTreeDecrement"), 1, true
+	case strings.Contains(name, "_Rb_tree_increment"):
+		return libc("RbTreeIncrement"), 1, true
+	default:
+		return nil, 0, false
+	}
+}
+
 func cxxIONamed(name string) (*jen.Statement, bool) {
 	if cxxNoopDtor(name) {
 		return libc("CxxNoop"), true

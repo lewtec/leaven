@@ -22,6 +22,16 @@ func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
 	}
 }
 
+func TestCxxTreeCall(t *testing.T) {
+	fn, args, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
+	if !ok || fn == nil || len(args) != 1 {
+		t.Fatalf("dec %v %d", fn, len(args))
+	}
+	if _, _, ok := cxxTreeCall("_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base", nil); !ok {
+		t.Fatal("inc const")
+	}
+}
+
 func TestCxxNoopDtor(t *testing.T) {
 	if !cxxNoopDtor("_ZNSt6localeD1Ev") {
 		t.Fatal("locale")

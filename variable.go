@@ -135,6 +135,9 @@ func namedRef(name string) (*jen.Statement, bool) {
 	if c, ok := cxxIONamed(name); ok {
 		return c, true
 	}
+	if c, ok := cxxTreeNamed(name); ok {
+		return c, true
+	}
 	if c := rustRuntime(name); c != nil {
 		return c, true
 	}
