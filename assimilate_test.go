@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// TestAssimilate builds real upstream trees (cmake+clang++ 22 for csmith,
+// TestAssimilate builds real upstream trees (cmake+clang++ 22 -O0 for csmith,
 // cargo+clang 22 for rhai), emits full-program LLVM IR, and compares native
 // stdout to the leaven-compiled Go program on the same argv.
 func TestAssimilate(t *testing.T) {
@@ -34,8 +34,12 @@ func testAssimilateCsmith(t *testing.T) {
 	link := llvmLink22(t)
 
 	build := t.TempDir()
+	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
+	// Release/-O2 inlines those into vptr-24 / iostate soup.
 	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, []string{
-		"-DCMAKE_CXX_FLAGS=-fno-exceptions",
+		"-DCMAKE_BUILD_TYPE=Debug",
+		"-DCMAKE_C_FLAGS=-O0",
+		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
 	})
 	cmakeBuild(t, cmake, ninja, build, "csmith")
 
