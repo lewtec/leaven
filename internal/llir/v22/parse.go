@@ -2103,14 +2103,9 @@ func (p *parser) parseExtractValue(block *ir.Block, ident ir.LocalIdent, name st
 	if err != nil {
 		return err
 	}
-	var idxs []uint64
-	for p.tok.kind == kComma {
-		p.next()
-		if p.tok.kind != kInt {
-			return p.errorf("expected extractvalue index")
-		}
-		idxs = append(idxs, uint64(p.tok.i))
-		p.next()
+	idxs, err := p.parseAggregateIndices()
+	if err != nil {
+		return err
 	}
 	inst := ir.NewExtractValue(x, idxs...)
 	inst.LocalIdent = ident
@@ -2131,19 +2126,35 @@ func (p *parser) parseInsertValue(block *ir.Block, ident ir.LocalIdent, name str
 	if err != nil {
 		return err
 	}
-	var idxs []uint64
-	for p.tok.kind == kComma {
-		p.next()
-		if p.tok.kind != kInt {
-			return p.errorf("expected insertvalue index")
-		}
-		idxs = append(idxs, uint64(p.tok.i))
-		p.next()
+	idxs, err := p.parseAggregateIndices()
+	if err != nil {
+		return err
 	}
 	inst := &ir.InstInsertValue{LocalIdent: ident, X: x, Elem: elem, Indices: idxs, Typ: x.Type()}
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
 	return nil
+}
+
+// parseAggregateIndices reads ', 0, 1' then ', !dbg !N'. A comma that is
+// not followed by an integer is metadata; skipInstMD consumes the rest.
+func (p *parser) parseAggregateIndices() ([]uint64, error) {
+	var idxs []uint64
+	for p.tok.kind == kComma {
+		p.next()
+		if p.tok.kind != kInt {
+			if err := p.skipMDNode(); err != nil {
+				return nil, err
+			}
+			break
+		}
+		idxs = append(idxs, uint64(p.tok.i))
+		p.next()
+	}
+	if err := p.skipInstMD(); err != nil {
+		return nil, err
+	}
+	return idxs, nil
 }
 
 func (p *parser) parseExtractElement(block *ir.Block, ident ir.LocalIdent, name string) error {

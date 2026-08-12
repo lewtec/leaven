@@ -179,6 +179,42 @@ entry:
 	}
 }
 
+func TestParseExtractValueTypedDbg(t *testing.T) {
+	src := `define i1 @f({ i64, i1 } %x) {
+entry:
+  %ok = extractvalue { i64, i1 } %x, 1, !dbg !0
+  ret i1 %ok
+}
+!0 = !{}
+`
+	m, err := ParseString("extract.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstExtractValue)
+	if !ok || len(ev.Indices) != 1 || ev.Indices[0] != 1 {
+		t.Fatalf("extractvalue %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseInsertValueDbg(t *testing.T) {
+	src := `define { i64, i1 } @f({ i64, i1 } %x) {
+entry:
+  %y = insertvalue { i64, i1 } %x, i1 true, 1, !dbg !0
+  ret { i64, i1 } %y
+}
+!0 = !{}
+`
+	m, err := ParseString("insert.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iv, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstInsertValue)
+	if !ok || len(iv.Indices) != 1 || iv.Indices[0] != 1 {
+		t.Fatalf("insertvalue %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
 func TestParseCmpXchgWeak(t *testing.T) {
 	src := `@c = global i64 0
 define void @f() {
