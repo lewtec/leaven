@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.IosBaseCtor"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZNSt8ios_baseC2Ev",
+        "func _ZNSt8ios_baseC2Ev"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["ok"],
+    "majors": ["22"]
+  }
+}

@@ -57,6 +57,23 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 	}
 }
 
+func TestIosBaseCtorVptrAndCtype(t *testing.T) {
+	var obj [272]byte
+	IosBaseCtor(&obj[0])
+	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
+	if vp == nil {
+		t.Fatal("nil vptr")
+	}
+	off := *(*int64)(unsafe.Add(vp, -24))
+	if off != 0 {
+		t.Fatalf("vptr-24=%d", off)
+	}
+	ct := *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&obj[0]), iosCtypeOff))
+	if ct == nil {
+		t.Fatal("nil _M_ctype")
+	}
+}
+
 func TestInitOstreamVptrMinus24(t *testing.T) {
 	var obj [272]byte
 	InitOstream(unsafe.Pointer(&obj[0]))

@@ -57,6 +57,23 @@ func TestCxxTreeCall(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallIosBaseCtor(t *testing.T) {
+	name := "_ZNSt8ios_baseC2Ev"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || retPtr || len(args) != 1 {
+		t.Fatalf("ctor %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(name); !ok {
+		t.Fatal("named miss")
+	}
+	if _, _, _, ok := cxxIOCall("_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E", nil); !ok {
+		t.Fatal("basic_ios::init")
+	}
+	if !isIosBaseCtor("_ZNSt8ios_base7_M_initEv") {
+		t.Fatal("_M_init")
+	}
+}
+
 func TestCxxNoopDtor(t *testing.T) {
 	if !cxxNoopDtor("_ZNSt6localeD1Ev") {
 		t.Fatal("locale")

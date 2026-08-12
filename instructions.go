@@ -1415,6 +1415,7 @@ const (
 	cxxIOPut
 	cxxIOFlush
 	cxxIOCtypeInit
+	cxxIOIosBase
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1580,7 +1581,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			this = asBytePtr(args[0])
 		}
 		return fn, []jen.Code{this}, true, true
-	case cxxIOCtypeInit:
+	case cxxIOCtypeInit, cxxIOIosBase:
 		this := jen.Nil()
 		if len(args) > 0 {
 			this = asBytePtr(args[0])
@@ -1625,12 +1626,22 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	return nil, 0, false
 }
 
+func isIosBaseCtor(name string) bool {
+	if strings.Contains(name, "St8ios_base") {
+		return strings.Contains(name, "C1E") || strings.Contains(name, "C2E") || strings.Contains(name, "7_M_init")
+	}
+	return strings.Contains(name, "9basic_ios") && strings.Contains(name, "4initE")
+}
+
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
 		return libc("OstreamInsert"), cxxIOInsert, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
+	}
+	if isIosBaseCtor(name) {
+		return libc("IosBaseCtor"), cxxIOIosBase, true
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false
