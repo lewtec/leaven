@@ -52,6 +52,44 @@ func isTaggedPointerType(t types.Type) bool {
 	return false
 }
 
+// structFieldUintptr reports whether a struct field must be uintptr rather
+// than a GC pointer. Opaque ptr is not tagged globally (that would wrap
+// every pointer); only proven slots are rewritten.
+func structFieldUintptr(st *types.StructType, field types.Type) bool {
+	pt, ok := field.(*types.PointerType)
+	if !ok {
+		return false
+	}
+	if isTaggedPointerType(pt) {
+		return true
+	}
+	// Clang collapses C union { T* } to { ptr }. The bits may be a tag
+	// (LSB set), including on LLVM 15+ opaque ptr.
+	if strings.HasPrefix(st.Name(), "union.") && len(st.Fields) == 1 {
+		return true
+	}
+	// Packed { ptr, iN } (libstdc++ _Bit_iterator): the integer sits next
+	// to the pointer. Go pads the struct so later i32 stores land in a
+	// pointer field (csmith GenerateNewGlobal: 0x1 on the stack).
+	if st.Packed && packedMixesPtrAndInt(st) {
+		return true
+	}
+	return false
+}
+
+func packedMixesPtrAndInt(st *types.StructType) bool {
+	var hasPtr, hasInt bool
+	for _, f := range st.Fields {
+		switch f.(type) {
+		case *types.PointerType:
+			hasPtr = true
+		case *types.IntType:
+			hasInt = true
+		}
+	}
+	return hasPtr && hasInt
+}
+
 // taggedPointerElem returns the Go type of the pointee for casts from uintptr
 // back to a real pointer (e.g. SubtreeHeapData).
 func taggedPointerElem(t types.Type) (*jen.Statement, error) {
@@ -166,9 +204,17 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 	case *types.StructType:
 		var fields []jen.Code
 		for i, field := range t.Fields {
-			fieldType, err := TypeSpec(field)
-			if err != nil {
-				return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
+			var fieldType *jen.Statement
+			var err error
+			if structFieldUintptr(t, field) {
+				// This slot may hold a tagged non-pointer (union payload or
+				// packed ptr+int). Do not put it in a GC pointer field.
+				fieldType = jen.Uintptr()
+			} else {
+				fieldType, err = TypeSpec(field)
+				if err != nil {
+					return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
+				}
 			}
 			fields = append(fields, jen.Id(fieldName(i)).Add(fieldType))
 		}
