@@ -382,6 +382,23 @@ func sameSizeVectors(t1, t2 types.Type) bool {
 	return ok1 && ok2 && a == b && a > 0
 }
 
+// sameSizeVectorScalar reports whether a bitcast between t1 and t2 is a
+// same-width vector↔scalar reinterpret (e.g. <2 x i64> to i128).
+func sameSizeVectorScalar(t1, t2 types.Type) bool {
+	va, vok1 := vectorBitSize(t1)
+	sa, sok1 := scalarBitSize(t1)
+	vb, vok2 := vectorBitSize(t2)
+	sb, sok2 := scalarBitSize(t2)
+	switch {
+	case vok1 && sok2:
+		return va == sb && va > 0
+	case sok1 && vok2:
+		return sa == vb && sa > 0
+	default:
+		return false
+	}
+}
+
 // i1VectorLen is N when t is <N x i1>.
 func i1VectorLen(t types.Type) (n uint64, ok bool) {
 	vt, ok := t.(*types.VectorType)
