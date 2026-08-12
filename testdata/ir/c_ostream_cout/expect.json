@@ -6,6 +6,7 @@
       "contains": [
         "libc.InitOstream",
         "libc.OstreamInsert",
+        "libc.OstreamPut",
         "var _ZSt4cout"
       ],
       "not_contains": [
@@ -14,7 +15,7 @@
     }
   ],
   "run": {
-    "stdout_contains": ["/*"],
+    "stdout_contains": ["/*", "\n"],
     "majors": ["22"]
   }
 }

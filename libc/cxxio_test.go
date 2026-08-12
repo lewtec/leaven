@@ -58,7 +58,7 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 }
 
 func TestInitOstreamVptrMinus24(t *testing.T) {
-	var obj [64]byte
+	var obj [272]byte
 	InitOstream(unsafe.Pointer(&obj[0]))
 	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
 	if vp == nil {
@@ -67,6 +67,16 @@ func TestInitOstreamVptrMinus24(t *testing.T) {
 	off := *(*int64)(unsafe.Add(vp, -24))
 	if off != 0 {
 		t.Fatalf("vptr-24=%d", off)
+	}
+	ct := *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&obj[0]), iosCtypeOff))
+	if ct == nil {
+		t.Fatal("nil _M_ctype")
+	}
+	if *(*byte)(unsafe.Add(ct, ctypeWidenOkOff)) == 0 {
+		t.Fatal("widen_ok")
+	}
+	if *(*byte)(unsafe.Add(ct, ctypeWidenTabOff+10)) != '\n' {
+		t.Fatal("widen \\n")
 	}
 }
 

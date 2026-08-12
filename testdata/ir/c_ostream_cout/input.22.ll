@@ -3,7 +3,7 @@ source_filename = "testdata/ir/c_ostream_cout/source.c"
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-@_ZSt4cout = external global [64 x i8]
+@_ZSt4cout = external global [272 x i8]
 @msg = private unnamed_addr constant [3 x i8] c"/*\00"
 
 define i32 @main() {
@@ -12,14 +12,26 @@ entry:
   %slot = getelementptr i8, ptr %vp, i64 -24
   %off = load i64, ptr %slot
   %z = icmp eq i64 %off, 0
-  br i1 %z, label %write, label %bad
+  br i1 %z, label %endl, label %bad
+
+endl:
+  %ios = getelementptr i8, ptr @_ZSt4cout, i64 0
+  %ctp = getelementptr i8, ptr %ios, i64 240
+  %ct = load ptr, ptr %ctp
+  %null = icmp eq ptr %ct, null
+  br i1 %null, label %bad, label %write
 
 write:
   %p = call ptr @_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l(ptr @_ZSt4cout, ptr @msg, i64 2)
+  %nl = getelementptr i8, ptr %ct, i64 67
+  %c = load i8, ptr %nl
+  %q = call ptr @_ZNSo3putEc(ptr @_ZSt4cout, i8 %c)
   ret i32 0
 
 bad:
   ret i32 1
 }
+
+declare ptr @_ZNSo3putEc(ptr, i8)
 
 declare ptr @_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l(ptr, ptr, i64)

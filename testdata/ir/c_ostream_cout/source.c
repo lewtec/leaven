@@ -1,4 +1,4 @@
-/* csmith OutputHeader: declare-only cout. clang++ -O2 loads *(vptr-24).
+/* csmith OutputHeader: cout vptr-24 and _M_ctype for inlined endl.
  * leaven:hand-ir
  */
 int main(void) { return 0; }

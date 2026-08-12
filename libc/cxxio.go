@@ -27,11 +27,29 @@ var streams sync.Map // uintptr → *fileStream
 var ifstreamVT = [4]int64{}
 
 const (
-	iosEofbit   = 2
-	iosFailbit  = 4
-	iosStateOff = 32
-	filebufOff  = 16
+	iosEofbit        = 2
+	iosFailbit       = 4
+	iosStateOff      = 32
+	filebufOff       = 16
+	iosCtypeOff      = 240 // basic_ios::_M_ctype (clang++ -O2 endl)
+	ctypeWidenOkOff  = 56
+	ctypeWidenTabOff = 57
+	ctypeSize        = 570
 )
+
+// standinCtype is libstdc++ ctype<char>. endl does
+//
+//	f = *(ios+240); if f==nil throw_bad_cast; if f[56]!=0 { c = f[57+10] }
+//
+// Identity widen table so '\n' stays 10.
+var standinCtype [ctypeSize]byte
+
+func init() {
+	standinCtype[ctypeWidenOkOff] = 1
+	for i := 0; i < 256; i++ {
+		standinCtype[ctypeWidenTabOff+i] = byte(i)
+	}
+}
 
 // StandinVptr is an Itanium vptr into ifstreamVT. vptr-24 is slot 0 (0).
 // Declare-only VTTs store these so inlined dtors do not load nil-24.
@@ -166,16 +184,28 @@ func IosNot(this *byte) bool { return streamOf(this).fail }
 // IosBool is basic_ios::operator bool (true if the stream is good).
 func IosBool(this *byte) bool { return !streamOf(this).fail }
 
-// InitOstream writes the stand-in Itanium vptr at this. clang++ -O2
-// operator<< does off = *(vptr-24); ios = this+off; state = *(ios+32).
-// Offset 0 and zero iostate is a good stream. csmith's cout is
-// declare-only; without this, vptr is nil and vptr-24 faults at
-// 0xffffffffffffffe8.
+// InitOstream writes the stand-in Itanium vptr and ctype<char>.
+// clang++ -O2 endl: off = *(vptr-24); ios = this+off; ctype = *(ios+240);
+// null ctype → __throw_bad_cast (OutputMgr::OutputHeader).
 func InitOstream(this unsafe.Pointer) {
 	if this == nil {
 		return
 	}
 	*(*unsafe.Pointer)(this) = StandinVptr()
+	*(*unsafe.Pointer)(unsafe.Add(this, iosCtypeOff)) = unsafe.Pointer(&standinCtype[0])
+}
+
+// CtypeWidenInit is ctype<char>::_M_widen_init. Identity table, widen_ok=1.
+func CtypeWidenInit(this *byte) {
+	if this == nil {
+		return
+	}
+	base := unsafe.Pointer(this)
+	*(*byte)(unsafe.Add(base, ctypeWidenOkOff)) = 1
+	tab := unsafe.Slice((*byte)(unsafe.Add(base, ctypeWidenTabOff)), 256)
+	for i := range tab {
+		tab[i] = byte(i)
+	}
 }
 
 // OstreamInsert is std::__ostream_insert<char>(ostream&, char const*, long).

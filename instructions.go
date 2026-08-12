@@ -1403,6 +1403,7 @@ const (
 	cxxIOInsertU64
 	cxxIOPut
 	cxxIOFlush
+	cxxIOCtypeInit
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1568,6 +1569,12 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			this = asBytePtr(args[0])
 		}
 		return fn, []jen.Code{this}, true, true
+	case cxxIOCtypeInit:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		return fn, []jen.Code{this}, false, true
 	default:
 		return nil, nil, false, false
 	}
@@ -1589,6 +1596,8 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		return libc("OstreamPut"), cxxIOPut, true
 	case strings.Contains(name, "So5flushE"):
 		return libc("OstreamFlush"), cxxIOFlush, true
+	case strings.Contains(name, "5ctypeIcE13_M_widen_init"):
+		return libc("CtypeWidenInit"), cxxIOCtypeInit, true
 	case strings.Contains(name, "SolsEPFRSoS_E"):
 		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
 		return libc("OstreamEndl"), cxxIOEndl, true
