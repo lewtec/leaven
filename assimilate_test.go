@@ -35,10 +35,11 @@ func testAssimilateCsmith(t *testing.T) {
 
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
-	// Release's -O3 is replaced; do not use Debug (-g emits #dbg_*).
+	// Debug keeps -g; v22 skips #dbg_* records.
 	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, []string{
-		"-DCMAKE_C_FLAGS_RELEASE=-O0",
-		"-DCMAKE_CXX_FLAGS_RELEASE=-O0 -fno-exceptions",
+		"-DCMAKE_BUILD_TYPE=Debug",
+		"-DCMAKE_C_FLAGS=-O0",
+		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
 	})
 	cmakeBuild(t, cmake, ninja, build, "csmith")
 
