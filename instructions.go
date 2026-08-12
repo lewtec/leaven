@@ -45,6 +45,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "+", x: x, y: y})), nil
 		}
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128Add").Call(x, y))), nil
+		}
 		if ciy, ok := inst.Y.(*constant.Int); ok && ciy.X.Sign() == -1 {
 			// Use the constant's own minus sign.
 			return one(jen.Id(name).Op("=").Add(x).Op(ciy.X.String())), nil
@@ -177,6 +180,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
 		}
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128And").Call(x, y))), nil
+		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "&&", y))), nil
 		}
@@ -192,6 +198,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		name := VariableName(inst)
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128AShr").Call(x, y))), nil
+		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
 			return one(assign(name, jen.Byte().Call(bin(x, ">>", y)))), nil
 		}
@@ -423,6 +432,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		name := VariableName(inst)
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128LShr").Call(x, y))), nil
+		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
 			return one(assign(name, conv(goIntType(t.BitSize), bin(x, ">>", y)))), nil
 		}
@@ -443,6 +455,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
+		}
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128Or").Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "||", y))), nil
@@ -493,8 +508,22 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			if toType.BitSize == 128 {
+				c, err := formatSExt(inst.From, inst.To)
+				if err != nil {
+					return nil, err
+				}
+				return one(assign(name, c)), nil
+			}
 			neg := -1
 			return one(jen.If(from).Block(assign(name, jen.Lit(neg))).Else().Block(assign(name, jen.Lit(0)))), nil
+		}
+		if toType.BitSize == 128 {
+			c, err := formatSExt(inst.From, inst.To)
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(name, c)), nil
 		}
 		return one(assign(name, conv(goIntType(toType.BitSize), from))), nil
 
@@ -506,6 +535,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		y, err := FormatUnsigned(inst.Y)
 		if err != nil {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
+		}
+		if isI128(inst.Typ) {
+			return one(assign(VariableName(inst), libc("I128Shl").Call(x, y))), nil
 		}
 		return one(assign(VariableName(inst), bin(x, "<<", y))), nil
 
@@ -586,22 +618,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				jen.Id(name).Index(jen.Id("i")).Op("=").Add(to).Call(jen.Id("v")),
 			)), nil
 		}
-		to, err := translateType(inst.To, "To type")
+		c, err := formatTrunc(inst.From, inst.To)
 		if err != nil {
 			return nil, err
 		}
-		from, err := translateOp(inst.From, "source")
-		if err != nil {
-			return nil, err
-		}
-		name := VariableName(inst)
-		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize == 1 {
-			return one(assign(name, jen.Parens(bin(from, "&", jen.Lit(1))).Op("!=").Lit(0))), nil
-		}
-		if intType, ok := inst.To.(*types.IntType); ok && intType.BitSize < 8 {
-			return one(assign(name, jen.Byte().Call(bin(from, "&", litUntyped(int64(255>>(8-intType.BitSize))))))), nil
-		}
-		return one(assign(name, conv(to, from))), nil
+		return one(assign(VariableName(inst), c)), nil
 
 	case *ir.InstUIToFP:
 		from, err := FormatUnsigned(inst.From)
@@ -626,6 +647,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
+		}
+		if isI128(inst.Typ) {
+			return one(assign(name, libc("I128Xor").Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "!=", y))), nil
@@ -668,7 +692,21 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			if toType.BitSize == 128 {
+				c, err := formatZExt(inst.From, inst.To)
+				if err != nil {
+					return nil, err
+				}
+				return one(assign(name, c)), nil
+			}
 			return one(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
+		}
+		if toType.BitSize == 128 {
+			c, err := formatZExt(inst.From, inst.To)
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(name, c)), nil
 		}
 		w := goIntBits(toType.BitSize)
 		return one(assign(name, conv(goIntType(w), conv(goUintType(w), from)))), nil
@@ -683,7 +721,61 @@ type llvmBin struct {
 	x, y value.Value
 }
 
+func i128BinFunc(op string, ashr bool) (string, bool) {
+	if ashr && (op == ">>" || op == "ashr") {
+		return "I128AShr", true
+	}
+	switch op {
+	case "+":
+		return "I128Add", true
+	case "-":
+		return "I128Sub", true
+	case "*":
+		return "I128Mul", true
+	case "&":
+		return "I128And", true
+	case "|":
+		return "I128Or", true
+	case "^":
+		return "I128Xor", true
+	case "<<":
+		return "I128Shl", true
+	case ">>", "lshr":
+		return "I128LShr", true
+	case "ashr":
+		return "I128AShr", true
+	case "/":
+		return "", false
+	case "%":
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+func translateI128Bin(name, op string, x, y value.Value, ashr bool) ([]jen.Code, bool, error) {
+	if !isI128(x.Type()) && !isI128(y.Type()) {
+		return nil, false, nil
+	}
+	fn, ok := i128BinFunc(op, ashr)
+	if !ok {
+		return nil, false, fmt.Errorf("%w: i128 %s", errUnsupportedInstruction, op)
+	}
+	xv, err := translateOp(x, "left operand")
+	if err != nil {
+		return nil, true, err
+	}
+	yv, err := translateOp(y, "right operand")
+	if err != nil {
+		return nil, true, err
+	}
+	return one(assign(name, libc(fn).Call(xv, yv))), true, nil
+}
+
 func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if stmts, ok, err := translateI128Bin(VariableName(inst), b.op, b.x, b.y, false); ok {
+		return stmts, err
+	}
 	xv, err := translateOp(b.x, "left operand")
 	if err != nil {
 		return nil, err
@@ -719,6 +811,21 @@ func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
 }
 
 func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if isI128(inst.Type()) {
+		fn := "I128SDiv"
+		if b.op == "%" {
+			fn = "I128SRem"
+		}
+		xv, err := translateOp(b.x, "left operand")
+		if err != nil {
+			return nil, err
+		}
+		yv, err := translateOp(b.y, "right operand")
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), libc(fn).Call(xv, yv))), nil
+	}
 	xv, err := FormatSigned(b.x)
 	if err != nil {
 		return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
@@ -735,6 +842,21 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 }
 
 func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if isI128(inst.Type()) {
+		fn := "I128UDiv"
+		if b.op == "%" {
+			fn = "I128URem"
+		}
+		xv, err := translateOp(b.x, "left operand")
+		if err != nil {
+			return nil, err
+		}
+		yv, err := translateOp(b.y, "right operand")
+		if err != nil {
+			return nil, err
+		}
+		return one(assign(VariableName(inst), libc(fn).Call(xv, yv))), nil
+	}
 	xv, err := FormatUnsigned(b.x)
 	if err != nil {
 		return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
@@ -984,9 +1106,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if c, adj, ok := cxxIOCall(llvmName, args); ok {
+		} else if c, adj, retPtr, ok := cxxIOCall(llvmName, args); ok {
 			callee = c
 			args = adj
+			typedPtr = retPtr
 		} else if strings.Contains(llvmName, "throw_bad_cast") {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
@@ -1054,7 +1177,8 @@ func libcReturnsTypedPtr(name string) bool {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
-		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":
+		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
+		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":
 		return true
 	default:
 		return false
@@ -1173,6 +1297,7 @@ func rustRuntime(name string) *jen.Statement {
 const (
 	cxxIOOpen = iota + 1
 	cxxIOClose
+	cxxIOInsert
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1260,10 +1385,10 @@ func cxxNoopDtor(name string) bool {
 		strings.Contains(name, "St8ios_base")
 }
 
-func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) {
+func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, bool) {
 	fn, kind, ok := cxxIOKind(name)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	switch kind {
 	case cxxIOOpen:
@@ -1277,19 +1402,34 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) 
 		if len(args) > 2 {
 			mode = jen.Add(args[2])
 		}
-		return fn, []jen.Code{this, path, mode}, true
+		return fn, []jen.Code{this, path, mode}, false, true
 	case cxxIOClose:
 		this := jen.Nil()
 		if len(args) > 0 {
 			this = asBytePtr(args[0])
 		}
-		return fn, []jen.Code{this}, true
+		return fn, []jen.Code{this}, false, true
+	case cxxIOInsert:
+		os, s, n := jen.Nil(), jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			s = asBytePtr(args[1])
+		}
+		if len(args) > 2 {
+			n = jen.Add(args[2])
+		}
+		return fn, []jen.Code{os, s, n}, true, true
 	default:
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 }
 
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
+	if strings.Contains(name, "__ostream_insert") {
+		return libc("OstreamInsert"), cxxIOInsert, true
+	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false
 	}
@@ -1307,17 +1447,18 @@ var libraryFunctions = map[string]goRef{
 	"abort":          {libcPath, "Abort"},
 	"arc4random_buf": {libcPath, "Arc4randomBuf"},
 	"__cxa_atexit":   {libcPath, "CxaAtexit"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                    {libcPath, "IfstreamClose"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                    {libcPath, "IfstreamCloseVTT"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                {libcPath, "IfstreamClose"},
-	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                 {libcPath, "FilebufClose"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                      {libcPath, "IosFail"},
-	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":       {libcPath, "IosClear"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                       {libcPath, "IosEof"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                         {libcPath, "IosNot"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                        {libcPath, "IosBool"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                {libcPath, "IfstreamClose"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                {libcPath, "IfstreamCloseVTT"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                            {libcPath, "IfstreamClose"},
+	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                             {libcPath, "FilebufClose"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                  {libcPath, "IosFail"},
+	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                   {libcPath, "IosClear"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                   {libcPath, "IosEof"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                     {libcPath, "IosNot"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                    {libcPath, "IosBool"},
+	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l": {libcPath, "OstreamInsert"},
 	"__assert_fail":       {libcPath, "AssertFail"},
 	"fabs":                {"math", "Abs"},
 	"__ctype_b_loc":       {libcPath, "CtypeBLoc"},

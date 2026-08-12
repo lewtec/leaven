@@ -143,6 +143,9 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			// Bitfields and other non-power-of-two widths (e.g. i24) map to the
 			// next wider Go integer type (int16/int32/int64).
 			return goIntType(t.BitSize), nil
+		case t.BitSize == 128:
+			// rustc i128/u128 and TypeId. Two limbs, not int64.
+			return libc("I128"), nil
 		default:
 			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
 			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)

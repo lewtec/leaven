@@ -56,3 +56,26 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 		t.Fatal("close left a live stream")
 	}
 }
+
+func TestOstreamInsertWrites(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	msg := []byte("/*\n")
+	var dummy [8]byte
+	got := OstreamInsert(&dummy[0], &msg[0], int64(len(msg)))
+	_ = w.Close()
+	os.Stdout = old
+	if got != &dummy[0] {
+		t.Fatal("did not return the stream")
+	}
+	buf := make([]byte, 8)
+	n, _ := r.Read(buf)
+	_ = r.Close()
+	if string(buf[:n]) != "/*\n" {
+		t.Fatalf("wrote %q", buf[:n])
+	}
+}

@@ -18,14 +18,16 @@ type fileStream struct {
 var streams sync.Map // uintptr → *fileStream
 
 // ifstreamVT is a stand-in Itanium vtable. clang++ -O2 does
-//   off = *(vptr-24); ios = this+off; state = *(ios+32)
+//
+//	off = *(vptr-24); ios = this+off; state = *(ios+32)
+//
 // Offset 0 means fail/eof read iostate at this+32. We do not
 // reconstruct libstdc++ layout beyond that slot.
 var ifstreamVT = [4]int64{}
 
 const (
-	iosEofbit  = 2
-	iosFailbit = 4
+	iosEofbit   = 2
+	iosFailbit  = 4
 	iosStateOff = 32
 	filebufOff  = 16
 )
@@ -162,6 +164,17 @@ func IosNot(this *byte) bool { return streamOf(this).fail }
 
 // IosBool is basic_ios::operator bool (true if the stream is good).
 func IosBool(this *byte) bool { return !streamOf(this).fail }
+
+// OstreamInsert is std::__ostream_insert<char>(ostream&, char const*, long).
+// csmith OutputMgr::OutputHeader writes the generated program header
+// through this. Unknown streams go to stdout (DefaultOutputMgr::get_main_out
+// is cout).
+func OstreamInsert(out *byte, s *byte, n int64) *byte {
+	if s != nil && n > 0 {
+		_, _ = os.Stdout.Write(unsafe.Slice(s, int(n)))
+	}
+	return out
+}
 
 // IosClear is basic_ios::clear(iostate). Writes the inlined iostate
 // slot and updates the side table so later fail/eof loads stay honest.

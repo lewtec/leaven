@@ -4,12 +4,12 @@ import "testing"
 
 func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	name := "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1ERKNSt7__cxx1112basic_stringIcS2_SaIcEEE"
-	fn, args, ok := cxxIOCall(name, nil)
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
 	if !ok {
 		t.Fatalf("missed %s", name)
 	}
-	if fn == nil || len(args) != 3 {
-		t.Fatalf("open %v args=%d", fn, len(args))
+	if fn == nil || len(args) != 3 || retPtr {
+		t.Fatalf("open %v args=%d ret=%v", fn, len(args), retPtr)
 	}
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
@@ -17,8 +17,19 @@ func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 }
 
 func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
-	if _, _, ok := cxxIOCall("printf", nil); ok {
+	if _, _, _, ok := cxxIOCall("printf", nil); ok {
 		t.Fatal("printf")
+	}
+}
+
+func TestCxxIOCallOstreamInsert(t *testing.T) {
+	name := "_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || !retPtr || len(args) != 3 {
+		t.Fatalf("insert %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(name); !ok {
+		t.Fatal("named miss")
 	}
 }
 

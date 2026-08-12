@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dave/jennifer/jen"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
 )
 
 const libcPath = "github.com/lewtec/leaven/libc"
@@ -82,6 +83,8 @@ func goIntType(bits uint64) *jen.Statement {
 		return jen.Int32()
 	case 64:
 		return jen.Int64()
+	case 128:
+		return libc("I128")
 	default:
 		return jen.Id(fmt.Sprintf("int%d", bits))
 	}
@@ -97,9 +100,16 @@ func goUintType(bits uint64) *jen.Statement {
 		return jen.Uint32()
 	case 64:
 		return jen.Uint64()
+	case 128:
+		return libc("I128")
 	default:
 		return jen.Id(fmt.Sprintf("uint%d", bits))
 	}
+}
+
+func isI128(t types.Type) bool {
+	it, ok := t.(*types.IntType)
+	return ok && it.BitSize == 128
 }
 
 func litUntyped(n int64) *jen.Statement {
