@@ -327,6 +327,20 @@ entry:
 	}
 }
 
+func TestParseDeadOnReturn(t *testing.T) {
+	src := `define void @f(ptr dead_on_return noalias noundef %0) {
+  ret void
+}
+`
+	m, err := ParseString("dor.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) == 0 || len(m.Funcs[0].Params) != 1 {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+}
+
 func TestParseDefineDbg(t *testing.T) {
 	src := `define internal fastcc void @f(i64 %0) unnamed_addr #0 !dbg !0 {
   ret void

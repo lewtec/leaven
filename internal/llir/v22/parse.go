@@ -2711,6 +2711,7 @@ func (p *parser) skipParamAttrs() error {
 		}
 		if p.isIdent("noalias") || p.isIdent("readonly") || p.isIdent("writeonly") ||
 			p.isIdent("readnone") || p.isIdent("writable") || p.isIdent("dead_on_unwind") ||
+			p.isIdent("dead_on_return") ||
 			p.isIdent("allocptr") || p.isIdent("allocalign") || p.isIdent("nocapture") ||
 			p.isIdent("nofree") || p.isIdent("nonnull") {
 			p.next()
@@ -2963,7 +2964,8 @@ func isParamAttr(s string) bool {
 	case "zeroext", "signext", "inreg", "byval", "sret", "noalias", "nocapture",
 		"nofree", "noundef", "nonnull", "readonly", "readnone", "writeonly",
 		"immarg", "returned", "swiftself", "swifterror", "nest", "nomerge",
-		"inalloca", "preallocated", "byref", "elementtype", "no_cfi":
+		"inalloca", "preallocated", "byref", "elementtype", "no_cfi",
+		"dead_on_return", "dead_on_unwind":
 		return true
 	}
 	return false
