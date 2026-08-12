@@ -282,3 +282,96 @@ func IosClear(this *byte, state int32) {
 		s.eof = state&iosEofbit != 0
 	}
 }
+
+const (
+	cxxStringSSO      = 15
+	cxxStringLenOff   = 8
+	cxxStringLocalOff = 16
+)
+
+// IstreamGetline is std::getline(istream&, string&). Reads one line
+// from the ifstream side table into a libstdc++ string. Missing
+// stream fails (no fake success). Existing fail/eof bits are kept;
+// eof is set when extraction stops at EOF or the stream was already bad.
+func IstreamGetline(is, str *byte) *byte {
+	if is == nil {
+		return is
+	}
+	v, ok := streams.Load(uintptr(unsafe.Pointer(is)))
+	if !ok {
+		st := &fileStream{fail: true, eof: true}
+		streams.Store(uintptr(unsafe.Pointer(is)), st)
+		setIfstreamABI(is, true, true)
+		return is
+	}
+	st := v.(*fileStream)
+	if st.f == nil || st.fail {
+		st.fail = true
+		st.eof = true
+		setIfstreamABI(is, st.fail, st.eof)
+		return is
+	}
+	var buf []byte
+	var b [1]byte
+	got := false
+	for {
+		n, err := st.f.Read(b[:])
+		if n == 1 {
+			if b[0] == '\n' {
+				got = true
+				break
+			}
+			buf = append(buf, b[0])
+			got = true
+			continue
+		}
+		if err != nil {
+			st.eof = true
+			if !got {
+				st.fail = true
+			}
+			break
+		}
+	}
+	if !st.fail {
+		cxxStringAssign(str, buf)
+	}
+	setIfstreamABI(is, st.fail, st.eof)
+	return is
+}
+
+// cxxStringAssign writes data into a libstdc++ __cxx11::basic_string.
+// SSO for n<=15; otherwise RustAlloc so the inlined dtor's delete matches.
+func cxxStringAssign(s *byte, data []byte) {
+	if s == nil {
+		return
+	}
+	base := unsafe.Pointer(s)
+	local := (*byte)(unsafe.Add(base, cxxStringLocalOff))
+	old := *(**byte)(base)
+	if old != nil && old != local {
+		RustDealloc(unsafe.Pointer(old), 0, 1)
+	}
+	n := len(data)
+	if n <= cxxStringSSO {
+		dst := unsafe.Slice(local, cxxStringSSO+1)
+		copy(dst, data)
+		dst[n] = 0
+		*(**byte)(base) = local
+		*(*int64)(unsafe.Add(base, cxxStringLenOff)) = int64(n)
+		return
+	}
+	p := RustAlloc(int64(n+1), 1)
+	if p == nil {
+		*local = 0
+		*(**byte)(base) = local
+		*(*int64)(unsafe.Add(base, cxxStringLenOff)) = 0
+		return
+	}
+	dst := unsafe.Slice((*byte)(p), n+1)
+	copy(dst, data)
+	dst[n] = 0
+	*(**byte)(base) = (*byte)(p)
+	*(*int64)(unsafe.Add(base, cxxStringLenOff)) = int64(n)
+	*(*uint64)(unsafe.Add(base, cxxStringLocalOff)) = uint64(n)
+}

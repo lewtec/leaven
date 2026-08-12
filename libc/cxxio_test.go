@@ -103,6 +103,91 @@ func TestInitOstreamVptrMinus24(t *testing.T) {
 	}
 }
 
+func emptyCxxString() *[32]byte {
+	var s [32]byte
+	*(*unsafe.Pointer)(unsafe.Pointer(&s[0])) = unsafe.Pointer(&s[16])
+	return &s
+}
+
+func cxxStringText(s *[32]byte) string {
+	p := *(**byte)(unsafe.Pointer(&s[0]))
+	if p == nil {
+		return ""
+	}
+	n := *(*int64)(unsafe.Pointer(&s[8]))
+	if n < 0 {
+		return ""
+	}
+	return string(unsafe.Slice(p, int(n)))
+}
+
+func TestIstreamGetlineMissingFails(t *testing.T) {
+	var obj [256]byte
+	var str = emptyCxxString()
+	got := IstreamGetline(&obj[0], &str[0])
+	if got != &obj[0] {
+		t.Fatal("did not return the stream")
+	}
+	if !IosFail(&obj[0]) {
+		t.Fatal("missing stream did not fail")
+	}
+	if !IosEof(&obj[0]) {
+		t.Fatal("missing stream did not set eof")
+	}
+}
+
+func TestIstreamGetlineKeepsFail(t *testing.T) {
+	var obj [256]byte
+	IfstreamOpen(&obj[0], &[]byte("no-such-leaven-getline.info\x00")[0], 8)
+	if !IosFail(&obj[0]) {
+		t.Fatal("open of missing file should fail")
+	}
+	var str = emptyCxxString()
+	IstreamGetline(&obj[0], &str[0])
+	if !IosFail(&obj[0]) {
+		t.Fatal("getline cleared fail on a bad stream")
+	}
+	if !IosEof(&obj[0]) {
+		t.Fatal("getline on a bad stream left eof clear")
+	}
+	IfstreamClose(&obj[0])
+}
+
+func TestIstreamGetlineReadsLine(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "platform.info")
+	if err := os.WriteFile(p, []byte("integer size = 4\npointer size = 8\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var obj [256]byte
+	IfstreamOpen(&obj[0], &append([]byte(p), 0)[0], 8)
+	if IosFail(&obj[0]) {
+		t.Fatal("open failed")
+	}
+	s1 := emptyCxxString()
+	IstreamGetline(&obj[0], &s1[0])
+	if IosFail(&obj[0]) {
+		t.Fatal("first line failed")
+	}
+	if got := cxxStringText(s1); got != "integer size = 4" {
+		t.Fatalf("line1 %q", got)
+	}
+	s2 := emptyCxxString()
+	IstreamGetline(&obj[0], &s2[0])
+	if IosFail(&obj[0]) {
+		t.Fatal("second line failed")
+	}
+	if got := cxxStringText(s2); got != "pointer size = 8" {
+		t.Fatalf("line2 %q", got)
+	}
+	s3 := emptyCxxString()
+	IstreamGetline(&obj[0], &s3[0])
+	if !IosFail(&obj[0]) || !IosEof(&obj[0]) {
+		t.Fatal("EOF getline should set fail+eof")
+	}
+	IfstreamClose(&obj[0])
+}
+
 func TestOstreamInsertWrites(t *testing.T) {
 	old := os.Stdout
 	r, w, err := os.Pipe()

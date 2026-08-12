@@ -44,6 +44,20 @@ func TestCxxIOCallOstreamInsert(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallGetline(t *testing.T) {
+	name := "_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || !retPtr || len(args) != 2 {
+		t.Fatalf("getline %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(name); !ok {
+		t.Fatal("named miss")
+	}
+	if !isGetline(name) {
+		t.Fatal("isGetline")
+	}
+}
+
 func TestCxxTreeCall(t *testing.T) {
 	fn, args, retPtr, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
 	if !ok || fn == nil || len(args) != 1 || !retPtr {

@@ -1316,7 +1316,8 @@ func libcReturnsTypedPtr(name string) bool {
 		"memset", "memcpy",
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
-		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":
+		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
+		"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE":
 		return true
 	default:
 		return false
@@ -1453,6 +1454,7 @@ const (
 	cxxIOFlush
 	cxxIOCtypeInit
 	cxxIOIosBase
+	cxxIOGetline
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1624,6 +1626,15 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			this = asBytePtr(args[0])
 		}
 		return fn, []jen.Code{this}, false, true
+	case cxxIOGetline:
+		is, str := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			is = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			str = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{is, str}, true, true
 	default:
 		return nil, nil, false, false
 	}
@@ -1677,9 +1688,16 @@ func isLocaleCtor(name string) bool {
 	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
 }
 
+func isGetline(name string) bool {
+	return strings.Contains(name, "St7getline") || strings.HasPrefix(name, "_ZSt7getline")
+}
+
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
 		return libc("OstreamInsert"), cxxIOInsert, true
+	}
+	if isGetline(name) {
+		return libc("IstreamGetline"), cxxIOGetline, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
@@ -1708,18 +1726,19 @@ var libraryFunctions = map[string]goRef{
 	"arc4random_buf": {libcPath, "Arc4randomBuf"},
 	"__cxa_atexit":   {libcPath, "CxaAtexit"},
 	"__dynamic_cast": {libcPath, "DynamicCast"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":             {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                {libcPath, "IfstreamClose"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                {libcPath, "IfstreamCloseVTT"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                            {libcPath, "IfstreamClose"},
-	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                             {libcPath, "FilebufClose"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                  {libcPath, "IosFail"},
-	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                   {libcPath, "IosClear"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                   {libcPath, "IosEof"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                     {libcPath, "IosNot"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                    {libcPath, "IosBool"},
-	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l": {libcPath, "OstreamInsert"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":                                        {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":                                        {libcPath, "IfstreamOpen"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                                           {libcPath, "IfstreamClose"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                                           {libcPath, "IfstreamCloseVTT"},
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                                                       {libcPath, "IfstreamClose"},
+	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                                                        {libcPath, "FilebufClose"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             {libcPath, "IosFail"},
+	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              {libcPath, "IosClear"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              {libcPath, "IosEof"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                                                {libcPath, "IosNot"},
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               {libcPath, "IosBool"},
+	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            {libcPath, "OstreamInsert"},
+	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": {libcPath, "IstreamGetline"},
 	"__assert_fail":       {libcPath, "AssertFail"},
 	"fabs":                {"math", "Abs"},
 	"fmod":                {"math", "Mod"},
