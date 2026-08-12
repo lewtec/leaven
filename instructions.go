@@ -359,6 +359,30 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 	case *ir.InstFDiv:
 		return translateBinAssign(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
 
+	case *ir.InstFRem:
+		x, err := translateOp(inst.X, "left operand")
+		if err != nil {
+			return nil, err
+		}
+		y, err := translateOp(inst.Y, "right operand")
+		if err != nil {
+			return nil, err
+		}
+		// LLVM frem is libm fmod: remainder with the sign of the dividend.
+		// Go has no % on float; math.Mod is float64-only.
+		xf, yf := x, y
+		wrapF32 := false
+		if ft, ok := inst.Type().(*types.FloatType); ok && ft.Kind == types.FloatKindFloat {
+			xf = jen.Float64().Call(x)
+			yf = jen.Float64().Call(y)
+			wrapF32 = true
+		}
+		mod := jen.Qual("math", "Mod").Call(xf, yf)
+		if wrapF32 {
+			mod = jen.Float32().Call(mod)
+		}
+		return one(assign(VariableName(inst), mod)), nil
+
 	case *ir.InstFMul:
 		return translateBinAssign(inst, llvmBin{op: "*", x: inst.X, y: inst.Y})
 
@@ -1698,6 +1722,7 @@ var libraryFunctions = map[string]goRef{
 	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l": {libcPath, "OstreamInsert"},
 	"__assert_fail":       {libcPath, "AssertFail"},
 	"fabs":                {"math", "Abs"},
+	"fmod":                {"math", "Mod"},
 	"__ctype_b_loc":       {libcPath, "CtypeBLoc"},
 	"dup":                 {libcPath, "Dup"},
 	"fclose":              {libcPath, "Fclose"},
