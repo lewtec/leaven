@@ -52,8 +52,54 @@ func rawIdentName(v value.Named) string {
 	return name
 }
 
+// funcLocalNames disambiguates Go names inside one function (%0 and %v0
+// both become v0). Filled by collectFuncLocalNames.
+var funcLocalNames map[value.Named]string
+
+func collectFuncLocalNames(fn *ir.Func) {
+	funcLocalNames = make(map[value.Named]string)
+	used := map[string]bool{rawIdentName(fn): true}
+	add := func(v value.Named) {
+		if v == nil || types.Equal(v.Type(), types.Void) {
+			return
+		}
+		if _, ok := funcLocalNames[v]; ok {
+			return
+		}
+		base := variableNameBase(v)
+		name := base
+		for i := 2; used[name]; i++ {
+			name = fmt.Sprintf("%s_%d", base, i)
+		}
+		used[name] = true
+		funcLocalNames[v] = name
+	}
+	for _, p := range fn.Params {
+		add(p)
+	}
+	for _, b := range fn.Blocks {
+		for _, inst := range b.Insts {
+			if n, ok := inst.(value.Named); ok {
+				add(n)
+			}
+		}
+		if n, ok := b.Term.(value.Named); ok {
+			add(n)
+		}
+	}
+}
+
 // VariableName returns the name to use for a local variable or parameter.
 func VariableName(v value.Named) string {
+	if funcLocalNames != nil {
+		if n, ok := funcLocalNames[v]; ok {
+			return n
+		}
+	}
+	return variableNameBase(v)
+}
+
+func variableNameBase(v value.Named) string {
 	name := rawIdentName(v)
 	// Params named like SSA temps (v0, v1, …) collide with anonymous
 	// instructions ("%1" → "v1"). Prefix params so both can coexist.

@@ -97,6 +97,7 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	}
 
 	for _, fn := range m.Funcs {
+		collectFuncLocalNames(fn)
 		name := VariableName(fn)
 		if fn.Blocks == nil && hasRuntimeDef(name) {
 			continue

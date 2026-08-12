@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "v0_2"
+      ],
+      "not_contains": [
+        "v0 redeclared"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
