@@ -7,6 +7,17 @@ import (
 	"unsafe"
 )
 
+func TestStandinVptrMinus24(t *testing.T) {
+	vp := StandinVptr()
+	if vp == nil {
+		t.Fatal("nil vptr")
+	}
+	off := *(*int64)(unsafe.Add(vp, -24))
+	if off != 0 {
+		t.Fatalf("vptr-24=%d", off)
+	}
+}
+
 func TestIfstreamMissingFileFails(t *testing.T) {
 	var obj [256]byte
 	IfstreamOpen(&obj[0], &[]byte("no-such-leaven-platform.info\x00")[0], 8)

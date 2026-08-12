@@ -30,13 +30,18 @@ const (
 	filebufOff  = 16
 )
 
+// StandinVptr is an Itanium vptr into ifstreamVT. vptr-24 is slot 0 (0).
+// Declare-only VTTs store these so inlined dtors do not load nil-24.
+func StandinVptr() unsafe.Pointer {
+	return unsafe.Add(unsafe.Pointer(&ifstreamVT[0]), 3*8)
+}
+
 func setIfstreamABI(this *byte, fail, eof bool) {
 	if this == nil {
 		return
 	}
 	base := unsafe.Pointer(this)
-	vp := unsafe.Add(unsafe.Pointer(&ifstreamVT[0]), 3*8)
-	*(*unsafe.Pointer)(base) = vp
+	*(*unsafe.Pointer)(base) = StandinVptr()
 	st := int32(0)
 	if fail {
 		st |= iosFailbit
@@ -130,6 +135,10 @@ func IfstreamClose(this *byte) {
 
 // IfstreamCloseVTT is D2(this, vtt).
 func IfstreamCloseVTT(this *byte, vtt *byte) { IfstreamClose(this) }
+
+// CxxNoop is a declare-only C++ dtor we never constructed a real
+// object for (locale, ios_base, __basic_file).
+func CxxNoop(this *byte) {}
 
 // FilebufClose is basic_filebuf::close. O2 inlines ifstream::close
 // as filebuf::close(this+16). Return this (non-null) on success.

@@ -972,6 +972,8 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				args[i] = libcCallArg(llvmName, i, a, args[i])
 			}
 			typedPtr = libcReturnsTypedPtr(llvmName)
+		} else if cxxNoopDtor(llvmName) {
+			return nil, nil
 		} else if c, adj, ok := cxxIOCall(llvmName, args); ok {
 			callee = c
 			args = adj
@@ -1166,8 +1168,23 @@ const (
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
 // const char* + openmode pair clang used last time.
 func cxxIONamed(name string) (*jen.Statement, bool) {
+	if cxxNoopDtor(name) {
+		return libc("CxxNoop"), true
+	}
 	fn, _, ok := cxxIOKind(name)
 	return fn, ok
+}
+
+// cxxNoopDtor is a dtor for a type we never constructed (locale,
+// ios_base, __basic_file). Empty is honest; unsatisfied would panic
+// in the inlined ifstream dtor after fail() already succeeded.
+func cxxNoopDtor(name string) bool {
+	if !strings.Contains(name, "D0E") && !strings.Contains(name, "D1E") && !strings.Contains(name, "D2E") {
+		return false
+	}
+	return strings.Contains(name, "12__basic_file") ||
+		strings.Contains(name, "St6locale") ||
+		strings.Contains(name, "St8ios_base")
 }
 
 func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) {

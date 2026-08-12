@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir"
@@ -51,6 +52,10 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			return fmt.Errorf("error translating type (%v): %w", g.ContentType, err)
 		}
 		if g.Init == nil {
+			if init := vttStandin(name, g.ContentType); init != nil {
+				f.Var().Id(name).Add(t).Op("=").Add(init)
+				continue
+			}
 			f.Var().Id(name).Add(t)
 			continue
 		}
@@ -140,6 +145,43 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		}
 	}
 	return nil
+}
+
+// vttStandin fills a declare-only Itanium VTT with StandinVptr so
+// inlined dtors can load *(vptr-24) without faulting on nil.
+func vttStandin(name string, t types.Type) *jen.Statement {
+	if !strings.HasPrefix(name, "_ZTT") {
+		return nil
+	}
+	n, wrap := vttLen(t)
+	if n <= 0 {
+		return nil
+	}
+	elems := make([]jen.Code, n)
+	for i := range elems {
+		elems[i] = libc("StandinVptr").Call()
+	}
+	arr := jen.Index(litUntyped(int64(n))).Qual("unsafe", "Pointer").Values(elems...)
+	if wrap {
+		return jen.Values(arr)
+	}
+	return arr
+}
+
+func vttLen(t types.Type) (n int, wrap bool) {
+	switch t := t.(type) {
+	case *types.ArrayType:
+		if _, ok := t.ElemType.(*types.PointerType); ok {
+			return int(t.Len), false
+		}
+	case *types.StructType:
+		if len(t.Fields) == 1 {
+			if n, wrap := vttLen(t.Fields[0]); n > 0 && !wrap {
+				return n, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // unsatisfiedMsg keeps the panic line short enough that tailBytes / CI
