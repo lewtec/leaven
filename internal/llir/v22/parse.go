@@ -889,6 +889,8 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseGEP(block, ident, name)
 	case "atomicrmw":
 		return p.parseAtomicRMW(block, ident, name)
+	case "cmpxchg":
+		return p.parseCmpXchg(block, ident, name)
 	case "call":
 		return p.parseCall(block, ident, name)
 	case "invoke":
@@ -1237,6 +1239,58 @@ func (p *parser) parseAtomicRMW(block *ir.Block, ident ir.LocalIdent, name strin
 	inst := ir.NewAtomicRMW(op, dst, x, ord)
 	inst.LocalIdent = ident
 	inst.Typ = x.Type()
+	if err := p.parseAlignAndMD(nil); err != nil {
+		return err
+	}
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) parseCmpXchg(block *ir.Block, ident ir.LocalIdent, name string) error {
+	weak := false
+	if p.isIdent("weak") {
+		weak = true
+		p.next()
+	}
+	if p.isIdent("volatile") {
+		p.next()
+	}
+	ptr, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	cmp, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	neu, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	succ, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	fail := enum.AtomicOrderingMonotonic
+	if p.tok.kind == kIdent {
+		if o, ok := atomicOrdering(p.tok.s); ok {
+			fail = o
+			p.next()
+		}
+	}
+	if succ == enum.AtomicOrderingNone {
+		succ = enum.AtomicOrderingSeqCst
+	}
+	inst := ir.NewCmpXchg(ptr, cmp, neu, succ, fail)
+	inst.LocalIdent = ident
+	inst.Weak = weak
 	if err := p.parseAlignAndMD(nil); err != nil {
 		return err
 	}

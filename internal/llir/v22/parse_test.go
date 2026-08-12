@@ -179,6 +179,24 @@ entry:
 	}
 }
 
+func TestParseCmpXchgWeak(t *testing.T) {
+	src := `@c = global i64 0
+define void @f() {
+entry:
+  %x = cmpxchg weak ptr @c, i64 0, i64 1 monotonic monotonic
+  ret void
+}
+`
+	m, err := ParseString("cas.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cx, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCmpXchg)
+	if !ok || !cx.Weak {
+		t.Fatalf("cmpxchg %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
 func TestParseHexDouble(t *testing.T) {
 	src := `define i1 @f(double %x) {
 entry:
