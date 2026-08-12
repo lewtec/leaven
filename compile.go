@@ -43,6 +43,7 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		val  *jen.Statement
 	}
 	var deferred []deferredInit
+	var streamInits []string
 	for _, g := range m.Globals {
 		if isLLVMSpecialGlobal(g.Name()) {
 			continue
@@ -61,6 +62,9 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 				continue
 			}
 			f.Var().Id(name).Add(t)
+			if isStdStream(name) {
+				streamInits = append(streamInits, name)
+			}
 			continue
 		}
 		val, err := FormatValue(g.Init)
@@ -78,10 +82,13 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		f.Var().Id(name).Add(t).Op("=").Add(val)
 	}
 	ctors := globalCtorFuncs(m)
-	if len(deferred) > 0 || len(ctors) > 0 {
+	if len(deferred) > 0 || len(ctors) > 0 || len(streamInits) > 0 {
 		f.Func().Id("init").Params().BlockFunc(func(g *jen.Group) {
 			for _, d := range deferred {
 				g.Id(d.name).Op("=").Add(d.val)
+			}
+			for _, name := range streamInits {
+				g.Add(initStdStream(name))
 			}
 			for _, fn := range ctors {
 				g.Id(VariableName(fn)).Call()

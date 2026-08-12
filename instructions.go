@@ -1390,6 +1390,12 @@ const (
 	cxxIOOpen = iota + 1
 	cxxIOClose
 	cxxIOInsert
+	cxxIOEndl
+	cxxIOLsCStr
+	cxxIOInsertI64
+	cxxIOInsertU64
+	cxxIOPut
+	cxxIOFlush
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1513,14 +1519,91 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			n = jen.Add(args[2])
 		}
 		return fn, []jen.Code{os, s, n}, true, true
+	case cxxIOLsCStr:
+		os, s := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			s = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{os, s}, true, true
+	case cxxIOInsertI64:
+		os, n := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			n = jen.Int64().Call(args[1])
+		}
+		return fn, []jen.Code{os, n}, true, true
+	case cxxIOInsertU64:
+		os, n := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			n = jen.Uint64().Call(args[1])
+		}
+		return fn, []jen.Code{os, n}, true, true
+	case cxxIOPut:
+		os, c := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			c = jen.Byte().Call(args[1])
+		}
+		return fn, []jen.Code{os, c}, true, true
+	case cxxIOEndl, cxxIOFlush:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		return fn, []jen.Code{this}, true, true
 	default:
 		return nil, nil, false, false
 	}
 }
 
+// cxxOstreamOp is cout << / endl / put / flush. csmith OutputHeader
+// inlines some of these and calls the rest.
+func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
+	switch {
+	case strings.Contains(name, "4endlI") || strings.HasPrefix(name, "_ZSt4endl"):
+		return libc("OstreamEndl"), cxxIOEndl, true
+	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
+		return libc("OstreamLsCStr"), cxxIOLsCStr, true
+	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
+		return libc("OstreamInsertU64"), cxxIOInsertU64, true
+	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
+		return libc("OstreamInsertI64"), cxxIOInsertI64, true
+	case strings.Contains(name, "So3putE"):
+		return libc("OstreamPut"), cxxIOPut, true
+	case strings.Contains(name, "So5flushE"):
+		return libc("OstreamFlush"), cxxIOFlush, true
+	case strings.Contains(name, "SolsEPFRSoS_E"):
+		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
+		return libc("OstreamEndl"), cxxIOEndl, true
+	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
+		switch {
+		case strings.HasSuffix(name, "PKc"):
+			return libc("OstreamLsCStr"), cxxIOLsCStr, true
+		case strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"), strings.HasSuffix(name, "Ex"):
+			return libc("OstreamInsertI64"), cxxIOInsertI64, true
+		case strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
+			return libc("OstreamInsertU64"), cxxIOInsertU64, true
+		}
+	}
+	return nil, 0, false
+}
+
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
 		return libc("OstreamInsert"), cxxIOInsert, true
+	}
+	if k, kind, ok := cxxOstreamOp(name); ok {
+		return k, kind, true
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false

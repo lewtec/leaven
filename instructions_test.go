@@ -22,6 +22,17 @@ func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
 	}
 }
 
+func TestCxxOstreamOpEndl(t *testing.T) {
+	name := "_ZSt4endlIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || !retPtr || len(args) != 1 {
+		t.Fatalf("endl %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(name); !ok {
+		t.Fatal("named miss")
+	}
+}
+
 func TestCxxIOCallOstreamInsert(t *testing.T) {
 	name := "_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l"
 	fn, args, retPtr, ok := cxxIOCall(name, nil)

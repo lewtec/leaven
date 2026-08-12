@@ -131,6 +131,19 @@ func vectorBin(v vecBin) *jen.Statement {
 	)
 }
 
+func isStdStream(name string) bool {
+	switch name {
+	case "_ZSt4cout", "_ZSt4cerr", "_ZSt4clog", "_ZSt3cin":
+		return true
+	default:
+		return false
+	}
+}
+
+func initStdStream(name string) *jen.Statement {
+	return libc("InitOstream").Call(unsafePtr(addrOf(jen.Id(name))))
+}
+
 func i1PackFn(n uint64) (string, bool) {
 	switch n {
 	case 8:

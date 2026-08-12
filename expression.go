@@ -126,6 +126,13 @@ func overlayMem(addr *jen.Statement, elem types.Type) (*jen.Statement, error) {
 }
 
 func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, error) {
+	// cout/cerr are objects. load ptr from @cout is the vptr at offset 0,
+	// not the object as a Go slice or as a pointer value.
+	if g, ok := srcVal.(*ir.Global); ok && isStdStream(VariableName(g)) {
+		if _, ok := elem.(*types.PointerType); ok {
+			return overlayMem(src.code, elem)
+		}
+	}
 	if src.base != nil && wholeVarAccess(srcVal, elem) {
 		loaded := src.load()
 		// Library FILE* globals are *os.File; LLVM pointer values are
