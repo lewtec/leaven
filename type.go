@@ -172,6 +172,7 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		return jen.Struct(fields...), nil
 
 	case *types.VectorType:
+		// <N x i1> stays [N]bool. bitcast to iN packs lanes (see i1VectorBitCast).
 		elemType, err := TypeSpec(t.ElemType)
 		if err != nil {
 			return nil, err
@@ -273,6 +274,24 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 	_, ok1 := t1.(*types.PointerType)
 	_, ok2 := t2.(*types.PointerType)
 	return ok1 && ok2
+}
+
+// i1VectorLen is N when t is <N x i1>.
+func i1VectorLen(t types.Type) (n uint64, ok bool) {
+	vt, ok := t.(*types.VectorType)
+	if !ok {
+		return 0, false
+	}
+	it, ok := vt.ElemType.(*types.IntType)
+	if !ok || it.BitSize != 1 {
+		return 0, false
+	}
+	return vt.Len, true
+}
+
+func isI1Vector(t types.Type) bool {
+	_, ok := i1VectorLen(t)
+	return ok
 }
 
 // hasPointers returns whether t contains pointers.

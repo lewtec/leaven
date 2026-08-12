@@ -131,6 +131,64 @@ func vectorBin(v vecBin) *jen.Statement {
 	)
 }
 
+func i1PackFn(n uint64) (string, bool) {
+	switch n {
+	case 8:
+		return "I1Pack8", true
+	case 16:
+		return "I1Pack16", true
+	case 32:
+		return "I1Pack32", true
+	case 64:
+		return "I1Pack64", true
+	default:
+		return "", false
+	}
+}
+
+func i1UnpackFn(n uint64) (string, bool) {
+	switch n {
+	case 8:
+		return "I1Unpack8", true
+	case 16:
+		return "I1Unpack16", true
+	case 32:
+		return "I1Unpack32", true
+	case 64:
+		return "I1Unpack64", true
+	default:
+		return "", false
+	}
+}
+
+// i1VectorBitCast packs <N x i1> to iN or unpacks iN to <N x i1>.
+// LLVM stores i1 vectors packed; Go keeps [N]bool so extract/and stay lanes.
+func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, error) {
+	if n, ok := i1VectorLen(from); ok {
+		it, ok := to.(*types.IntType)
+		if !ok || it.BitSize != n {
+			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, from, to)
+		}
+		fn, ok := i1PackFn(n)
+		if !ok {
+			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
+		}
+		return conv(goIntType(it.BitSize), libc(fn).Call(src)), nil
+	}
+	if n, ok := i1VectorLen(to); ok {
+		it, ok := from.(*types.IntType)
+		if !ok || it.BitSize != n {
+			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, from, to)
+		}
+		fn, ok := i1UnpackFn(n)
+		if !ok {
+			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
+		}
+		return libc(fn).Call(conv(goIntType(it.BitSize), src)), nil
+	}
+	return nil, nil
+}
+
 func one(s *jen.Statement) []jen.Code {
 	if s == nil {
 		return nil

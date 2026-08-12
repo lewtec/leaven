@@ -530,6 +530,36 @@ func TestParseExternalThenGlobal(t *testing.T) {
 	}
 }
 
+func TestParseBitcastI1Vec(t *testing.T) {
+	// rustc SIMD icmp produces <16 x i1> and bitcasts the mask to i16.
+	src := `define i16 @f(<16 x i1> %v) {
+entry:
+  %b = bitcast <16 x i1> %v to i16
+  ret i16 %b
+}
+`
+	m, err := ParseString("i1vec.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstBitCast)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	vt, ok := bc.From.Type().(*types.VectorType)
+	if !ok || vt.Len != 16 {
+		t.Fatalf("from %v", bc.From.Type())
+	}
+	elem, ok := vt.ElemType.(*types.IntType)
+	if !ok || elem.BitSize != 1 {
+		t.Fatalf("elem %v", vt.ElemType)
+	}
+	to, ok := bc.To.(*types.IntType)
+	if !ok || to.BitSize != 16 {
+		t.Fatalf("to %v", bc.To)
+	}
+}
+
 func TestParseI128Const(t *testing.T) {
 	// rustc TypeId / i128 math uses values that do not fit in int64.
 	src := `define i128 @f() {

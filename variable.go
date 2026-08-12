@@ -256,6 +256,12 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
+		if packed, err := i1VectorBitCast(from, v.From.Type(), v.To); packed != nil || err != nil {
+			if err != nil {
+				return expr{}, err
+			}
+			return val(packed), nil
+		}
 		if isTaggedPointerType(v.To) {
 			return val(uintptrOfPtr(from)), nil
 		}

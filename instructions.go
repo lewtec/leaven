@@ -177,6 +177,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
+		if isI1Vector(inst.Typ) {
+			return one(vectorBin(vecBin{dest: name, op: "&&", x: x, y: y})), nil
+		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
 		}
@@ -207,12 +210,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(name, bin(x, ">>", y))), nil
 
 	case *ir.InstBitCast:
-		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
-			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
-		}
 		from, err := translateOp(inst.From, "source")
 		if err != nil {
 			return nil, err
+		}
+		if packed, err := i1VectorBitCast(from, inst.From.Type(), inst.To); packed != nil || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(VariableName(inst), packed)), nil
+		}
+		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
+			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
 		}
 		name := VariableName(inst)
 		if isTaggedPointerType(inst.To) {
@@ -372,6 +381,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(VariableName(inst), result.code)), nil
 
 	case *ir.InstICmp:
+		if _, ok := inst.X.Type().(*types.VectorType); ok {
+			return translateVectorICmp(inst)
+		}
 		cmp, err := formatICmp(inst.Pred, inst.X, inst.Y)
 		if err != nil {
 			return nil, err
@@ -453,6 +465,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
+		if isI1Vector(inst.Typ) {
+			return one(vectorBin(vecBin{dest: name, op: "||", x: x, y: y})), nil
+		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
 		}
@@ -495,6 +510,15 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
+		if _, ok := inst.Cond.Type().(*types.VectorType); ok {
+			return one(jen.For(jen.List(jen.Id("i"), jen.Id("c")).Op(":=").Range().Add(cond)).Block(
+				jen.If(jen.Id("c")).Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(valueTrue).Index(jen.Id("i")),
+				).Else().Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(valueFalse).Index(jen.Id("i")),
+				),
+			)), nil
+		}
 		return one(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
 
 	case *ir.InstSExt:
@@ -645,6 +669,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
+		if isI1Vector(inst.Typ) {
+			return one(vectorBin(vecBin{dest: name, op: "!=", x: x, y: y})), nil
+		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
 		}
@@ -675,6 +702,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				return nil, err
 			}
 			name := VariableName(inst)
+			if fromType.BitSize == 1 {
+				return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(boolToInt(jen.Id("v"), toType.BitSize, false)),
+				)), nil
+			}
 			tw, fw := goIntBits(toType.BitSize), goIntBits(fromType.BitSize)
 			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
 				jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(tw)).Call(
@@ -750,6 +782,66 @@ func i128BinFunc(op string, ashr bool) (string, bool) {
 		return "", false
 	default:
 		return "", false
+	}
+}
+
+func translateVectorICmp(inst *ir.InstICmp) ([]jen.Code, error) {
+	x, err := translateOp(inst.X, "left operand")
+	if err != nil {
+		return nil, err
+	}
+	y, err := translateOp(inst.Y, "right operand")
+	if err != nil {
+		return nil, err
+	}
+	op, signed, unsigned, err := icmpPredOp(inst.Pred)
+	if err != nil {
+		return nil, err
+	}
+	xv := jen.Id("v")
+	yv := jen.Add(y).Index(jen.Id("i"))
+	if vt, ok := inst.X.Type().(*types.VectorType); ok {
+		if it, ok := vt.ElemType.(*types.IntType); ok {
+			switch {
+			case signed && it.BitSize == 8:
+				xv = jen.Int8().Call(xv)
+				yv = jen.Int8().Call(yv)
+			case unsigned:
+				xv = goUintType(it.BitSize).Call(xv)
+				yv = goUintType(it.BitSize).Call(yv)
+			}
+		}
+	}
+	name := VariableName(inst)
+	return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(x)).Block(
+		jen.Id(name).Index(jen.Id("i")).Op("=").Add(bin(xv, op, yv)),
+	)), nil
+}
+
+func icmpPredOp(pred enum.IPred) (op string, signed, unsigned bool, err error) {
+	switch pred {
+	case enum.IPredEQ:
+		return "==", false, false, nil
+	case enum.IPredNE:
+		return "!=", false, false, nil
+	case enum.IPredSGE:
+		return ">=", true, false, nil
+	case enum.IPredSGT:
+		return ">", true, false, nil
+	case enum.IPredSLE:
+		return "<=", true, false, nil
+	case enum.IPredSLT:
+		return "<", true, false, nil
+	case enum.IPredUGE:
+		return ">=", false, true, nil
+	case enum.IPredUGT:
+		return ">", false, true, nil
+	case enum.IPredULE:
+		return "<=", false, true, nil
+	case enum.IPredULT:
+		return "<", false, true, nil
+	default:
+		return "", false, false, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
 	}
 }
 
