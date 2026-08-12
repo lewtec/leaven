@@ -974,10 +974,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			typedPtr = libcReturnsTypedPtr(llvmName)
 		} else if cxxNoopDtor(llvmName) {
 			return nil, nil
-		} else if c, adj, ok := cxxTreeCall(llvmName, args); ok {
+		} else if c, adj, retPtr, ok := cxxTreeCall(llvmName, args); ok {
 			callee = c
 			args = adj
-			typedPtr = true
+			typedPtr = retPtr
 		} else if c, adj, ok := cxxIOCall(llvmName, args); ok {
 			callee = c
 			args = adj
@@ -1176,27 +1176,62 @@ func cxxTreeNamed(name string) (*jen.Statement, bool) {
 	return fn, ok
 }
 
-func cxxTreeCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) {
-	fn, _, ok := cxxTreeKind(name)
+func cxxTreeCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, bool) {
+	fn, kind, ok := cxxTreeKind(name)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
-	this := jen.Nil()
-	if len(args) > 0 {
-		this = asBytePtr(args[0])
+	switch kind {
+	case cxxTreeInsert:
+		out := make([]jen.Code, 4)
+		if len(args) > 0 {
+			out[0] = args[0]
+		} else {
+			out[0] = jen.False()
+		}
+		for i := 1; i < 4; i++ {
+			if i < len(args) {
+				out[i] = asBytePtr(args[i])
+			} else {
+				out[i] = jen.Nil()
+			}
+		}
+		return fn, out, false, true
+	default:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		return fn, []jen.Code{this}, kind == cxxTreeWalk, true
 	}
-	return fn, []jen.Code{this}, true
 }
+
+const (
+	cxxTreeWalk = iota + 1
+	cxxTreeInsert
+	cxxTreeInit
+)
 
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "_Rb_tree_decrement"):
-		return libc("RbTreeDecrement"), 1, true
+		return libc("RbTreeDecrement"), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_increment"):
-		return libc("RbTreeIncrement"), 1, true
+		return libc("RbTreeIncrement"), cxxTreeWalk, true
+	case strings.Contains(name, "_Rb_tree_insert_and_rebalance"):
+		return libc("RbTreeInsertAndRebalance"), cxxTreeInsert, true
+	case isRbTreeDefaultCtor(name):
+		return libc("RbTreeInit"), cxxTreeInit, true
 	default:
 		return nil, 0, false
 	}
+}
+
+func isRbTreeDefaultCtor(name string) bool {
+	if !strings.HasSuffix(name, "C1Ev") && !strings.HasSuffix(name, "C2Ev") {
+		return false
+	}
+	return strings.Contains(name, "St8_Rb_tree") || strings.Contains(name, "St3mapI")
 }
 
 func cxxIONamed(name string) (*jen.Statement, bool) {

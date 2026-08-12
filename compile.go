@@ -8,6 +8,7 @@ import (
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
 )
@@ -43,6 +44,9 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	}
 	var deferred []deferredInit
 	for _, g := range m.Globals {
+		if isLLVMSpecialGlobal(g.Name()) {
+			continue
+		}
 		name := VariableName(g)
 		if g.Init == nil && hasRuntimeDef(name) {
 			continue
@@ -73,10 +77,14 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		}
 		f.Var().Id(name).Add(t).Op("=").Add(val)
 	}
-	if len(deferred) > 0 {
+	ctors := globalCtorFuncs(m)
+	if len(deferred) > 0 || len(ctors) > 0 {
 		f.Func().Id("init").Params().BlockFunc(func(g *jen.Group) {
 			for _, d := range deferred {
 				g.Id(d.name).Op("=").Add(d.val)
+			}
+			for _, fn := range ctors {
+				g.Id(VariableName(fn)).Call()
 			}
 		})
 	}
@@ -145,6 +153,59 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		}
 	}
 	return nil
+}
+
+func isLLVMSpecialGlobal(name string) bool {
+	switch name {
+	case "llvm.global_ctors", "llvm.global_dtors", "llvm.used", "llvm.compiler.used":
+		return true
+	default:
+		return false
+	}
+}
+
+// globalCtorFuncs is llvm.global_ctors, lowest priority first.
+func globalCtorFuncs(m *ir.Module) []*ir.Func {
+	var g *ir.Global
+	for _, cand := range m.Globals {
+		if cand.Name() == "llvm.global_ctors" {
+			g = cand
+			break
+		}
+	}
+	if g == nil || g.Init == nil {
+		return nil
+	}
+	arr, ok := g.Init.(*constant.Array)
+	if !ok {
+		return nil
+	}
+	type ent struct {
+		prio int64
+		fn   *ir.Func
+	}
+	var ents []ent
+	for _, el := range arr.Elems {
+		st, ok := el.(*constant.Struct)
+		if !ok || len(st.Fields) < 2 {
+			continue
+		}
+		prio := int64(65535)
+		if n, ok := st.Fields[0].(*constant.Int); ok {
+			prio = n.X.Int64()
+		}
+		fn, ok := st.Fields[1].(*ir.Func)
+		if !ok || fn.Blocks == nil {
+			continue
+		}
+		ents = append(ents, ent{prio, fn})
+	}
+	sort.SliceStable(ents, func(i, j int) bool { return ents[i].prio < ents[j].prio })
+	out := make([]*ir.Func, len(ents))
+	for i, e := range ents {
+		out[i] = e.fn
+	}
+	return out
 }
 
 // vttStandin fills a declare-only Itanium VTT with StandinVptr so

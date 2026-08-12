@@ -23,12 +23,15 @@ func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
 }
 
 func TestCxxTreeCall(t *testing.T) {
-	fn, args, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
-	if !ok || fn == nil || len(args) != 1 {
-		t.Fatalf("dec %v %d", fn, len(args))
+	fn, args, retPtr, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
+	if !ok || fn == nil || len(args) != 1 || !retPtr {
+		t.Fatalf("dec %v %d ret=%v", fn, len(args), retPtr)
 	}
-	if _, _, ok := cxxTreeCall("_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base", nil); !ok {
+	if _, _, _, ok := cxxTreeCall("_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base", nil); !ok {
 		t.Fatal("inc const")
+	}
+	if _, a, ret, ok := cxxTreeCall("_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_", nil); !ok || ret || len(a) != 4 {
+		t.Fatalf("insert %v %d", ret, len(a))
 	}
 }
 
