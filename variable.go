@@ -132,6 +132,9 @@ func namedRef(name string) (*jen.Statement, bool) {
 	if ref, ok := libraryFunctions[name]; ok {
 		return ref.code(), true
 	}
+	if c, ok := cxxIONamed(name); ok {
+		return c, true
+	}
 	if c := rustRuntime(name); c != nil {
 		return c, true
 	}

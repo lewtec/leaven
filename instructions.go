@@ -972,6 +972,9 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				args[i] = libcCallArg(llvmName, i, a, args[i])
 			}
 			typedPtr = libcReturnsTypedPtr(llvmName)
+		} else if c, adj, ok := cxxIOCall(llvmName, args); ok {
+			callee = c
+			args = adj
 		} else if strings.Contains(llvmName, "throw_bad_cast") {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
@@ -1152,6 +1155,61 @@ func rustRuntime(name string) *jen.Statement {
 		return libc("RustFmtUsize")
 	default:
 		return nil
+	}
+}
+
+const (
+	cxxIOOpen = iota + 1
+	cxxIOClose
+)
+
+// cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
+// const char* + openmode pair clang used last time.
+func cxxIONamed(name string) (*jen.Statement, bool) {
+	fn, _, ok := cxxIOKind(name)
+	return fn, ok
+}
+
+func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool) {
+	fn, kind, ok := cxxIOKind(name)
+	if !ok {
+		return nil, nil, false
+	}
+	switch kind {
+	case cxxIOOpen:
+		this, path, mode := jen.Nil(), jen.Nil(), jen.Lit(8)
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			path = asBytePtr(args[1])
+		}
+		if len(args) > 2 {
+			mode = jen.Add(args[2])
+		}
+		return fn, []jen.Code{this, path, mode}, true
+	case cxxIOClose:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		return fn, []jen.Code{this}, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func cxxIOKind(name string) (*jen.Statement, int, bool) {
+	if !strings.Contains(name, "14basic_ifstream") {
+		return nil, 0, false
+	}
+	switch {
+	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"), strings.Contains(name, "4openE"):
+		return libc("IfstreamOpen"), cxxIOOpen, true
+	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"), strings.Contains(name, "5closeE"):
+		return libc("IfstreamClose"), cxxIOClose, true
+	default:
+		return nil, 0, false
 	}
 }
 

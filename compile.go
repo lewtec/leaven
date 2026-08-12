@@ -126,7 +126,7 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			decl.Add(ret)
 		}
 		if fn.Blocks == nil {
-			decl.Block(jen.Panic(jen.Lit("unsatisfied: " + fn.Name())))
+			decl.Block(jen.Panic(jen.Lit(unsatisfiedMsg(fn.Name()))))
 			continue
 		}
 		var bodyErr error
@@ -140,6 +140,16 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		}
 	}
 	return nil
+}
+
+// unsatisfiedMsg keeps the panic line short enough that tailBytes / CI
+// still show it. Itanium names alone are hundreds of bytes.
+func unsatisfiedMsg(name string) string {
+	const max = 80
+	if len(name) <= max {
+		return "unsatisfied: " + name
+	}
+	return "unsatisfied: " + name[:max]
 }
 
 // writeCMainArgs binds C main(int argc, char **argv) from os.Args.

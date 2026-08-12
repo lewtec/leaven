@@ -303,7 +303,7 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("go run: %v\n%s", err, tailBytes(buf.Bytes(), 4000))
+			t.Fatalf("go run: %v\n%s", err, clipEnds(buf.Bytes(), 4000))
 		}
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
@@ -399,6 +399,17 @@ func tailBytes(b []byte, n int) string {
 		return string(b)
 	}
 	return fmt.Sprintf("…(%d bytes omitted)\n%s", len(b)-n, b[len(b)-n:])
+}
+
+// clipEnds keeps the panic line (start) and the caller (end). tailBytes
+// alone dropped the first ~800 bytes of csmith go-run panics.
+func clipEnds(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	head := n / 2
+	tail := n - head
+	return fmt.Sprintf("%s\n…(%d bytes omitted)\n%s", b[:head], len(b)-n, b[len(b)-tail:])
 }
 
 func irSnippet(path string, err error) string {
