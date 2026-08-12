@@ -279,6 +279,41 @@ func compatiblePointerTypes(t1, t2 types.Type) bool {
 	return ok1 && ok2
 }
 
+// scalarBitSize is the LLVM bit width of an integer or IEEE float scalar.
+// x86_fp80 is mapped to Go float64, so it is not a same-size bitcast source.
+func scalarBitSize(t types.Type) (uint64, bool) {
+	switch t := t.(type) {
+	case *types.IntType:
+		if t.BitSize == 0 {
+			return 0, false
+		}
+		return t.BitSize, true
+	case *types.FloatType:
+		switch t.Kind {
+		case types.FloatKindHalf:
+			return 16, true
+		case types.FloatKindFloat:
+			return 32, true
+		case types.FloatKindDouble:
+			return 64, true
+		case types.FloatKindFP128, types.FloatKindPPC_FP128:
+			return 128, true
+		default:
+			return 0, false
+		}
+	default:
+		return 0, false
+	}
+}
+
+// sameSizeScalars reports whether a bitcast between t1 and t2 is a
+// same-width int/float reinterpret (not a pointer cast).
+func sameSizeScalars(t1, t2 types.Type) bool {
+	a, ok1 := scalarBitSize(t1)
+	b, ok2 := scalarBitSize(t2)
+	return ok1 && ok2 && a == b
+}
+
 // i1VectorLen is N when t is <N x i1>.
 func i1VectorLen(t types.Type) (n uint64, ok bool) {
 	vt, ok := t.(*types.VectorType)

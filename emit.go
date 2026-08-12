@@ -232,6 +232,50 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 	return nil, nil
 }
 
+// scalarBitCast reinterprets same-size int/float bits (LLVM bitcast).
+// rustc f32::to_bits is `bitcast float %x to i32`, not a pointer cast.
+func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, error) {
+	if !sameSizeScalars(from, to) {
+		if _, ok := scalarBitSize(from); ok {
+			if _, ok := scalarBitSize(to); ok {
+				return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, from, to)
+			}
+		}
+		return nil, nil
+	}
+	fromF, _ := from.(*types.FloatType)
+	toF, _ := to.(*types.FloatType)
+	fromI, _ := from.(*types.IntType)
+	toI, _ := to.(*types.IntType)
+	bits, _ := scalarBitSize(from)
+	switch {
+	case fromF != nil && toI != nil:
+		switch bits {
+		case 32:
+			return conv(goIntType(32), jen.Qual("math", "Float32bits").Call(src)), nil
+		case 64:
+			return conv(goIntType(64), jen.Qual("math", "Float64bits").Call(src)), nil
+		default:
+			return nil, fmt.Errorf("%w: %v and %v", errUnsupportedFloatType, from, to)
+		}
+	case fromI != nil && toF != nil:
+		switch bits {
+		case 32:
+			return jen.Qual("math", "Float32frombits").Call(jen.Uint32().Call(src)), nil
+		case 64:
+			return jen.Qual("math", "Float64frombits").Call(jen.Uint64().Call(src)), nil
+		default:
+			return nil, fmt.Errorf("%w: %v and %v", errUnsupportedFloatType, from, to)
+		}
+	default:
+		dst, err := TypeSpec(to)
+		if err != nil {
+			return nil, err
+		}
+		return conv(dst, src), nil
+	}
+}
+
 func one(s *jen.Statement) []jen.Code {
 	if s == nil {
 		return nil

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "math.Float32bits",
+        "math.Float32frombits"
+      ],
+      "not_contains": [
+        "incompatible pointer types"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

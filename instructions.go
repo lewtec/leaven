@@ -221,6 +221,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			return one(assign(VariableName(inst), packed)), nil
 		}
+		if bits, err := scalarBitCast(from, inst.From.Type(), inst.To); bits != nil || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(VariableName(inst), bits)), nil
+		}
 		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
 			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
 		}
