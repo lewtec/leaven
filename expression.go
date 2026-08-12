@@ -14,6 +14,9 @@ import (
 // The LLVM pointer value is always unsafe.Pointer. *T exists only while
 // indexing into a struct/array or as AddPointer's type argument.
 func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (expr, error) {
+	if vt, ok := src.Type().(*types.VectorType); ok {
+		return vectorGEP(elemType, src, indices, vt)
+	}
 	if _, ok := src.Type().(*types.PointerType); !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
@@ -103,6 +106,48 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		return addrExpr(result), nil
 	}
 	return val(unsafePtr(result)), nil
+}
+
+// vectorGEP is getelementptr on a vector of pointers. Each lane is offset
+// by the (broadcast) index in units of elemType.
+func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *types.VectorType) (expr, error) {
+	if len(indices) == 0 {
+		return expr{}, fmt.Errorf("%w: no indices", errUnsupportedIndexType)
+	}
+	srcExpr, err := FormatValue(src)
+	if err != nil {
+		return expr{}, err
+	}
+	idx := indices[0]
+	if ci, ok := idx.(*constant.Index); ok {
+		idx = ci.Constant
+	}
+	idxExpr, err := FormatValue(idx)
+	if err != nil {
+		return expr{}, err
+	}
+	et, err := TypeSpec(elemType)
+	if err != nil {
+		return expr{}, err
+	}
+	_, idxVec := idx.Type().(*types.VectorType)
+	n := int64(vt.Len)
+	elems := make([]jen.Code, n)
+	for i := int64(0); i < n; i++ {
+		lane := jen.Add(srcExpr).Index(litUntyped(i))
+		off := idxExpr
+		if idxVec {
+			off = jen.Add(idxExpr).Index(litUntyped(i))
+		}
+		elems[i] = unsafePtr(libc("AddPointer").Types(et).Call(
+			jen.Parens(ptrTyp(et)).Call(lane),
+			jen.Int().Call(off),
+		))
+	}
+	if len(indices) > 1 {
+		return expr{}, fmt.Errorf("%w: vector gep extra indices", errUnsupportedIndexType)
+	}
+	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
 
 // wholeVarAccess reports whether addrExpr.base is the entire LLVM object of
