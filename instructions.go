@@ -1360,6 +1360,7 @@ var libraryFunctions = map[string]goRef{
 	"scanf":               {libcPath, "Scanf"},
 	"sscanf":              {libcPath, "Sscanf"},
 	"__isoc23_sscanf":     {libcPath, "Sscanf"},
+	"statx":               {libcPath, "Statx"},
 	"snprintf":            {libcPath, "Snprintf"},
 	"sqrt":                {"math", "Sqrt"},
 	"__strcat_chk":        {libcPath, "StrcatChk"},

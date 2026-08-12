@@ -5,6 +5,8 @@ import (
 	"math/bits"
 	"sync/atomic"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // RustAlloc is __rust_alloc(size, align).
@@ -84,4 +86,21 @@ func UMulWithOverflowU64(a, b int64) struct {
 		F0 int64
 		F1 bool
 	}{int64(lo), hi != 0}
+}
+
+// Statx is Linux statx(2). rustc std FileAttr declares
+// `extern_weak ... @statx` and calls it when the symbol exists.
+func Statx(dirfd int32, pathname *byte, flags int32, mask int32, buf *byte) int32 {
+	if buf == nil {
+		return -1
+	}
+	path := ""
+	if pathname != nil {
+		path = GoString(pathname)
+	}
+	st := (*unix.Statx_t)(unsafe.Pointer(buf))
+	if err := unix.Statx(int(dirfd), path, int(flags), int(uint32(mask)), st); err != nil {
+		return -1
+	}
+	return 0
 }

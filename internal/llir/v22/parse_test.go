@@ -273,6 +273,25 @@ entry:
 	}
 }
 
+func TestParseExternWeak(t *testing.T) {
+	// rustc std FileAttr: declare extern_weak noundef i32 @statx(...)
+	src := `declare extern_weak noundef i32 @statx(i32 noundef, ptr noundef, i32 noundef, i32 noundef, ptr noundef) unnamed_addr
+`
+	m, err := ParseString("statx.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) != 1 || m.Funcs[0].Name() != "statx" {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+	if m.Funcs[0].Linkage != enum.LinkageExternWeak {
+		t.Fatalf("linkage %v", m.Funcs[0].Linkage)
+	}
+	if m.Funcs[0].Sig.RetType != types.I32 {
+		t.Fatalf("ret %v", m.Funcs[0].Sig.RetType)
+	}
+}
+
 func TestParseCallFastMathNSZ(t *testing.T) {
 	// rustc f64::max: tail call nsz double @llvm.maximumnum.f64
 	src := `declare double @llvm.maximumnum.f64(double, double)

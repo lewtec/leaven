@@ -2,7 +2,10 @@ package libc
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
+	"unsafe"
 )
 
 func TestMaximumNumF64(t *testing.T) {
@@ -39,5 +42,48 @@ func TestFence(t *testing.T) {
 	Fence()
 	if asmMemFence == before {
 		t.Fatal("fence did not touch the barrier")
+	}
+}
+
+func TestStatxFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f")
+	if err := os.WriteFile(p, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := append([]byte(p), 0)
+	var buf [256]byte
+	if Statx(-100, &path[0], 0, 0x7ff, &buf[0]) != 0 {
+		t.Fatal("statx failed")
+	}
+	size := *(*uint64)(unsafe.Pointer(&buf[40]))
+	if size != 5 {
+		t.Fatalf("stx_size=%d", size)
+	}
+	if Statx(-100, &path[0], 0, 0x7ff, nil) != -1 {
+		t.Fatal("nil buf")
+	}
+}
+
+func TestStatxEmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f")
+	if err := os.WriteFile(p, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	empty := []byte{0}
+	var buf [256]byte
+	const atEmptyPath = 0x1000
+	if Statx(int32(f.Fd()), &empty[0], atEmptyPath, 0x7ff, &buf[0]) != 0 {
+		t.Fatal("statx AT_EMPTY_PATH failed")
+	}
+	size := *(*uint64)(unsafe.Pointer(&buf[40]))
+	if size != 5 {
+		t.Fatalf("stx_size=%d", size)
 	}
 }

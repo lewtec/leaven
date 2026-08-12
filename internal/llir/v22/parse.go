@@ -303,6 +303,9 @@ func (p *parser) parseGlobal() error {
 		case "external":
 			link = enum.LinkageExternal
 			p.next()
+		case "extern_weak":
+			link = enum.LinkageExternWeak
+			p.next()
 		case "common":
 			link = enum.LinkageCommon
 			p.next()
@@ -570,6 +573,9 @@ func (p *parser) parseFunc(def bool) error {
 			p.next()
 		case "external":
 			link = enum.LinkageExternal
+			p.next()
+		case "extern_weak":
+			link = enum.LinkageExternWeak
 			p.next()
 		case "linkonce_odr":
 			link = enum.LinkageLinkOnceODR
