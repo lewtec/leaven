@@ -697,6 +697,12 @@ ret:
 			}
 			continue
 		}
+		if p.tok.kind == kMetaID || p.tok.kind == kMetaName || p.tok.kind == kBang {
+			if err := p.skipMDNode(); err != nil {
+				return err
+			}
+			continue
+		}
 		break
 	}
 	f.UnnamedAddr = unnamed

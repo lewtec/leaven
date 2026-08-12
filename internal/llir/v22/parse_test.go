@@ -327,6 +327,22 @@ entry:
 	}
 }
 
+func TestParseDefineDbg(t *testing.T) {
+	src := `define internal fastcc void @f(i64 %0) unnamed_addr #0 !dbg !0 {
+  ret void
+}
+attributes #0 = { nounwind }
+!0 = !{}
+`
+	m, err := ParseString("fndbg.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) == 0 || len(m.Funcs[0].Blocks) == 0 {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+}
+
 func TestParseUnreachableDbg(t *testing.T) {
 	src := `define void @f() {
 entry:
