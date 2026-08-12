@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Sscanf"
+      ],
+      "not_contains": [
+        "unsatisfied: __isoc23_sscanf",
+        "func __isoc23_sscanf"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
