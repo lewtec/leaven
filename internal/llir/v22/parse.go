@@ -928,6 +928,8 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseAtomicRMW(block, ident, name)
 	case "cmpxchg":
 		return p.parseCmpXchg(block, ident, name)
+	case "fence":
+		return p.parseFence(block)
 	case "call":
 		return p.parseCall(block, ident, name)
 	case "invoke":
@@ -1333,6 +1335,24 @@ func (p *parser) parseCmpXchg(block *ir.Block, ident ir.LocalIdent, name string)
 	}
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
+	return nil
+}
+
+// parseFence is LangRef `fence [syncscope("…")] <ordering>`. rustc emits
+// `fence acquire` before Arc::drop_slow. No SSA result.
+func (p *parser) parseFence(block *ir.Block) error {
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	if ord == enum.AtomicOrderingNone {
+		return p.errorf("expected fence ordering")
+	}
+	inst := ir.NewFence(ord)
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	block.Insts = append(block.Insts, inst)
 	return nil
 }
 

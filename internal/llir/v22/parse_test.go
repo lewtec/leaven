@@ -273,6 +273,35 @@ entry:
 	}
 }
 
+func TestParseFenceAcquire(t *testing.T) {
+	// rustc Arc drop_slow: fence acquire then load the inner ptr.
+	src := `define void @f(ptr %p) {
+entry:
+  fence acquire
+  %x = load ptr, ptr %p, align 8
+  fence syncscope("singlethread") seq_cst, !dbg !0
+  ret void
+}
+!0 = !{}
+`
+	m, err := ParseString("fence.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insts := m.Funcs[0].Blocks[0].Insts
+	if len(insts) != 3 {
+		t.Fatalf("insts=%d", len(insts))
+	}
+	f0, ok := insts[0].(*ir.InstFence)
+	if !ok || f0.Ordering != enum.AtomicOrderingAcquire {
+		t.Fatalf("fence0 %+v", insts[0])
+	}
+	f1, ok := insts[2].(*ir.InstFence)
+	if !ok || f1.Ordering != enum.AtomicOrderingSeqCst {
+		t.Fatalf("fence1 %+v", insts[2])
+	}
+}
+
 func TestParseHexDouble(t *testing.T) {
 	src := `define i1 @f(double %x) {
 entry:

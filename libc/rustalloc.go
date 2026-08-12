@@ -2,6 +2,7 @@ package libc
 
 import (
 	"math/bits"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -34,6 +35,13 @@ func RustRealloc(p unsafe.Pointer, oldSize, align, newSize int64) unsafe.Pointer
 		copy(unsafe.Slice((*byte)(n), int(newSize)), unsafe.Slice((*byte)(p), int(m)))
 	}
 	return n
+}
+
+// Fence is LLVM `fence <ordering>`. rustc emits `fence acquire` before
+// Arc::drop_slow so the last refcount decrement is visible. Same barrier
+// as empty asm ~{memory}.
+func Fence() {
+	atomic.AddUint32(&asmMemFence, 1)
 }
 
 // UMaxU64 is llvm.umax.i64.
