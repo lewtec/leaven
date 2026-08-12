@@ -111,10 +111,6 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
-		addFn, ok := atomicAddFunc(inst.Type())
-		if !ok {
-			return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
-		}
 		elem, err := TypeSpec(inst.Type())
 		if err != nil {
 			return nil, err
@@ -122,9 +118,17 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		dst = ptrCast(ptrTyp(elem), dst)
 		switch inst.Op {
 		case enum.AtomicOpAdd:
+			addFn, ok := atomicAddFunc(inst.Type())
+			if !ok {
+				return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
+			}
 			// atomicrmw returns the old value; Add* returns the new value.
 			return one(assign(name, bin(addFn.Call(dst, x), "-", x))), nil
 		case enum.AtomicOpSub:
+			addFn, ok := atomicAddFunc(inst.Type())
+			if !ok {
+				return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
+			}
 			return one(assign(name, bin(addFn.Call(dst, jen.Op("-").Parens(x)), "+", x))), nil
 		case enum.AtomicOpXChg:
 			swapFn, ok := atomicSwapFunc(inst.Type())
@@ -1305,6 +1309,9 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 }
 
 func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
+	if _, ok := t.(*types.PointerType); ok {
+		return jen.Qual("sync/atomic", "SwapPointer"), true
+	}
 	it, ok := t.(*types.IntType)
 	if !ok {
 		return nil, false

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "atomic.SwapPointer"
+      ],
+      "not_contains": [
+        "unsupported instruction type: atomicrmw on ptr",
+        "unsupported instruction type: atomicrmw xchg on ptr"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
