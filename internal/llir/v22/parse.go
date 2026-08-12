@@ -55,10 +55,11 @@ type parser struct {
 	tok     token
 
 	// per-function
-	fn     *ir.Func
-	locals map[string]value.Value
-	blocks map[string]*ir.Block
-	phis   []pendingPhi
+	fn        *ir.Func
+	locals    map[string]value.Value
+	blocks    map[string]*ir.Block
+	phis      []pendingPhi
+	nextLocal int64
 }
 
 type pendingPhi struct {
@@ -713,6 +714,7 @@ ret:
 }
 
 func (p *parser) parseParams() ([]*ir.Param, bool, error) {
+	p.nextLocal = 0
 	var params []*ir.Param
 	variadic := false
 	if p.tok.kind == kRParen {
@@ -737,7 +739,16 @@ func (p *parser) parseParams() ([]*ir.Param, bool, error) {
 			name = p.tok.s
 			p.next()
 		}
-		params = append(params, newParam(name, t))
+		param := newParam(name, t)
+		if name == "" {
+			param.SetID(p.nextLocal)
+			p.nextLocal++
+		} else if id, err := strconv.ParseInt(name, 10, 64); err == nil {
+			if id >= p.nextLocal {
+				p.nextLocal = id + 1
+			}
+		}
+		params = append(params, param)
 		if p.tok.kind != kComma {
 			break
 		}
@@ -761,12 +772,20 @@ func (p *parser) parseBody(f *ir.Func) error {
 	if err := p.collectBlocks(f); err != nil {
 		return err
 	}
+	first := true
 	for !p.done() && p.tok.kind != kRBrace {
 		name, ok := p.parseLabel()
 		if !ok {
-			return p.errorf("expected basic block label")
+			if !first {
+				return p.errorf("expected basic block label")
+			}
+			name = p.implicitEntryName()
 		}
+		first = false
 		block := p.blocks[name]
+		if block == nil {
+			return p.errorf("unknown block %%%s", name)
+		}
 		for !p.done() && p.tok.kind != kRBrace && !p.atLabel() {
 			if err := p.parseInst(block); err != nil {
 				return err
@@ -800,8 +819,10 @@ func (p *parser) parseBody(f *ir.Func) error {
 
 func (p *parser) collectBlocks(f *ir.Func) error {
 	saveI, saveTok := p.i, p.tok
+	if !p.atLabel() {
+		p.addImplicitEntry(f)
+	}
 	depth := 0
-	sawLabel := false
 	for !p.done() {
 		if depth == 0 && p.tok.kind == kRBrace {
 			break
@@ -814,7 +835,6 @@ func (p *parser) collectBlocks(f *ir.Func) error {
 			if _, exists := p.blocks[name]; !exists {
 				p.blocks[name] = f.NewBlock(name)
 			}
-			sawLabel = true
 		}
 		switch p.tok.kind {
 		case kLParen, kLBrace, kLBrack, kLt:
@@ -824,13 +844,24 @@ func (p *parser) collectBlocks(f *ir.Func) error {
 		}
 		p.next()
 	}
-	if !sawLabel {
-		if _, exists := p.blocks["entry"]; !exists {
-			p.blocks["entry"] = f.NewBlock("entry")
-		}
-	}
 	p.i, p.tok = saveI, saveTok
 	return nil
+}
+
+// implicitEntryName is the LLVM unnamed-value id of a first block with no
+// label. Params %0,%1 then the block is %2 (first inst often %3).
+func (p *parser) implicitEntryName() string {
+	return strconv.FormatInt(p.nextLocal, 10)
+}
+
+func (p *parser) addImplicitEntry(f *ir.Func) {
+	name := p.implicitEntryName()
+	if _, exists := p.blocks[name]; exists {
+		return
+	}
+	b := f.NewBlock("")
+	b.SetID(p.nextLocal)
+	p.blocks[name] = b
 }
 
 func (p *parser) atLabel() bool {

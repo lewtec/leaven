@@ -179,6 +179,46 @@ entry:
 	}
 }
 
+func TestParseUnlabeledEntry(t *testing.T) {
+	src := `define i32 @f(i32 %0, i32 %1) {
+  %3 = add i32 %0, %1
+  br label %4
+4:
+  ret i32 %3
+}
+`
+	m, err := ParseString("entry.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := m.Funcs[0]
+	if len(f.Blocks) != 2 {
+		t.Fatalf("blocks %d", len(f.Blocks))
+	}
+	if f.Blocks[0].ID() != 2 || !f.Blocks[0].IsUnnamed() {
+		t.Fatalf("entry %+v", f.Blocks[0].LocalIdent)
+	}
+	add, ok := f.Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", f.Blocks[0].Insts[0])
+	}
+	_ = add
+}
+
+func TestParseUnlabeledEntryOnly(t *testing.T) {
+	src := `define void @f() {
+  ret void
+}
+`
+	m, err := ParseString("only.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs[0].Blocks) != 1 {
+		t.Fatalf("blocks %d", len(m.Funcs[0].Blocks))
+	}
+}
+
 func TestParseExtractValueTypedDbg(t *testing.T) {
 	src := `define i1 @f({ i64, i1 } %x) {
 entry:
