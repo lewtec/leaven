@@ -57,6 +57,20 @@ func TestCxxTreeCall(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallLocaleCtor(t *testing.T) {
+	name := "_ZNSt6localeC1Ev"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || retPtr || len(args) != 1 {
+		t.Fatalf("locale %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(name); !ok {
+		t.Fatal("named miss")
+	}
+	if !isLocaleCtor("_ZNSt6localeC2ERKS_") {
+		t.Fatal("copy ctor")
+	}
+}
+
 func TestCxxIOCallIosBaseCtor(t *testing.T) {
 	name := "_ZNSt8ios_baseC2Ev"
 	fn, args, retPtr, ok := cxxIOCall(name, nil)

@@ -1640,6 +1640,13 @@ func isIosBaseCtor(name string) bool {
 	return strings.Contains(name, "9basic_ios") && strings.Contains(name, "4initE")
 }
 
+func isLocaleCtor(name string) bool {
+	if !strings.Contains(name, "St6locale") {
+		return false
+	}
+	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
+}
+
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
 		return libc("OstreamInsert"), cxxIOInsert, true
@@ -1649,6 +1656,9 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if isIosBaseCtor(name) {
 		return libc("IosBaseCtor"), cxxIOIosBase, true
+	}
+	if isLocaleCtor(name) {
+		return libc("LocaleCtor"), cxxIOIosBase, true
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false

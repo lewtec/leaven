@@ -184,6 +184,11 @@ func IosNot(this *byte) bool { return streamOf(this).fail }
 // IosBool is basic_ios::operator bool (true if the stream is good).
 func IosBool(this *byte) bool { return !streamOf(this).fail }
 
+// LocaleCtor is std::locale::locale() (default and copy). gensym's
+// ostringstream constructs a locale after ios_base; we do not
+// reconstruct facets (ctype is already on the ios object).
+func LocaleCtor(this *byte) {}
+
 // IosBaseCtor is std::ios_base::ios_base() / _M_init / basic_ios::init.
 // gensym's stack ostringstream calls this before operator<< / str().
 // Same stand-in vptr and ctype as cout so inlined fail/endl stay honest.

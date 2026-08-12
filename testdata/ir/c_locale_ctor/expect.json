@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.LocaleCtor"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZNSt6localeC1Ev",
+        "func _ZNSt6localeC1Ev"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

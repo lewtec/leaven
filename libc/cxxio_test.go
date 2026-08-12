@@ -57,6 +57,12 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 	}
 }
 
+func TestLocaleCtorNilSafe(t *testing.T) {
+	LocaleCtor(nil)
+	var obj [16]byte
+	LocaleCtor(&obj[0])
+}
+
 func TestIosBaseCtorVptrAndCtype(t *testing.T) {
 	var obj [272]byte
 	IosBaseCtor(&obj[0])
