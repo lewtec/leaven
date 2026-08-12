@@ -51,6 +51,46 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		return one(assign(name, bin(x, "+", y))), nil
 
+	case *ir.InstCmpXchg:
+		ptr, err := translateOp(inst.Ptr, "pointer")
+		if err != nil {
+			return nil, err
+		}
+		cmp, err := translateOp(inst.Cmp, "compare")
+		if err != nil {
+			return nil, err
+		}
+		neu, err := translateOp(inst.New, "new")
+		if err != nil {
+			return nil, err
+		}
+		casFn, ok := atomicCASFunc(inst.Cmp.Type())
+		if !ok {
+			return nil, fmt.Errorf("%w: cmpxchg on %v", errUnsupportedInstruction, inst.Cmp.Type())
+		}
+		elem, err := TypeSpec(inst.Cmp.Type())
+		if err != nil {
+			return nil, err
+		}
+		ret, err := TypeSpec(inst.Type())
+		if err != nil {
+			return nil, err
+		}
+		p := ptrCast(ptrTyp(elem), ptr)
+		name := VariableName(inst)
+		okName := name + "_ok"
+		oldName := name + "_old"
+		// Strong CAS. LLVM weak may spuriously fail; strong is still correct
+		// for the usual retry loop and does not hide a failed compare.
+		return []jen.Code{
+			assign(okName, casFn.Call(p, cmp, neu)),
+			assign(oldName, cmp),
+			jen.If(jen.Op("!").Id(okName)).Block(
+				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
+			),
+			assign(name, jen.Add(ret).Values(jen.Id(oldName), jen.Id(okName))),
+		}, nil
+
 	case *ir.InstAtomicRMW:
 		dst, err := translateOp(inst.Dst, "destination")
 		if err != nil {
@@ -932,6 +972,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				args[i] = libcCallArg(llvmName, i, a, args[i])
 			}
 			typedPtr = libcReturnsTypedPtr(llvmName)
+		} else if strings.Contains(llvmName, "throw_bad_cast") {
+			// Inlined getline path if failbit was not seen. Short text
+			// so CI does not omit the panic line.
+			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
 		} else if strings.Contains(llvmName, "panicking") ||
 			strings.Contains(llvmName, "handle_error") ||
 			strings.Contains(llvmName, "throw_logic_error") ||
@@ -1032,6 +1076,34 @@ func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 	}
 }
 
+func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
+	it, ok := t.(*types.IntType)
+	if !ok {
+		return nil, false
+	}
+	switch goIntBits(it.BitSize) {
+	case 32:
+		return jen.Qual("sync/atomic", "CompareAndSwapInt32"), true
+	case 64:
+		return jen.Qual("sync/atomic", "CompareAndSwapInt64"), true
+	default:
+		return nil, false
+	}
+}
+
+func atomicLoadFunc(t types.Type) *jen.Statement {
+	it, ok := t.(*types.IntType)
+	if !ok {
+		return jen.Qual("sync/atomic", "LoadInt64")
+	}
+	switch goIntBits(it.BitSize) {
+	case 32:
+		return jen.Qual("sync/atomic", "LoadInt32")
+	default:
+		return jen.Qual("sync/atomic", "LoadInt64")
+	}
+}
+
 func formatAggregateIndex(base *jen.Statement, t types.Type, indices []uint64) (*jen.Statement, error) {
 	curCode := base
 	cur := t
@@ -1093,6 +1165,7 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                {libcPath, "IfstreamClose"},
 	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                 {libcPath, "FilebufClose"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                      {libcPath, "IosFail"},
+	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":       {libcPath, "IosClear"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                       {libcPath, "IosEof"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                         {libcPath, "IosNot"},
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                        {libcPath, "IosBool"},

@@ -153,3 +153,17 @@ func IosNot(this *byte) bool { return streamOf(this).fail }
 
 // IosBool is basic_ios::operator bool (true if the stream is good).
 func IosBool(this *byte) bool { return !streamOf(this).fail }
+
+// IosClear is basic_ios::clear(iostate). Writes the inlined iostate
+// slot and updates the side table so later fail/eof loads stay honest.
+func IosClear(this *byte, state int32) {
+	if this == nil {
+		return
+	}
+	*(*int32)(unsafe.Add(unsafe.Pointer(this), iosStateOff)) = state
+	if v, ok := streams.Load(uintptr(unsafe.Pointer(this))); ok {
+		s := v.(*fileStream)
+		s.fail = state&iosFailbit != 0
+		s.eof = state&iosEofbit != 0
+	}
+}
