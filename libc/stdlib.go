@@ -125,3 +125,32 @@ func mulSize(a, b int64) (int64, bool) {
 	}
 	return a * b, true
 }
+
+// POSIX 48-bit LCG (IEEE Std 1003.1). csmith AbsRndNumGenerator
+// seeds with srand48 and draws with lrand48.
+const (
+	rand48Mult = uint64(0x5deece66d)
+	rand48Add  = uint64(0xb)
+	rand48Mask = uint64(1)<<48 - 1
+)
+
+var (
+	rand48Mu    sync.Mutex
+	rand48State = uint64(0x1234abcd330e)
+)
+
+// Srand48 is POSIX srand48(3): Xi = (uint32(seed) << 16) | 0x330e.
+func Srand48(seed int64) {
+	rand48Mu.Lock()
+	rand48State = (uint64(uint32(seed)) << 16) | 0x330e
+	rand48Mu.Unlock()
+}
+
+// Lrand48 is POSIX lrand48(3): bits 47..1 of the next Xi (31 bits).
+func Lrand48() int64 {
+	rand48Mu.Lock()
+	rand48State = (rand48State*rand48Mult + rand48Add) & rand48Mask
+	x := int64(rand48State >> 17)
+	rand48Mu.Unlock()
+	return x
+}
