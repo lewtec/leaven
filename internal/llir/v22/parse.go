@@ -921,6 +921,9 @@ func (p *parser) parseInst(block *ir.Block) error {
 	}
 	op := p.tok.s
 	p.next()
+	if strings.HasPrefix(op, "dbg_") {
+		return p.skipDbgRecord()
+	}
 	switch op {
 	case "alloca":
 		return p.parseAlloca(block, ident, name)
@@ -2356,6 +2359,13 @@ func (p *parser) parseAlignAndMD(align *ir.Align) error {
 		}
 	}
 	return nil
+}
+
+func (p *parser) skipDbgRecord() error {
+	if p.tok.kind != kLParen {
+		return p.errorf("expected dbg record (")
+	}
+	return p.skipBalanced(kLParen, kRParen)
 }
 
 func (p *parser) skipInstMD() error {

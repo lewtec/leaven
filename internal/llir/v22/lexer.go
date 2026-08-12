@@ -195,11 +195,22 @@ func (l *lexer) next() (token, error) {
 			return token{kind: kGlobal, s: s, line: line, col: col}, nil
 		case '#':
 			l.adv()
-			n, err := l.uint()
-			if err != nil {
-				return token{}, l.err(err)
+			if l.i < len(l.src) && isDigit(l.src[l.i]) {
+				n, err := l.uint()
+				if err != nil {
+					return token{}, l.err(err)
+				}
+				return token{kind: kAttrID, i: n, line: line, col: col}, nil
 			}
-			return token{kind: kAttrID, i: n, line: line, col: col}, nil
+			// LLVM 19+ debug records: #dbg_declare(...), #dbg_value(...).
+			if l.i < len(l.src) && isIdentStart(l.src[l.i]) {
+				s, err := l.unquotedIdent()
+				if err != nil {
+					return token{}, l.err(err)
+				}
+				return token{kind: kIdent, s: s, line: line, col: col}, nil
+			}
+			return token{}, l.err(fmt.Errorf("expected attribute id or dbg record"))
 		case '!':
 			l.adv()
 			if l.i < len(l.src) && l.src[l.i] == '"' {

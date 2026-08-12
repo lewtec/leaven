@@ -422,6 +422,26 @@ entry:
 	}
 }
 
+func TestParseDbgDeclare(t *testing.T) {
+	src := `define void @f(ptr %p) {
+  %p.addr = alloca ptr
+  store ptr %p, ptr %p.addr
+    #dbg_declare(ptr %p.addr, !0, !DIExpression(), !1)
+    #dbg_value(ptr %p, !0, !DIExpression(), !1)
+  ret void
+}
+!0 = !{}
+!1 = !{}
+`
+	m, err := ParseString("dbg.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(m.Funcs[0].Blocks[0].Insts); n != 2 {
+		t.Fatalf("insts %d, want alloca+store", n)
+	}
+}
+
 func TestParseDeadOnReturn(t *testing.T) {
 	src := `define void @f(ptr dead_on_return noalias noundef %0) {
   ret void
