@@ -314,6 +314,28 @@ func sameSizeScalars(t1, t2 types.Type) bool {
 	return ok1 && ok2 && a == b
 }
 
+// vectorBitSize is the total LLVM bit width of a non-i1 vector.
+// <N x i1> is packed separately (see i1VectorBitCast).
+func vectorBitSize(t types.Type) (uint64, bool) {
+	vt, ok := t.(*types.VectorType)
+	if !ok || isI1Vector(t) {
+		return 0, false
+	}
+	elemBits, ok := scalarBitSize(vt.ElemType)
+	if !ok {
+		return 0, false
+	}
+	return elemBits * vt.Len, true
+}
+
+// sameSizeVectors reports whether a bitcast between t1 and t2 is a
+// same-width vector reinterpret (e.g. <16 x i8> to <2 x i64>).
+func sameSizeVectors(t1, t2 types.Type) bool {
+	a, ok1 := vectorBitSize(t1)
+	b, ok2 := vectorBitSize(t2)
+	return ok1 && ok2 && a == b && a > 0
+}
+
 // i1VectorLen is N when t is <N x i1>.
 func i1VectorLen(t types.Type) (n uint64, ok bool) {
 	vt, ok := t.(*types.VectorType)

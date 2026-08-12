@@ -262,6 +262,12 @@ func formatExpr(v value.Value) (expr, error) {
 			}
 			return val(packed), nil
 		}
+		if vec, err := vectorBitCast(from, v.From.Type(), v.To); vec != nil || err != nil {
+			if err != nil {
+				return expr{}, err
+			}
+			return val(vec), nil
+		}
 		if bits, err := scalarBitCast(from, v.From.Type(), v.To); bits != nil || err != nil {
 			if err != nil {
 				return expr{}, err

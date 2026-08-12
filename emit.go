@@ -232,6 +232,26 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 	return nil, nil
 }
 
+// vectorBitCast reinterprets same-size vectors (LLVM bitcast).
+// rustc SIMD uses `bitcast <16 x i8> %x to <2 x i64>`, not a pointer cast.
+// The IIFE makes a non-addressable operand (constant) addressable.
+func vectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, error) {
+	if !sameSizeVectors(from, to) {
+		return nil, nil
+	}
+	fromT, err := TypeSpec(from)
+	if err != nil {
+		return nil, err
+	}
+	toT, err := TypeSpec(to)
+	if err != nil {
+		return nil, err
+	}
+	return jen.Func().Params(jen.Id("v").Add(fromT)).Add(toT).Block(
+		jen.Return(deref(jen.Parens(ptrTyp(toT)).Call(unsafePtr(addrOf(jen.Id("v")))))),
+	).Call(src), nil
+}
+
 // scalarBitCast reinterprets same-size int/float bits (LLVM bitcast).
 // rustc f32::to_bits is `bitcast float %x to i32`, not a pointer cast.
 func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, error) {

@@ -225,6 +225,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			return one(assign(VariableName(inst), packed)), nil
 		}
+		if vec, err := vectorBitCast(from, inst.From.Type(), inst.To); vec != nil || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			return one(assign(VariableName(inst), vec)), nil
+		}
 		if bits, err := scalarBitCast(from, inst.From.Type(), inst.To); bits != nil || err != nil {
 			if err != nil {
 				return nil, err
