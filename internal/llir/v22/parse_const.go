@@ -253,7 +253,10 @@ func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
 		if !ok {
 			return nil, p.errorf("integer constant for non-int type %s", typ)
 		}
-		c := constant.NewInt(it, p.tok.i)
+		c, err := parseIntConst(it, p.tok.s, p.tok.i)
+		if err != nil {
+			return nil, p.errorf("integer constant %q: %v", p.tok.s, err)
+		}
 		p.next()
 		return c, nil
 	case kFloat:
@@ -445,4 +448,20 @@ func (p *parser) parseVectorConst(typ types.Type) (constant.Constant, error) {
 	}
 	vt, _ := typ.(*types.VectorType)
 	return constant.NewVector(vt, elems...), nil
+}
+
+// parseIntConst keeps the full lexeme so i128 (and other wide) literals
+// are not truncated to the lexer's int64 field.
+func parseIntConst(typ *types.IntType, s string, fallback int64) (*constant.Int, error) {
+	if s == "" {
+		return constant.NewInt(typ, fallback), nil
+	}
+	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		s = "u0x" + s[2:]
+	}
+	c, err := constant.NewIntFromString(typ, s)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }

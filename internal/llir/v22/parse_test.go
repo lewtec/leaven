@@ -530,6 +530,37 @@ func TestParseExternalThenGlobal(t *testing.T) {
 	}
 }
 
+func TestParseI128Const(t *testing.T) {
+	// rustc TypeId / i128 math uses values that do not fit in int64.
+	src := `define i128 @f() {
+entry:
+  %a = add i128 170141183460469231731687303715884105727, 1
+  %b = add i128 %a, -170141183460469231731687303715884105728
+  ret i128 %b
+}
+`
+	m, err := ParseString("i128.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	it, ok := add.Typ.(*types.IntType)
+	if !ok || it.BitSize != 128 {
+		t.Fatalf("type %v", add.Typ)
+	}
+	ci, ok := add.X.(*constant.Int)
+	if !ok || ci.X.String() != "170141183460469231731687303715884105727" {
+		t.Fatalf("max i128 %v", add.X)
+	}
+	one, ok := add.Y.(*constant.Int)
+	if !ok || one.X.Int64() != 1 {
+		t.Fatalf("add 1 %v", add.Y)
+	}
+}
+
 func TestParseForwardGlobal(t *testing.T) {
 	// C++ vtables mention @_ZTI* before that global is defined.
 	// Typeinfo inits use constant getelementptr.
