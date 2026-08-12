@@ -2999,6 +2999,8 @@ func intType(n uint64) *types.IntType {
 		return types.I64
 	case 128:
 		return types.I128
+	case 256:
+		return types.I256
 	default:
 		return types.NewInt(n)
 	}

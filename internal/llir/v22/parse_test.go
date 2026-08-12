@@ -613,6 +613,41 @@ entry:
 	}
 }
 
+func TestParseI256Const(t *testing.T) {
+	// rustc core::fmt::num::__fmt_inner uses i256 literals beyond i128.
+	src := `define i256 @f() {
+entry:
+  %a = add i256 1, 10000000000000000000
+  %b = zext i128 1 to i256
+  ret i256 %a
+}
+`
+	m, err := ParseString("i256.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	it, ok := add.Typ.(*types.IntType)
+	if !ok || it.BitSize != 256 {
+		t.Fatalf("type %v", add.Typ)
+	}
+	ci, ok := add.Y.(*constant.Int)
+	if !ok || ci.X.String() != "10000000000000000000" {
+		t.Fatalf("i256 const %v", add.Y)
+	}
+	zext, ok := m.Funcs[0].Blocks[0].Insts[1].(*ir.InstZExt)
+	if !ok {
+		t.Fatalf("zext %T", m.Funcs[0].Blocks[0].Insts[1])
+	}
+	to, ok := zext.To.(*types.IntType)
+	if !ok || to.BitSize != 256 {
+		t.Fatalf("zext to %v", zext.To)
+	}
+}
+
 func TestParseForwardGlobal(t *testing.T) {
 	// C++ vtables mention @_ZTI* before that global is defined.
 	// Typeinfo inits use constant getelementptr.

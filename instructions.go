@@ -45,8 +45,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "+", x: x, y: y})), nil
 		}
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128Add").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "Add")).Call(x, y))), nil
 		}
 		if ciy, ok := inst.Y.(*constant.Int); ok && ciy.X.Sign() == -1 {
 			// Use the constant's own minus sign.
@@ -184,8 +184,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
 		}
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128And").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "And")).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "&&", y))), nil
@@ -202,8 +202,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		name := VariableName(inst)
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128AShr").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "AShr")).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
 			return one(assign(name, jen.Byte().Call(bin(x, ">>", y)))), nil
@@ -445,8 +445,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		name := VariableName(inst)
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128LShr").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "LShr")).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
 			return one(assign(name, conv(goIntType(t.BitSize), bin(x, ">>", y)))), nil
@@ -472,8 +472,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
 		}
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128Or").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "Or")).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "||", y))), nil
@@ -533,7 +533,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			if toType.BitSize == 128 {
+			if toType.BitSize == 128 || toType.BitSize == 256 {
 				c, err := formatSExt(inst.From, inst.To)
 				if err != nil {
 					return nil, err
@@ -543,7 +543,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			neg := -1
 			return one(jen.If(from).Block(assign(name, jen.Lit(neg))).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
-		if toType.BitSize == 128 {
+		if toType.BitSize == 128 || toType.BitSize == 256 {
 			c, err := formatSExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err
@@ -561,8 +561,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
-		if isI128(inst.Typ) {
-			return one(assign(VariableName(inst), libc("I128Shl").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(VariableName(inst), libc(wideFn(bits, "Shl")).Call(x, y))), nil
 		}
 		return one(assign(VariableName(inst), bin(x, "<<", y))), nil
 
@@ -676,8 +676,8 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if _, ok := inst.Typ.(*types.VectorType); ok {
 			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
 		}
-		if isI128(inst.Typ) {
-			return one(assign(name, libc("I128Xor").Call(x, y))), nil
+		if bits, ok := wideBits(inst.Typ); ok {
+			return one(assign(name, libc(wideFn(bits, "Xor")).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "!=", y))), nil
@@ -725,7 +725,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			if toType.BitSize == 128 {
+			if toType.BitSize == 128 || toType.BitSize == 256 {
 				c, err := formatZExt(inst.From, inst.To)
 				if err != nil {
 					return nil, err
@@ -734,7 +734,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			return one(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
-		if toType.BitSize == 128 {
+		if toType.BitSize == 128 || toType.BitSize == 256 {
 			c, err := formatZExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err
@@ -754,36 +754,36 @@ type llvmBin struct {
 	x, y value.Value
 }
 
-func i128BinFunc(op string, ashr bool) (string, bool) {
+func wideBinFunc(bits uint64, op string, ashr bool) (string, bool) {
 	if ashr && (op == ">>" || op == "ashr") {
-		return "I128AShr", true
+		return wideFn(bits, "AShr"), true
 	}
+	var name string
 	switch op {
 	case "+":
-		return "I128Add", true
+		name = "Add"
 	case "-":
-		return "I128Sub", true
+		name = "Sub"
 	case "*":
-		return "I128Mul", true
+		name = "Mul"
 	case "&":
-		return "I128And", true
+		name = "And"
 	case "|":
-		return "I128Or", true
+		name = "Or"
 	case "^":
-		return "I128Xor", true
+		name = "Xor"
 	case "<<":
-		return "I128Shl", true
+		name = "Shl"
 	case ">>", "lshr":
-		return "I128LShr", true
+		name = "LShr"
 	case "ashr":
-		return "I128AShr", true
-	case "/":
-		return "", false
-	case "%":
+		name = "AShr"
+	case "/", "%":
 		return "", false
 	default:
 		return "", false
 	}
+	return wideFn(bits, name), true
 }
 
 func translateVectorICmp(inst *ir.InstICmp) ([]jen.Code, error) {
@@ -847,12 +847,16 @@ func icmpPredOp(pred enum.IPred) (op string, signed, unsigned bool, err error) {
 }
 
 func translateI128Bin(name, op string, x, y value.Value, ashr bool) ([]jen.Code, bool, error) {
-	if !isI128(x.Type()) && !isI128(y.Type()) {
+	bits, ok := wideBits(x.Type())
+	if !ok {
+		bits, ok = wideBits(y.Type())
+	}
+	if !ok {
 		return nil, false, nil
 	}
-	fn, ok := i128BinFunc(op, ashr)
+	fn, ok := wideBinFunc(bits, op, ashr)
 	if !ok {
-		return nil, false, fmt.Errorf("%w: i128 %s", errUnsupportedInstruction, op)
+		return nil, false, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
 	}
 	xv, err := translateOp(x, "left operand")
 	if err != nil {
@@ -904,10 +908,10 @@ func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
 }
 
 func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
-	if isI128(inst.Type()) {
-		fn := "I128SDiv"
+	if bits, ok := wideBits(inst.Type()); ok {
+		fn := wideFn(bits, "SDiv")
 		if b.op == "%" {
-			fn = "I128SRem"
+			fn = wideFn(bits, "SRem")
 		}
 		xv, err := translateOp(b.x, "left operand")
 		if err != nil {
@@ -935,10 +939,10 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 }
 
 func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
-	if isI128(inst.Type()) {
-		fn := "I128UDiv"
+	if bits, ok := wideBits(inst.Type()); ok {
+		fn := wideFn(bits, "UDiv")
 		if b.op == "%" {
-			fn = "I128URem"
+			fn = wideFn(bits, "URem")
 		}
 		xv, err := translateOp(b.x, "left operand")
 		if err != nil {

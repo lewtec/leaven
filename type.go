@@ -146,6 +146,9 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		case t.BitSize == 128:
 			// rustc i128/u128 and TypeId. Two limbs, not int64.
 			return libc("I128"), nil
+		case t.BitSize == 256:
+			// rustc core::fmt::num::__fmt_inner widens u128 to i256.
+			return libc("I256"), nil
 		default:
 			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
 			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)

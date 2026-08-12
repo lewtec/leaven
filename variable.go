@@ -349,7 +349,7 @@ func formatExpr(v value.Value) (expr, error) {
 	case *constant.ExprLShr:
 		return formatBinConst(">>", v.X, v.Y)
 	case *constant.ExprAShr:
-		if isI128(v.X.Type()) {
+		if _, ok := wideBits(v.X.Type()); ok {
 			return formatBinConst("ashr", v.X, v.Y)
 		}
 		return formatBinConst(">>", v.X, v.Y)
@@ -378,6 +378,9 @@ func formatExpr(v value.Value) (expr, error) {
 	case *constant.Int:
 		if v.Typ.BitSize == 128 {
 			return val(i128Lit(v.X)), nil
+		}
+		if v.Typ.BitSize == 256 {
+			return val(i256Lit(v.X)), nil
 		}
 		if v.Typ.BitSize > 64 {
 			return expr{}, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
@@ -489,6 +492,9 @@ func zeroOf(typ types.Type) (expr, error) {
 		if t.BitSize == 128 {
 			return val(libc("I128").Values()), nil
 		}
+		if t.BitSize == 256 {
+			return val(libc("I256").Values()), nil
+		}
 		return val(jen.Lit(0)), nil
 	case *types.FloatType:
 		return val(jen.Lit(0)), nil
@@ -539,37 +545,51 @@ func i128Limbs(x *big.Int) (lo, hi uint64) {
 	return lo, hi
 }
 
-func i128ICmp(pred enum.IPred) (string, bool) {
+func i256Lit(x *big.Int) *jen.Statement {
+	mod := new(big.Int).Lsh(big.NewInt(1), 256)
+	u := new(big.Int).Mod(x, mod)
+	loMask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+	lo := new(big.Int).And(u, loMask)
+	hi := new(big.Int).Rsh(u, 128)
+	return libc("I256").Values(jen.Dict{
+		jen.Id("Lo"): i128Lit(lo),
+		jen.Id("Hi"): i128Lit(hi),
+	})
+}
+
+func wideICmp(bits uint64, pred enum.IPred) (string, bool) {
+	var op string
 	switch pred {
 	case enum.IPredEQ:
-		return "I128Eq", true
+		op = "Eq"
 	case enum.IPredNE:
-		return "I128Ne", true
+		op = "Ne"
 	case enum.IPredSGE:
-		return "I128Sge", true
+		op = "Sge"
 	case enum.IPredSGT:
-		return "I128Sgt", true
+		op = "Sgt"
 	case enum.IPredSLE:
-		return "I128Sle", true
+		op = "Sle"
 	case enum.IPredSLT:
-		return "I128Slt", true
+		op = "Slt"
 	case enum.IPredUGE:
-		return "I128Uge", true
+		op = "Uge"
 	case enum.IPredUGT:
-		return "I128Ugt", true
+		op = "Ugt"
 	case enum.IPredULE:
-		return "I128Ule", true
+		op = "Ule"
 	case enum.IPredULT:
-		return "I128Ult", true
+		op = "Ult"
 	default:
 		return "", false
 	}
+	return wideFn(bits, op), true
 }
 
 // formatICmp translates an icmp predicate and operands to a Go comparison expr.
 func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error) {
-	if isI128(xVal.Type()) || isI128(yVal.Type()) {
-		fn, ok := i128ICmp(pred)
+	if bits, ok := wideBits(xVal.Type()); ok {
+		fn, ok := wideICmp(bits, pred)
 		if !ok {
 			return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
 		}
@@ -647,6 +667,18 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		return libc("I128FromU64").Call(jen.Uint64().Call(src)), nil
 	}
+	if toType.BitSize == 256 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return libc("I256FromU64").Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
+				jen.True():  jen.Lit(1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		if isI128(from.Type()) {
+			return libc("I256FromI128").Call(src), nil
+		}
+		return libc("I256FromU64").Call(jen.Uint64().Call(src)), nil
+	}
 	w := goIntBits(toType.BitSize)
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 		// bool → int expression (no statements in constant-expr context).
@@ -676,6 +708,18 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 			}).Index(src)), nil
 		}
 		return libc("I128FromI64").Call(jen.Int64().Call(src)), nil
+	}
+	if toType.BitSize == 256 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return libc("I256FromI64").Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
+				jen.True():  jen.Lit(-1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		if isI128(from.Type()) {
+			return libc("I256FromI128S").Call(src), nil
+		}
+		return libc("I256FromI64").Call(jen.Int64().Call(src)), nil
 	}
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 		// Go has no int32(bool). sext i1: true → -1.
@@ -808,10 +852,10 @@ func formatBinConst(op string, x, y constant.Constant) (expr, error) {
 	if err != nil {
 		return expr{}, fmt.Errorf("error translating right (%v): %w", y, err)
 	}
-	if isI128(x.Type()) || isI128(y.Type()) {
-		fn, ok := i128BinFunc(op, false)
+	if bits, ok := wideBits(x.Type()); ok {
+		fn, ok := wideBinFunc(bits, op, false)
 		if !ok {
-			return expr{}, fmt.Errorf("%w: i128 %s", errUnsupportedInstruction, op)
+			return expr{}, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
 		}
 		return val(libc(fn).Call(l, r)), nil
 	}
@@ -844,6 +888,26 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 			return libc("I128TruncI32").Call(src), nil
 		default:
 			return libc("I128TruncI64").Call(src), nil
+		}
+	}
+	if isI256(from.Type()) {
+		it, ok := to.(*types.IntType)
+		if !ok {
+			return conv(toSpec, src), nil
+		}
+		switch {
+		case it.BitSize == 1:
+			return libc("I256TruncI1").Call(src), nil
+		case it.BitSize <= 8:
+			return libc("I256TruncI8").Call(src), nil
+		case it.BitSize <= 16:
+			return libc("I256TruncI16").Call(src), nil
+		case it.BitSize <= 32:
+			return libc("I256TruncI32").Call(src), nil
+		case it.BitSize == 128:
+			return libc("I256TruncI128").Call(src), nil
+		default:
+			return libc("I256TruncI64").Call(src), nil
 		}
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {
@@ -884,7 +948,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
-		if ci.Typ.BitSize == 128 {
+		if ci.Typ.BitSize == 128 || ci.Typ.BitSize == 256 {
 			return result, nil
 		}
 		if ci.Typ.BitSize > 64 {
@@ -940,7 +1004,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 
 	switch t := v.Type().(type) {
 	case *types.IntType:
-		if t.BitSize == 128 {
+		if t.BitSize == 128 || t.BitSize == 256 {
 			return result, nil
 		}
 		if t.BitSize > 8 {

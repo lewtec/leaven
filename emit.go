@@ -85,6 +85,8 @@ func goIntType(bits uint64) *jen.Statement {
 		return jen.Int64()
 	case 128:
 		return libc("I128")
+	case 256:
+		return libc("I256")
 	default:
 		return jen.Id(fmt.Sprintf("int%d", bits))
 	}
@@ -102,6 +104,8 @@ func goUintType(bits uint64) *jen.Statement {
 		return jen.Uint64()
 	case 128:
 		return libc("I128")
+	case 256:
+		return libc("I256")
 	default:
 		return jen.Id(fmt.Sprintf("uint%d", bits))
 	}
@@ -110,6 +114,32 @@ func goUintType(bits uint64) *jen.Statement {
 func isI128(t types.Type) bool {
 	it, ok := t.(*types.IntType)
 	return ok && it.BitSize == 128
+}
+
+func isI256(t types.Type) bool {
+	it, ok := t.(*types.IntType)
+	return ok && it.BitSize == 256
+}
+
+// wideBits is 128 or 256 when t is a limb integer we lower via libc.
+func wideBits(t types.Type) (uint64, bool) {
+	it, ok := t.(*types.IntType)
+	if !ok {
+		return 0, false
+	}
+	switch it.BitSize {
+	case 128, 256:
+		return it.BitSize, true
+	default:
+		return 0, false
+	}
+}
+
+func wideFn(bits uint64, op string) string {
+	if bits == 256 {
+		return "I256" + op
+	}
+	return "I128" + op
 }
 
 func litUntyped(n int64) *jen.Statement {
