@@ -51,6 +51,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		return one(assign(name, bin(x, "+", y))), nil
 
+	case *ir.InstFence:
+		// Ordering is recorded on the IR; Go has no distinct fence
+		// opcodes. The atomic bump is the same compiler barrier rustc
+		// uses empty asm ~{memory} for.
+		return one(libc("Fence").Call()), nil
+
 	case *ir.InstCmpXchg:
 		ptr, err := translateOp(inst.Ptr, "pointer")
 		if err != nil {
@@ -1300,6 +1306,7 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 var libraryFunctions = map[string]goRef{
 	"abort":            {libcPath, "Abort"},
 	"arc4random_buf":   {libcPath, "Arc4randomBuf"},
+	"__cxa_atexit":     {libcPath, "CxaAtexit"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode": {libcPath, "IfstreamOpen"},
 	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                    {libcPath, "IfstreamClose"},

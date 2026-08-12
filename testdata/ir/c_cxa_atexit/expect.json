@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.CxaAtexit"
+      ],
+      "not_contains": [
+        "unsatisfied: __cxa_atexit"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

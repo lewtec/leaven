@@ -140,8 +140,9 @@ func Towlower(c int32) int32 {
 	return int32(unicode.ToLower(rune(uint32(c))))
 }
 
-// Exit is C exit(status).
+// Exit is C exit(status). Runs __cxa_atexit handlers first.
 func Exit(status int32) {
+	runCxaAtExit()
 	os.Exit(int(status))
 }
 
