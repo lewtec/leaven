@@ -334,7 +334,8 @@ func formatExpr(v value.Value) (expr, error) {
 		return val(from), nil
 
 	case *constant.ExprIntToPtr:
-		from, err := FormatValue(v.From)
+		// Unsigned bit pattern: uintptr(negative int64) is a Go constant overflow.
+		from, err := FormatUnsigned(v.From)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
