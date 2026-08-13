@@ -191,14 +191,7 @@ func rbRotateLeft(x, header *rbNode) {
 	if y.left != nil {
 		rbPtr(y.left).parent = unsafe.Pointer(x)
 	}
-	y.parent = x.parent
-	if unsafe.Pointer(x) == header.parent {
-		header.parent = unsafe.Pointer(y)
-	} else if unsafe.Pointer(x) == rbPtr(x.parent).left {
-		rbPtr(x.parent).left = unsafe.Pointer(y)
-	} else {
-		rbPtr(x.parent).right = unsafe.Pointer(y)
-	}
+	rbAttachParent(x, y, header)
 	y.left = unsafe.Pointer(x)
 	x.parent = unsafe.Pointer(y)
 }
@@ -209,16 +202,24 @@ func rbRotateRight(x, header *rbNode) {
 	if y.right != nil {
 		rbPtr(y.right).parent = unsafe.Pointer(x)
 	}
+	rbAttachParent(x, y, header)
+	y.right = unsafe.Pointer(x)
+	x.parent = unsafe.Pointer(y)
+}
+
+// rbAttachParent puts y where x sat in the parent / header.
+func rbAttachParent(x, y, header *rbNode) {
 	y.parent = x.parent
 	if unsafe.Pointer(x) == header.parent {
 		header.parent = unsafe.Pointer(y)
-	} else if unsafe.Pointer(x) == rbPtr(x.parent).right {
-		rbPtr(x.parent).right = unsafe.Pointer(y)
-	} else {
-		rbPtr(x.parent).left = unsafe.Pointer(y)
+		return
 	}
-	y.right = unsafe.Pointer(x)
-	x.parent = unsafe.Pointer(y)
+	p := rbPtr(x.parent)
+	if unsafe.Pointer(x) == p.left {
+		p.left = unsafe.Pointer(y)
+	} else {
+		p.right = unsafe.Pointer(y)
+	}
 }
 
 // RbTreeRebalanceForErase is std::_Rb_tree_rebalance_for_erase

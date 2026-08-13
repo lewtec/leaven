@@ -125,12 +125,16 @@ func Fputc(c int32, stream *os.File) int32 {
 	return Putc(c, stream)
 }
 
-// Iswspace is C iswspace(c) from <wctype.h>.
-func Iswspace(c int32) int32 {
-	if unicode.IsSpace(rune(uint32(c))) {
+func cbool(ok bool) int32 {
+	if ok {
 		return 1
 	}
 	return 0
+}
+
+// Iswspace is C iswspace(c) from <wctype.h>.
+func Iswspace(c int32) int32 {
+	return cbool(unicode.IsSpace(rune(uint32(c))))
 }
 
 // Iswblank is C iswblank(c) from <wctype.h>.
@@ -145,50 +149,32 @@ func Iswblank(c int32) int32 {
 // Iswalnum is C iswalnum(c) from <wctype.h>.
 func Iswalnum(c int32) int32 {
 	r := rune(uint32(c))
-	if unicode.IsLetter(r) || unicode.IsDigit(r) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLetter(r) || unicode.IsDigit(r))
 }
 
 // Iswalpha is C iswalpha(c) from <wctype.h>.
 func Iswalpha(c int32) int32 {
-	if unicode.IsLetter(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLetter(rune(uint32(c))))
 }
 
 // Iswdigit is C iswdigit(c) from <wctype.h>.
 func Iswdigit(c int32) int32 {
-	if unicode.IsDigit(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsDigit(rune(uint32(c))))
 }
 
 // Iswlower is C iswlower(c) from <wctype.h>.
 func Iswlower(c int32) int32 {
-	if unicode.IsLower(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLower(rune(uint32(c))))
 }
 
 // Iswupper is C iswupper(c) from <wctype.h>.
 func Iswupper(c int32) int32 {
-	if unicode.IsUpper(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsUpper(rune(uint32(c))))
 }
 
 // Iswcntrl is C iswcntrl(c) from <wctype.h>.
 func Iswcntrl(c int32) int32 {
-	if unicode.IsControl(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsControl(rune(uint32(c))))
 }
 
 // Iswxdigit is C iswxdigit(c) from <wctype.h>.
