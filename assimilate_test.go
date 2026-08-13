@@ -50,7 +50,18 @@ func testAssimilateCsmith(t *testing.T) {
 
 	ll := filepath.Join(build, "csmith.ll")
 	emitIRFromCompileCommands(t, build, ll, link)
-	crossCheck(t, native, ll, []string{"-s", "1"})
+	// Seed 1 is the small smoke case. Seed 42 emits ~50× more C (multi-func,
+	// deep blocks, bitfields, pointer chains) — still the generator binary,
+	// but exercises more of its IR paths under leaven.
+	for _, args := range [][]string{
+		{"-s", "1"},
+		{"-s", "42"},
+	} {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			crossCheck(t, native, ll, args)
+		})
+	}
 }
 
 func testAssimilateRhai(t *testing.T) {
