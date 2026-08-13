@@ -29,10 +29,19 @@ func (r goRef) code() *jen.Statement {
 	return jen.Qual(r.pkg, r.name)
 }
 
-// Sym is jen.Qual for a package-level func. Generic instantiations drop [T].
-func Sym(fn any) *jen.Statement {
+func (r goRef) Call(args ...jen.Code) *jen.Statement {
+	return r.code().Call(args...)
+}
+
+func (r goRef) Types(t ...jen.Code) *jen.Statement {
+	return r.code().Types(t...)
+}
+
+// Sym is a resolved package-level func (pkg+name). Call/Types emit jen.
+// Generic instantiations drop [T]. Maps store this; FuncForPC runs once.
+func Sym(fn any) goRef {
 	pkg, name := funcPkgName(fn)
-	return jen.Qual(pkg, name)
+	return goRef{pkg: pkg, name: name}
 }
 
 func funcPkgName(fn any) (pkg, name string) {
@@ -58,18 +67,6 @@ func funcPkgName(fn any) (pkg, name string) {
 		panic(fmt.Sprintf("Sym: no pkg: %s", f.Name()))
 	}
 	return full[:len(full)-len(rest)+dot], rest[dot+1:]
-}
-
-// lib is goRef for a package-level func (library maps).
-func lib(fn any) goRef {
-	pkg, name := funcPkgName(fn)
-	return goRef{pkg: pkg, name: name}
-}
-
-// typ is goRef for a named type.
-func typ[T any]() goRef {
-	t := reflect.TypeFor[T]()
-	return goRef{pkg: t.PkgPath(), name: t.Name()}
 }
 
 func newGoFile(packageName string) *jen.File {
@@ -174,39 +171,49 @@ func libcT(fn any, t jen.Code, args ...jen.Code) *jen.Statement {
 	return Sym(fn).Types(t).Call(args...)
 }
 
+var (
+	symPtr    = Sym(libc.Ptr[byte])
+	symAs     = Sym(libc.As[byte])
+	symAddr   = Sym(libc.Addr[byte])
+	symOff    = Sym(libc.Off)
+	symAddPtr = Sym(libc.AddPointer[byte])
+	symLoad   = Sym(libc.Load[byte])
+	symStore  = Sym(libc.Store[byte])
+)
+
 // emitPtr is libc.Ptr(p) — (void *)p.
 func emitPtr(p jen.Code) *jen.Statement {
-	return Sym(libc.Ptr[byte]).Call(p)
+	return symPtr.Call(p)
 }
 
 // emitAs is libc.As[T](p) — (T *)p. t is the element type, not *T.
 func emitAs(t, p jen.Code) *jen.Statement {
-	return libcT(libc.As[byte], t, p)
+	return symAs.Types(t).Call(p)
 }
 
 // emitAddr is libc.Addr(p) — (uintptr)p.
 func emitAddr(p jen.Code) *jen.Statement {
-	return Sym(libc.Addr[byte]).Call(p)
+	return symAddr.Call(p)
 }
 
 // emitOff is libc.Off(p, n) — (char *)p + n.
 func emitOff(p, n jen.Code) *jen.Statement {
-	return Sym(libc.Off).Call(p, n)
+	return symOff.Call(p, n)
 }
 
 // emitAddPtr is libc.AddPointer[T](p, i).
 func emitAddPtr(t, p, i jen.Code) *jen.Statement {
-	return libcT(libc.AddPointer[byte], t, p, i)
+	return symAddPtr.Types(t).Call(p, i)
 }
 
 // emitLoad is libc.Load[T](p, off).
 func emitLoad(t, p, off jen.Code) *jen.Statement {
-	return libcT(libc.Load[byte], t, p, off)
+	return symLoad.Types(t).Call(p, off)
 }
 
 // emitStore is libc.Store[T](p, off, v).
 func emitStore(t, p, off, v jen.Code) *jen.Statement {
-	return libcT(libc.Store[byte], t, p, off, v)
+	return symStore.Types(t).Call(p, off, v)
 }
 
 // emitUP is unsafe.Pointer(x) for integer bit patterns (inttoptr),
@@ -277,7 +284,7 @@ func wideBits(t types.Type) (uint64, bool) {
 	}
 }
 
-func wideSym(bits uint64, i128, i256 any) *jen.Statement {
+func wideSym(bits uint64, i128, i256 any) goRef {
 	if bits == 256 {
 		return Sym(i256)
 	}

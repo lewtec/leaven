@@ -844,7 +844,7 @@ type llvmBin struct {
 	x, y value.Value
 }
 
-func wideBinFunc(bits uint64, op string, ashr bool) (*jen.Statement, bool) {
+func wideBinFunc(bits uint64, op string, ashr bool) (goRef, bool) {
 	if ashr && (op == ">>" || op == "ashr") {
 		return wideSym(bits, libc.I128AShr, libc.I256AShr), true
 	}
@@ -869,9 +869,9 @@ func wideBinFunc(bits uint64, op string, ashr bool) (*jen.Statement, bool) {
 	case "ashr":
 		i128, i256 = libc.I128AShr, libc.I256AShr
 	case "/", "%":
-		return nil, false
+		return goRef{}, false
 	default:
-		return nil, false
+		return goRef{}, false
 	}
 	return wideSym(bits, i128, i256), true
 }
@@ -1367,7 +1367,7 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 			if strings.Contains(llvmName, "i256") {
 				bits = 256
 			}
-			var fn *jen.Statement
+			var fn goRef
 			switch {
 			case strings.Contains(llvmName, "sadd") || strings.Contains(llvmName, "uadd"):
 				fn = wideSym(bits, libc.I128Add, libc.I256Add)
@@ -1849,9 +1849,9 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 	}
 	switch goIntBits(it.BitSize) {
 	case 32:
-		return Sym(atomic.AddInt32), true
+		return Sym(atomic.AddInt32).code(), true
 	case 64:
-		return Sym(atomic.AddInt64), true
+		return Sym(atomic.AddInt64).code(), true
 	default:
 		return nil, false
 	}
@@ -1868,7 +1868,7 @@ func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
 
 func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) {
 	if _, ok := t.(*types.PointerType); ok {
-		return Sym(ptr), true
+		return Sym(ptr).code(), true
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
@@ -1876,11 +1876,11 @@ func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) 
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return Sym(i8), true
+		return Sym(i8).code(), true
 	case 32:
-		return Sym(i32), true
+		return Sym(i32).code(), true
 	case 64:
-		return Sym(i64), true
+		return Sym(i64).code(), true
 	default:
 		return nil, false
 	}
@@ -1888,19 +1888,19 @@ func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) 
 
 func atomicLoadFunc(t types.Type) *jen.Statement {
 	if _, ok := t.(*types.PointerType); ok {
-		return Sym(atomic.LoadPointer)
+		return Sym(atomic.LoadPointer).code()
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
-		return Sym(atomic.LoadInt64)
+		return Sym(atomic.LoadInt64).code()
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return Sym(libc.AtomicLoadI8)
+		return Sym(libc.AtomicLoadI8).code()
 	case 32:
-		return Sym(atomic.LoadInt32)
+		return Sym(atomic.LoadInt32).code()
 	default:
-		return Sym(atomic.LoadInt64)
+		return Sym(atomic.LoadInt64).code()
 	}
 }
 
@@ -1932,7 +1932,7 @@ func formatAggregateIndex(base *jen.Statement, t types.Type, indices []uint64) (
 // Crate hashes change; match the stable path suffix.
 func rustRuntime(name string) *jen.Statement {
 	if strings.Contains(name, "stdio6__print") {
-		return Sym(libc.RustPrint)
+		return Sym(libc.RustPrint).code()
 	}
 	if !strings.Contains(name, "7Display3fmt") {
 		return nil
@@ -1947,9 +1947,9 @@ func rustRuntime(name string) *jen.Statement {
 	}
 	switch rest[0] {
 	case 'l': // i32
-		return Sym(libc.RustFmtI32)
+		return Sym(libc.RustFmtI32).code()
 	case 'j': // usize
-		return Sym(libc.RustFmtUsize)
+		return Sym(libc.RustFmtUsize).code()
 	default:
 		return nil
 	}
@@ -2037,15 +2037,15 @@ const (
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "_Rb_tree_decrement"):
-		return Sym(libc.RbTreeDecrement), cxxTreeWalk, true
+		return Sym(libc.RbTreeDecrement).code(), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_increment"):
-		return Sym(libc.RbTreeIncrement), cxxTreeWalk, true
+		return Sym(libc.RbTreeIncrement).code(), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_insert_and_rebalance"):
-		return Sym(libc.RbTreeInsertAndRebalance), cxxTreeInsert, true
+		return Sym(libc.RbTreeInsertAndRebalance).code(), cxxTreeInsert, true
 	case strings.Contains(name, "_Rb_tree_rebalance_for_erase"):
-		return Sym(libc.RbTreeRebalanceForErase), cxxTreeErase, true
+		return Sym(libc.RbTreeRebalanceForErase).code(), cxxTreeErase, true
 	case isRbTreeDefaultCtor(name):
-		return Sym(libc.RbTreeInit), cxxTreeInit, true
+		return Sym(libc.RbTreeInit).code(), cxxTreeInit, true
 	default:
 		return nil, 0, false
 	}
@@ -2060,7 +2060,7 @@ func isRbTreeDefaultCtor(name string) bool {
 
 func cxxIONamed(name string) (*jen.Statement, bool) {
 	if cxxNoopDtor(name) {
-		return Sym(libc.CxxNoop), true
+		return Sym(libc.CxxNoop).code(), true
 	}
 	fn, _, ok := cxxIOKind(name)
 	return fn, ok
@@ -2282,55 +2282,55 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "4endlI") || strings.HasPrefix(name, "_ZSt4endl"):
-		return Sym(libc.OstreamEndl), cxxIOEndl, true
+		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
-		return Sym(libc.OstreamLsCStr), cxxIOLsCStr, true
+		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 	// operator<<(ostream&, char)
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
-		return Sym(libc.OstreamPut), cxxIOPut, true
+		return Sym(libc.OstreamPut).code(), cxxIOPut, true
 	// operator<<(ostream&, basic_string const&)
 	case strings.Contains(name, "lsIcSt11char_traits") && strings.Contains(name, "basic_string"):
-		return Sym(libc.OstreamLsString), cxxIOLsCStr, true
+		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
 	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
-		return Sym(libc.OstreamInsertU64), cxxIOInsertU64, true
+		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
 	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
-		return Sym(libc.OstreamInsertI64), cxxIOInsertI64, true
+		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
 	case strings.Contains(name, "So3putE"):
-		return Sym(libc.OstreamPut), cxxIOPut, true
+		return Sym(libc.OstreamPut).code(), cxxIOPut, true
 	case strings.Contains(name, "So5flushE"):
-		return Sym(libc.OstreamFlush), cxxIOFlush, true
+		return Sym(libc.OstreamFlush).code(), cxxIOFlush, true
 	case strings.Contains(name, "5ctypeIcE13_M_widen_init"):
-		return Sym(libc.CtypeWidenInit), cxxIOCtypeInit, true
+		return Sym(libc.CtypeWidenInit).code(), cxxIOCtypeInit, true
 	case strings.Contains(name, "SolsEPFRSoS_E"):
 		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
-		return Sym(libc.OstreamEndl), cxxIOEndl, true
+		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
 	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
 		switch {
 		case strings.HasSuffix(name, "PKc"):
-			return Sym(libc.OstreamLsCStr), cxxIOLsCStr, true
+			return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 		case strings.HasSuffix(name, "PKv"):
 			// operator<<(void const*)
-			return Sym(libc.OstreamInsertPtr), cxxIOInsertPtr, true
+			return Sym(libc.OstreamInsertPtr).code(), cxxIOInsertPtr, true
 		// signed: char(a)/short(s)/int(i)/long(l)/long long(x)
 		case strings.HasSuffix(name, "Ea"), strings.HasSuffix(name, "Es"),
 			strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
 			strings.HasSuffix(name, "Ex"):
-			return Sym(libc.OstreamInsertI64), cxxIOInsertI64, true
+			return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
 		// unsigned: zero-extend to u64 (Go uint64(intN(-1)) sign-extends).
 		case strings.HasSuffix(name, "Eh"): // unsigned char
-			return Sym(libc.OstreamInsertU64), cxxIOInsertU8, true
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU8, true
 		case strings.HasSuffix(name, "Et"): // unsigned short
-			return Sym(libc.OstreamInsertU64), cxxIOInsertU16, true
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU16, true
 		case strings.HasSuffix(name, "Ej"): // unsigned int
-			return Sym(libc.OstreamInsertU64), cxxIOInsertU32, true
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU32, true
 		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
-			return Sym(libc.OstreamInsertU64), cxxIOInsertU64, true
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
 		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"):
-			return Sym(libc.OstreamInsertF64), cxxIOInsertF64, true
+			return Sym(libc.OstreamInsertF64).code(), cxxIOInsertF64, true
 		case strings.HasSuffix(name, "Eb"):
-			return Sym(libc.OstreamInsertBool), cxxIOInsertBool, true
+			return Sym(libc.OstreamInsertBool).code(), cxxIOInsertBool, true
 		case strings.HasSuffix(name, "Ec"):
-			return Sym(libc.OstreamPut), cxxIOPut, true
+			return Sym(libc.OstreamPut).code(), cxxIOPut, true
 		}
 	}
 	return nil, 0, false
@@ -2384,38 +2384,38 @@ func isIstreamIosManip(name string) bool {
 
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
-		return Sym(libc.OstreamInsert), cxxIOInsert, true
+		return Sym(libc.OstreamInsert).code(), cxxIOInsert, true
 	}
 	if isGetline(name) {
-		return Sym(libc.IstreamGetline), cxxIOGetline, true
+		return Sym(libc.IstreamGetline).code(), cxxIOGetline, true
 	}
 	if isIstreamIosManip(name) {
-		return Sym(libc.IstreamApplyIosManip), cxxIOManip, true
+		return Sym(libc.IstreamApplyIosManip).code(), cxxIOManip, true
 	}
 	if isIstreamExtractI32(name) {
-		return Sym(libc.IstreamExtractI32), cxxIOExtractI32, true
+		return Sym(libc.IstreamExtractI32).code(), cxxIOExtractI32, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
 	}
 	if isIosBaseCtor(name) {
-		return Sym(libc.IosBaseCtor), cxxIOIosBase, true
+		return Sym(libc.IosBaseCtor).code(), cxxIOIosBase, true
 	}
 	if isLocaleCtor(name) {
-		return Sym(libc.LocaleCtor), cxxIOIosBase, true
+		return Sym(libc.LocaleCtor).code(), cxxIOIosBase, true
 	}
 	if isStringstream(name) {
 		switch {
 		case strings.Contains(name, "3strE"):
-			return Sym(libc.StringstreamStr), cxxIOOStringStreamStr, true
+			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
 		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
 		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev"):
-			return Sym(libc.StringstreamDefaultCtor), cxxIOOStringStreamCtor, true
+			return Sym(libc.StringstreamDefaultCtor).code(), cxxIOOStringStreamCtor, true
 		case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"):
-			return Sym(libc.StringstreamCtor), cxxIOStringstreamCtor, true
+			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
 			// Prefer default-close if we might have dual keys; safe for both.
-			return Sym(libc.StringstreamDefaultClose), cxxIOClose, true
+			return Sym(libc.StringstreamDefaultClose).code(), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
@@ -2423,11 +2423,11 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if isOstringstream(name) {
 		switch {
 		case strings.Contains(name, "C1E") || strings.Contains(name, "C2E"):
-			return Sym(libc.OStringStreamCtor), cxxIOOStringStreamCtor, true
+			return Sym(libc.OStringStreamCtor).code(), cxxIOOStringStreamCtor, true
 		case strings.Contains(name, "3strE"):
-			return Sym(libc.OStringStreamStr), cxxIOOStringStreamStr, true
+			return Sym(libc.OStringStreamStr).code(), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
-			return Sym(libc.OStringStreamClose), cxxIOClose, true
+			return Sym(libc.OStringStreamClose).code(), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
@@ -2437,123 +2437,123 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	switch {
 	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"), strings.Contains(name, "4openE"):
-		return Sym(libc.IfstreamOpen), cxxIOOpen, true
+		return Sym(libc.IfstreamOpen).code(), cxxIOOpen, true
 	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"), strings.Contains(name, "5closeE"):
-		return Sym(libc.IfstreamClose), cxxIOClose, true
+		return Sym(libc.IfstreamClose).code(), cxxIOClose, true
 	default:
 		return nil, 0, false
 	}
 }
 
 var libraryFunctions = map[string]goRef{
-	"abort":          lib(libc.Abort),
-	"arc4random_buf": lib(libc.Arc4randomBuf),
-	"__cxa_atexit":   lib(libc.CxaAtexit),
-	"__dynamic_cast": lib(libc.DynamicCast),
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":                                        lib(libc.IfstreamOpen),
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":                                        lib(libc.IfstreamOpen),
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                                           lib(libc.IfstreamClose),
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                                           lib(libc.IfstreamCloseVTT),
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                                                       lib(libc.IfstreamClose),
-	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                                                        lib(libc.FilebufClose),
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             lib(libc.IosFail),
-	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              lib(libc.IosClear),
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              lib(libc.IosEof),
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                                                lib(libc.IosNot),
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               lib(libc.IosBool),
-	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            lib(libc.OstreamInsert),
-	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": lib(libc.IstreamGetline),
+	"abort":          Sym(libc.Abort),
+	"arc4random_buf": Sym(libc.Arc4randomBuf),
+	"__cxa_atexit":   Sym(libc.CxaAtexit),
+	"__dynamic_cast": Sym(libc.DynamicCast),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":                                        Sym(libc.IfstreamOpen),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":                                        Sym(libc.IfstreamOpen),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                                           Sym(libc.IfstreamClose),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                                           Sym(libc.IfstreamCloseVTT),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                                                       Sym(libc.IfstreamClose),
+	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                                                        Sym(libc.FilebufClose),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             Sym(libc.IosFail),
+	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              Sym(libc.IosClear),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              Sym(libc.IosEof),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                                                Sym(libc.IosNot),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               Sym(libc.IosBool),
+	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            Sym(libc.OstreamInsert),
+	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": Sym(libc.IstreamGetline),
 	// stringstream / istream >> are matched by cxxIOKind (arg reshaping).
-	"__assert_fail":         lib(libc.AssertFail),
-	"fabs":                  lib(math.Abs),
-	"fmod":                  lib(math.Mod),
-	"pow":                   lib(math.Pow),
-	"__ctype_b_loc":         lib(libc.CtypeBLoc),
-	"dup":                   lib(libc.Dup),
-	"fclose":                lib(libc.Fclose),
-	"fdopen":                lib(libc.Fdopen),
-	"fprintf":               lib(libc.Fprintf),
-	"fputc":                 lib(libc.Fputc),
-	"fputs":                 lib(libc.Fputs),
-	"free":                  lib(libc.Free),
-	"getchar":               lib(libc.Getchar),
-	"exit":                  lib(libc.Exit),
-	"iswalnum":              lib(libc.Iswalnum),
-	"iswalpha":              lib(libc.Iswalpha),
-	"iswblank":              lib(libc.Iswblank),
-	"iswcntrl":              lib(libc.Iswcntrl),
-	"iswdigit":              lib(libc.Iswdigit),
-	"iswlower":              lib(libc.Iswlower),
-	"iswspace":              lib(libc.Iswspace),
-	"iswupper":              lib(libc.Iswupper),
-	"iswxdigit":             lib(libc.Iswxdigit),
-	"leaven_va_arg":         lib(libc.VAArg),
-	"towlower":              lib(libc.Towlower),
-	"towupper":              lib(libc.Towupper),
-	"llvm_fabs_f64":         lib(math.Abs),
-	"llvm_fabs_f80":         lib(math.Abs),
-	"llvm_maximumnum_f64":   lib(libc.MaximumNumF64),
-	"llvm_pow_f64":          lib(math.Pow),
-	"memchr":                lib(libc.Memchr),
-	"memcmp":                lib(libc.Memcmp),
-	"bcmp":                  lib(libc.Memcmp),
-	"__memcpy_chk":          lib(libc.MemcpyChk),
-	"memmove":               lib(libc.Memmove),
-	"memset_pattern16":      lib(libc.MemsetPattern16),
-	"__memset_chk":          lib(libc.MemsetChk),
-	"printf":                lib(libc.Printf),
-	"putc":                  lib(libc.Putc),
-	"putchar":               lib(libc.Putchar),
-	"__errno_location":      lib(libc.ErrnoLocation),
-	"close":                 lib(libc.Close),
-	"dlsym":                 lib(libc.Dlsym),
-	"fstat64":               lib(libc.Fstat64),
-	"getauxval":             lib(libc.Getauxval),
-	"getcwd":                lib(libc.Getcwd),
-	"getenv":                lib(libc.Getenv),
-	"getpid":                lib(libc.Getpid),
-	"getrandom":             lib(libc.Getrandom),
-	"gettid":                lib(libc.Gettid),
-	"lseek64":               lib(libc.Lseek64),
-	"mmap64":                lib(libc.Mmap64),
-	"mprotect":              lib(libc.Mprotect),
-	"munmap":                lib(libc.Munmap),
-	"open":                  lib(libc.Open),
-	"open64":                lib(libc.Open64),
-	"poll":                  lib(libc.Poll),
-	"pthread_attr_destroy":  lib(libc.PthreadAttrDestroy),
-	"pthread_attr_getstack": lib(libc.PthreadAttrGetstack),
-	"pthread_getattr_np":    lib(libc.PthreadGetattrNp),
-	"pthread_self":          lib(libc.PthreadSelf),
-	"puts":                  lib(libc.Puts),
-	"read":                  lib(libc.Read),
-	"realpath":              lib(libc.Realpath),
-	"sigaction":             lib(libc.Sigaction),
-	"sigaltstack":           lib(libc.Sigaltstack),
-	"signal":                lib(libc.Signal),
-	"stat64":                lib(libc.Stat64),
-	"sysconf":               lib(libc.Sysconf),
-	"syscall":               lib(libc.Syscall),
-	"write":                 lib(libc.Write),
-	"realloc":               lib(libc.Realloc),
-	"scanf":                 lib(libc.Scanf),
-	"sscanf":                lib(libc.Sscanf),
-	"__isoc23_sscanf":       lib(libc.Sscanf),
-	"srand48":               lib(libc.Srand48),
-	"lrand48":               lib(libc.Lrand48),
-	"statx":                 lib(libc.Statx),
-	"snprintf":              lib(libc.Snprintf),
-	"sqrt":                  lib(math.Sqrt),
-	"__strcat_chk":          lib(libc.StrcatChk),
-	"strchr":                lib(libc.Strchr),
-	"strcmp":                lib(libc.Strcmp),
-	"strcpy":                lib(libc.Strcpy),
-	"strcspn":               lib(libc.Strcspn),
-	"strlen":                lib(libc.Strlen),
-	"strncat":               lib(libc.Strncat),
-	"strncmp":               lib(libc.Strncmp),
-	"strncpy":               lib(libc.Strncpy),
-	"strrchr":               lib(libc.Strrchr),
-	"strspn":                lib(libc.Strspn),
-	"strstr":                lib(libc.Strstr),
+	"__assert_fail":         Sym(libc.AssertFail),
+	"fabs":                  Sym(math.Abs),
+	"fmod":                  Sym(math.Mod),
+	"pow":                   Sym(math.Pow),
+	"__ctype_b_loc":         Sym(libc.CtypeBLoc),
+	"dup":                   Sym(libc.Dup),
+	"fclose":                Sym(libc.Fclose),
+	"fdopen":                Sym(libc.Fdopen),
+	"fprintf":               Sym(libc.Fprintf),
+	"fputc":                 Sym(libc.Fputc),
+	"fputs":                 Sym(libc.Fputs),
+	"free":                  Sym(libc.Free),
+	"getchar":               Sym(libc.Getchar),
+	"exit":                  Sym(libc.Exit),
+	"iswalnum":              Sym(libc.Iswalnum),
+	"iswalpha":              Sym(libc.Iswalpha),
+	"iswblank":              Sym(libc.Iswblank),
+	"iswcntrl":              Sym(libc.Iswcntrl),
+	"iswdigit":              Sym(libc.Iswdigit),
+	"iswlower":              Sym(libc.Iswlower),
+	"iswspace":              Sym(libc.Iswspace),
+	"iswupper":              Sym(libc.Iswupper),
+	"iswxdigit":             Sym(libc.Iswxdigit),
+	"leaven_va_arg":         Sym(libc.VAArg),
+	"towlower":              Sym(libc.Towlower),
+	"towupper":              Sym(libc.Towupper),
+	"llvm_fabs_f64":         Sym(math.Abs),
+	"llvm_fabs_f80":         Sym(math.Abs),
+	"llvm_maximumnum_f64":   Sym(libc.MaximumNumF64),
+	"llvm_pow_f64":          Sym(math.Pow),
+	"memchr":                Sym(libc.Memchr),
+	"memcmp":                Sym(libc.Memcmp),
+	"bcmp":                  Sym(libc.Memcmp),
+	"__memcpy_chk":          Sym(libc.MemcpyChk),
+	"memmove":               Sym(libc.Memmove),
+	"memset_pattern16":      Sym(libc.MemsetPattern16),
+	"__memset_chk":          Sym(libc.MemsetChk),
+	"printf":                Sym(libc.Printf),
+	"putc":                  Sym(libc.Putc),
+	"putchar":               Sym(libc.Putchar),
+	"__errno_location":      Sym(libc.ErrnoLocation),
+	"close":                 Sym(libc.Close),
+	"dlsym":                 Sym(libc.Dlsym),
+	"fstat64":               Sym(libc.Fstat64),
+	"getauxval":             Sym(libc.Getauxval),
+	"getcwd":                Sym(libc.Getcwd),
+	"getenv":                Sym(libc.Getenv),
+	"getpid":                Sym(libc.Getpid),
+	"getrandom":             Sym(libc.Getrandom),
+	"gettid":                Sym(libc.Gettid),
+	"lseek64":               Sym(libc.Lseek64),
+	"mmap64":                Sym(libc.Mmap64),
+	"mprotect":              Sym(libc.Mprotect),
+	"munmap":                Sym(libc.Munmap),
+	"open":                  Sym(libc.Open),
+	"open64":                Sym(libc.Open64),
+	"poll":                  Sym(libc.Poll),
+	"pthread_attr_destroy":  Sym(libc.PthreadAttrDestroy),
+	"pthread_attr_getstack": Sym(libc.PthreadAttrGetstack),
+	"pthread_getattr_np":    Sym(libc.PthreadGetattrNp),
+	"pthread_self":          Sym(libc.PthreadSelf),
+	"puts":                  Sym(libc.Puts),
+	"read":                  Sym(libc.Read),
+	"realpath":              Sym(libc.Realpath),
+	"sigaction":             Sym(libc.Sigaction),
+	"sigaltstack":           Sym(libc.Sigaltstack),
+	"signal":                Sym(libc.Signal),
+	"stat64":                Sym(libc.Stat64),
+	"sysconf":               Sym(libc.Sysconf),
+	"syscall":               Sym(libc.Syscall),
+	"write":                 Sym(libc.Write),
+	"realloc":               Sym(libc.Realloc),
+	"scanf":                 Sym(libc.Scanf),
+	"sscanf":                Sym(libc.Sscanf),
+	"__isoc23_sscanf":       Sym(libc.Sscanf),
+	"srand48":               Sym(libc.Srand48),
+	"lrand48":               Sym(libc.Lrand48),
+	"statx":                 Sym(libc.Statx),
+	"snprintf":              Sym(libc.Snprintf),
+	"sqrt":                  Sym(math.Sqrt),
+	"__strcat_chk":          Sym(libc.StrcatChk),
+	"strchr":                Sym(libc.Strchr),
+	"strcmp":                Sym(libc.Strcmp),
+	"strcpy":                Sym(libc.Strcpy),
+	"strcspn":               Sym(libc.Strcspn),
+	"strlen":                Sym(libc.Strlen),
+	"strncat":               Sym(libc.Strncat),
+	"strncmp":               Sym(libc.Strncmp),
+	"strncpy":               Sym(libc.Strncpy),
+	"strrchr":               Sym(libc.Strrchr),
+	"strspn":                Sym(libc.Strspn),
+	"strstr":                Sym(libc.Strstr),
 }

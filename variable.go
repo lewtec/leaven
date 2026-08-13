@@ -632,7 +632,7 @@ func i256Lit(x *big.Int) *jen.Statement {
 	})
 }
 
-func wideICmp(bits uint64, pred enum.IPred) (*jen.Statement, bool) {
+func wideICmp(bits uint64, pred enum.IPred) (goRef, bool) {
 	var i128, i256 any
 	switch pred {
 	case enum.IPredEQ:
@@ -656,7 +656,7 @@ func wideICmp(bits uint64, pred enum.IPred) (*jen.Statement, bool) {
 	case enum.IPredULT:
 		i128, i256 = libc.I128Ult, libc.I256Ult
 	default:
-		return nil, false
+		return goRef{}, false
 	}
 	return wideSym(bits, i128, i256), true
 }

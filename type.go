@@ -3,6 +3,7 @@ package leaven
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"unsafe"
 
@@ -344,9 +345,14 @@ func TypeName(t types.Type) string {
 	return name
 }
 
+var osFileRef = func() goRef {
+	t := reflect.TypeFor[os.File]()
+	return goRef{pkg: t.PkgPath(), name: t.Name()}
+}()
+
 var libraryTypes = map[string]goRef{
-	"FILE":     typ[os.File](),
-	"_IO_FILE": typ[os.File](), // glibc / clang struct name for FILE
+	"FILE":     osFileRef,
+	"_IO_FILE": osFileRef, // glibc / clang struct name for FILE
 }
 
 // compatiblePointerTypes returns whether casting t1 to t2 is allowed.
