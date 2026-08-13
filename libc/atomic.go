@@ -6,11 +6,11 @@ import (
 )
 
 func i8Word(addr *byte) (p *uint32, shift uint, mask uint32) {
-	up := uintptr(unsafe.Pointer(addr))
+	up := Addr(addr)
 	base := up &^ 3
 	shift = uint((up & 3) * 8)
 	mask = uint32(0xff) << shift
-	p = (*uint32)(unsafe.Pointer(base))
+	p = As[uint32](unsafe.Pointer(base))
 	return p, shift, mask
 }
 

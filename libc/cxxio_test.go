@@ -12,7 +12,7 @@ func TestStandinVptrMinus24(t *testing.T) {
 	if vp == nil {
 		t.Fatal("nil vptr")
 	}
-	off := *(*int64)(unsafe.Add(vp, -24))
+	off := Load[int64](vp, -24)
 	if off != 0 {
 		t.Fatalf("vptr-24=%d", off)
 	}
@@ -28,12 +28,12 @@ func TestIfstreamMissingFileFails(t *testing.T) {
 		t.Fatal("operator bool true on missing file")
 	}
 	// clang++ -O2: off = *(vptr-24); state = *(this+off+32); fail = state&5
-	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
+	vp := Load[unsafe.Pointer](Ptr(&obj[0]), 0)
 	if vp == nil {
 		t.Fatal("vptr not set")
 	}
-	off := *(*int64)(unsafe.Add(vp, -24))
-	state := *(*int32)(unsafe.Add(unsafe.Pointer(&obj[0]), int(off)+iosStateOff))
+	off := Load[int64](vp, -24)
+	state := Load[int32](Ptr(&obj[0]), int(off)+iosStateOff)
 	if state&iosFailbit == 0 {
 		t.Fatalf("inlined failbit not set, state=%d off=%d", state, off)
 	}
@@ -66,15 +66,15 @@ func TestLocaleCtorNilSafe(t *testing.T) {
 func TestIosBaseCtorVptrAndCtype(t *testing.T) {
 	var obj [272]byte
 	IosBaseCtor(&obj[0])
-	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
+	vp := Load[unsafe.Pointer](Ptr(&obj[0]), 0)
 	if vp == nil {
 		t.Fatal("nil vptr")
 	}
-	off := *(*int64)(unsafe.Add(vp, -24))
+	off := Load[int64](vp, -24)
 	if off != 0 {
 		t.Fatalf("vptr-24=%d", off)
 	}
-	ct := *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&obj[0]), iosCtypeOff))
+	ct := Load[unsafe.Pointer](Ptr(&obj[0]), iosCtypeOff)
 	if ct == nil {
 		t.Fatal("nil _M_ctype")
 	}
@@ -82,43 +82,43 @@ func TestIosBaseCtorVptrAndCtype(t *testing.T) {
 
 func TestInitOstreamVptrMinus24(t *testing.T) {
 	var obj [272]byte
-	InitOstream(unsafe.Pointer(&obj[0]))
-	vp := *(*unsafe.Pointer)(unsafe.Pointer(&obj[0]))
+	InitOstream(Ptr(&obj[0]))
+	vp := Load[unsafe.Pointer](Ptr(&obj[0]), 0)
 	if vp == nil {
 		t.Fatal("nil vptr")
 	}
-	off := *(*int64)(unsafe.Add(vp, -24))
+	off := Load[int64](vp, -24)
 	if off != 0 {
 		t.Fatalf("vptr-24=%d", off)
 	}
-	ct := *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&obj[0]), iosCtypeOff))
+	ct := Load[unsafe.Pointer](Ptr(&obj[0]), iosCtypeOff)
 	if ct == nil {
 		t.Fatal("nil _M_ctype")
 	}
-	if *(*byte)(unsafe.Add(ct, ctypeWidenOkOff)) == 0 {
+	if Load[byte](ct, ctypeWidenOkOff) == 0 {
 		t.Fatal("widen_ok")
 	}
-	if *(*byte)(unsafe.Add(ct, ctypeWidenTabOff+10)) != '\n' {
+	if Load[byte](ct, ctypeWidenTabOff+10) != '\n' {
 		t.Fatal("widen \\n")
 	}
 }
 
 func emptyCxxString() *[32]byte {
 	var s [32]byte
-	*(*unsafe.Pointer)(unsafe.Pointer(&s[0])) = unsafe.Pointer(&s[16])
+	Store(Ptr(&s[0]), 0, Ptr(&s[16]))
 	return &s
 }
 
 func cxxStringText(s *[32]byte) string {
-	p := *(**byte)(unsafe.Pointer(&s[0]))
+	p := Load[*byte](Ptr(&s[0]), 0)
 	if p == nil {
 		return ""
 	}
-	n := *(*int64)(unsafe.Pointer(&s[8]))
+	n := Load[int64](Ptr(&s[0]), 8)
 	if n < 0 {
 		return ""
 	}
-	return string(unsafe.Slice(p, int(n)))
+	return string(Bytes(p, int(n)))
 }
 
 func TestIstreamGetlineMissingFails(t *testing.T) {
@@ -195,7 +195,7 @@ func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	var ss [128]byte
 	StringstreamCtor(&ss[0], &s[0], 24)
 	var out int32 = -1
-	IstreamExtractI32(&ss[0], (*byte)(unsafe.Pointer(&out)))
+	IstreamExtractI32(&ss[0], As[byte](Ptr(&out)))
 	if out != 42 {
 		t.Fatalf("dec got %d", out)
 	}
@@ -207,7 +207,7 @@ func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	StringstreamCtor(&ss2[0], &s2[0], 24)
 	IstreamApplyIosManip(&ss2[0], nil)
 	out = -1
-	IstreamExtractI32(&ss2[0], (*byte)(unsafe.Pointer(&out)))
+	IstreamExtractI32(&ss2[0], As[byte](Ptr(&out)))
 	if out != 0x2a {
 		t.Fatalf("hex got %d want %d", out, 0x2a)
 	}

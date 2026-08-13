@@ -36,7 +36,7 @@ func RustAlloc(size, align int64) unsafe.Pointer {
 	// [raw ... raw+8) stores original; payload starts at aligned address.
 	base := raw + 8
 	aligned := (base + uintptr(align-1)) &^ (uintptr(align) - 1)
-	*(*uintptr)(unsafe.Pointer(aligned - 8)) = raw
+	Store[uintptr](unsafe.Pointer(aligned), -8, raw)
 	return unsafe.Pointer(aligned)
 }
 
@@ -44,7 +44,7 @@ func RustAlloc(size, align int64) unsafe.Pointer {
 func RustAllocZeroed(size, align int64) unsafe.Pointer {
 	p := RustAlloc(size, align)
 	if p != nil && uintptr(p) > 1 && size > 0 {
-		clear(unsafe.Slice((*byte)(p), int(size)))
+		clear(Bytes(As[byte](p), int(size)))
 	}
 	return p
 }
@@ -57,7 +57,7 @@ func RustDealloc(p unsafe.Pointer, size, align int64) {
 	u := uintptr(p)
 	if align > 16 {
 		// Over-aligned: raw block pointer is stored 8 bytes before payload.
-		u = *(*uintptr)(unsafe.Pointer(u - 8))
+		u = Load[uintptr](unsafe.Pointer(u), -8)
 	}
 	slabFree(u)
 }
@@ -79,7 +79,7 @@ func RustRealloc(p unsafe.Pointer, oldSize, align, newSize int64) unsafe.Pointer
 			if newSize < m {
 				m = newSize
 			}
-			copy(unsafe.Slice((*byte)(n), int(newSize)), unsafe.Slice((*byte)(p), int(m)))
+			copy(Bytes(As[byte](n), int(newSize)), Bytes(As[byte](p), int(m)))
 		}
 		RustDealloc(p, oldSize, align)
 		return n
@@ -149,7 +149,7 @@ func Statx(dirfd int32, pathname *byte, flags int32, mask int32, buf *byte) int3
 	if pathname != nil {
 		path = GoString(pathname)
 	}
-	st := (*unix.Statx_t)(unsafe.Pointer(buf))
+	st := As[unix.Statx_t](Ptr(buf))
 	if err := unix.Statx(int(dirfd), path, int(flags), int(uint32(mask)), st); err != nil {
 		return -1
 	}

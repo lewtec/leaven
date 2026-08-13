@@ -65,6 +65,6 @@ func VecReduceAddV4I32(v [4]int32) int32 {
 
 // LoadRelativeI64 is llvm.load.relative.i64: load i32 at ptr+offset, return ptr+i32.
 func LoadRelativeI64(p unsafe.Pointer, off int64) unsafe.Pointer {
-	rel := int64(*(*int32)(unsafe.Add(p, int(off))))
-	return unsafe.Add(p, int(rel))
+	rel := int64(Load[int32](p, int(off)))
+	return Off(p, int(rel))
 }

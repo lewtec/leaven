@@ -26,11 +26,11 @@ func Poll(fds *byte, nfds int64, timeout int32) int32 {
 	const pollfdSize = 8
 	const eventsOff = 4
 	const reventsOff = 6
-	base := unsafe.Pointer(fds)
+	base := Ptr(fds)
 	for i := int64(0); i < nfds; i++ {
-		p := unsafe.Add(base, i*pollfdSize)
-		ev := *(*int16)(unsafe.Add(p, eventsOff))
-		*(*int16)(unsafe.Add(p, reventsOff)) = ev
+		p := Off(base, int(i*pollfdSize))
+		ev := Load[int16](p, eventsOff)
+		Store(p, reventsOff, ev)
 	}
 	return int32(nfds)
 }
@@ -66,10 +66,10 @@ func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 	_ = attr
 	if stackaddr != nil {
 		// Fake stack base.
-		*(*unsafe.Pointer)(unsafe.Pointer(stackaddr)) = unsafe.Pointer(uintptr(0x7fff00000000))
+		Store(Ptr(stackaddr), 0, unsafe.Pointer(uintptr(0x7fff00000000)))
 	}
 	if stacksize != nil {
-		*(*uint64)(unsafe.Pointer(stacksize)) = 8 << 20 // 8 MiB
+		Store[uint64](Ptr(stacksize), 0, 8<<20) // 8 MiB
 	}
 	return 0
 }
@@ -108,7 +108,7 @@ func Fputs(s *byte, stream *os.File) int32 {
 	if stream == nil {
 		return -1
 	}
-	_, err := stream.Write(unsafe.Slice(s, Strlen(s)))
+	_, err := stream.Write(Bytes(s, int(Strlen(s))))
 	if err != nil {
 		return -1
 	}
@@ -239,7 +239,7 @@ func Snprintf(buf *byte, n int64, format *byte, args ...any) int32 {
 	f := fixPrintfFormat(format, args)
 	s := fmt.Sprintf(f, args...)
 	if n > 0 && buf != nil {
-		dst := unsafe.Slice(buf, n)
+		dst := Bytes(buf, int(n))
 		copyLen := len(s)
 		if int64(copyLen) >= n {
 			copyLen = int(n - 1)
@@ -259,7 +259,7 @@ func Snprintf(buf *byte, n int64, format *byte, args ...any) int32 {
 func Vsnprintf(buf *byte, n int64, format *byte, ap *byte) int32 {
 	var args []any
 	if ap != nil {
-		vlPtr := *(**[]interface{})(unsafe.Add(unsafe.Pointer(ap), 8))
+		vlPtr := Load[*[]interface{}](Ptr(ap), 8)
 		if vlPtr != nil {
 			args = append(args, (*vlPtr)...)
 		}

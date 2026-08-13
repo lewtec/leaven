@@ -54,7 +54,7 @@ func init() {
 // StandinVptr is an Itanium vptr into ifstreamVT. vptr-24 is slot 0 (0).
 // Declare-only VTTs store these so inlined dtors do not load nil-24.
 func StandinVptr() unsafe.Pointer {
-	return unsafe.Add(unsafe.Pointer(&ifstreamVT[0]), 3*8)
+	return Off(Ptr(&ifstreamVT[0]), 3*8)
 }
 
 func setIfstreamABI(this *byte, fail, eof bool) {
@@ -167,7 +167,7 @@ func FilebufClose(this *byte) *byte {
 	if this == nil {
 		return nil
 	}
-	owner := (*byte)(unsafe.Add(unsafe.Pointer(this), -filebufOff))
+	owner := As[byte](Off(Ptr(this), -filebufOff))
 	IfstreamClose(owner)
 	return this
 }
@@ -196,7 +196,7 @@ func IosBaseCtor(this *byte) {
 	if this == nil {
 		return
 	}
-	InitOstream(unsafe.Pointer(this))
+	InitOstream(Ptr(this))
 }
 
 // InitOstream writes the stand-in Itanium vptr and ctype<char>.
@@ -262,7 +262,7 @@ func OStringStreamCtor(this *byte) {
 	buf := []byte{}
 	ostringStreams.Store(Addr(this), &buf)
 	// Stand-in vptr only (first word); no ctype slot in this size.
-	*(*unsafe.Pointer)(unsafe.Pointer(this)) = StandinVptr()
+	Store(Ptr(this), 0, StandinVptr())
 }
 
 // StringstreamDefaultCtor is basic_stringstream() used by Variable::new_ctrl_vars.
@@ -379,7 +379,7 @@ func ostreamPrecision(out *byte) int {
 	if out == nil {
 		return 6
 	}
-	p := *(*int64)(unsafe.Add(unsafe.Pointer(out), 8))
+	p := Load[int64](Ptr(out), 8)
 	if p <= 0 {
 		return 6
 	}
@@ -407,7 +407,7 @@ func IosClear(this *byte, state int32) {
 	if this == nil {
 		return
 	}
-	*(*int32)(unsafe.Add(unsafe.Pointer(this), iosStateOff)) = state
+	Store(Ptr(this), iosStateOff, state)
 	if v, ok := streams.Load(Addr(this)); ok {
 		s := v.(*fileStream)
 		s.fail = state&iosFailbit != 0
@@ -584,7 +584,7 @@ func IstreamExtractI32(is *byte, out *byte) *byte {
 	if out == nil {
 		return is
 	}
-	dst := (*int32)(unsafe.Pointer(out))
+	dst := As[int32](Ptr(out))
 	*dst = -1
 	st := stringStreamOf(is)
 	if st == nil {
