@@ -74,8 +74,7 @@ func TestDynamicCastUnknownKindPanics(t *testing.T) {
 
 func TestCxaAtexit(t *testing.T) {
 	cxaHit = 0
-	tmp := cxaTestDtor
-	fn := *(**byte)(unsafe.Pointer(&tmp))
+	fn := As[byte](FuncCode(cxaTestDtor))
 	var obj byte
 	if CxaAtexit(fn, &obj, nil) != 0 {
 		t.Fatal("ret")

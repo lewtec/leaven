@@ -59,6 +59,24 @@ func Bytes(p *byte, n int) []byte {
 	return unsafe.Slice(p, n)
 }
 
+// funcWord is a Go func value: code pointer, then optional data word.
+type funcWord struct {
+	code, data unsafe.Pointer
+}
+
+// FuncCode is the code word of a Go func. Inverse of FuncFromCode.
+// Used for C++ atexit slots and rustc vtable method pointers.
+func FuncCode[F any](fn F) unsafe.Pointer {
+	return Load[unsafe.Pointer](Ptr(&fn), 0)
+}
+
+// FuncFromCode rebuilds a Go func from a code word (nil closure data).
+func FuncFromCode[F any](code unsafe.Pointer) F {
+	var w funcWord
+	w.code = code
+	return Load[F](Ptr(&w), 0)
+}
+
 // GoString returns s converted from a C string to a Go string.
 func GoString(s *byte) string {
 	if s == nil {

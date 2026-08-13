@@ -60,18 +60,15 @@ func runCxaAtExit() {
 }
 
 func invokeCxa(fn, arg *byte) {
-	// Generated calls bitcast a named Go func to unsafe.Pointer (first
-	// word) then *byte. Reconstruct the func value with a nil data word.
-	var words [2]uintptr
-	words[0] = uintptr(unsafe.Pointer(fn))
-	f := *(*func(unsafe.Pointer))(unsafe.Pointer(&words[0]))
-	f(unsafe.Pointer(arg))
+	// IR stores the Go func's code word as *byte. Rebuild and call.
+	f := FuncFromCode[func(unsafe.Pointer)](Ptr(fn))
+	f(Ptr(arg))
 }
 
-func classTypeInfoVptr() unsafe.Pointer   { return unsafe.Pointer(&ClassTypeInfoVT[2]) }
-func siClassTypeInfoVptr() unsafe.Pointer { return unsafe.Pointer(&SIClassTypeInfoVT[2]) }
+func classTypeInfoVptr() unsafe.Pointer   { return Ptr(&ClassTypeInfoVT[2]) }
+func siClassTypeInfoVptr() unsafe.Pointer { return Ptr(&SIClassTypeInfoVT[2]) }
 func vmiClassTypeInfoVptr() unsafe.Pointer {
-	return unsafe.Pointer(&VMIClassTypeInfoVT[2])
+	return Ptr(&VMIClassTypeInfoVT[2])
 }
 
 func typeInfoKind(ti *byte) int {

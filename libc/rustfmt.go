@@ -43,12 +43,11 @@ func rustPrintFormatter() unsafe.Pointer {
 	if !rustPrintFmtInit {
 		rustPrintVtable.size = 8
 		rustPrintVtable.align = 8
-		tmp := rustStdoutWriteStr
-		rustPrintVtable.writeStr = *(*unsafe.Pointer)(unsafe.Pointer(&tmp))
-		rustPrintFmt.vtable = unsafe.Pointer(&rustPrintVtable)
+		rustPrintVtable.writeStr = FuncCode(rustStdoutWriteStr)
+		rustPrintFmt.vtable = Ptr(&rustPrintVtable)
 		rustPrintFmtInit = true
 	}
-	return unsafe.Pointer(&rustPrintFmt)
+	return Ptr(&rustPrintFmt)
 }
 
 // RustPrint is std::io::stdio::_print(template, args).

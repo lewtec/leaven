@@ -518,13 +518,13 @@ func storeScanInt(a any, v uint64, nbytes int) {
 	}
 	switch nbytes {
 	case 1:
-		*(*uint8)(p) = uint8(v)
+		Store[uint8](p, 0, uint8(v))
 	case 2:
-		*(*uint16)(p) = uint16(v)
+		Store[uint16](p, 0, uint16(v))
 	case 4:
-		*(*uint32)(p) = uint32(v)
+		Store[uint32](p, 0, uint32(v))
 	default:
-		*(*uint64)(p) = v
+		Store[uint64](p, 0, v)
 	}
 }
 
@@ -536,21 +536,22 @@ func destData(a any) unsafe.Pointer {
 	case unsafe.Pointer:
 		return v
 	case *byte:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *uint64:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *int64:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *uint32:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *int32:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *uint:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	case *int:
-		return unsafe.Pointer(v)
+		return Ptr(v)
 	default:
+		// Go iface: {typ, data}. Only this scanf path needs the data word.
 		type eface struct{ typ, data unsafe.Pointer }
-		return (*eface)(unsafe.Pointer(&a)).data
+		return As[eface](Ptr(&a)).data
 	}
 }

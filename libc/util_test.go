@@ -35,6 +35,13 @@ func TestPointerKit(t *testing.T) {
 	if GoString(nil) != "" {
 		t.Fatal("gostring nil")
 	}
+	hit := 0
+	fn := func(p unsafe.Pointer) { hit = int(Load[byte](p, 0)) }
+	var x byte = 9
+	FuncFromCode[func(unsafe.Pointer)](FuncCode(fn))(Ptr(&x))
+	if hit != 9 {
+		t.Fatalf("funccode hit=%d", hit)
+	}
 }
 
 func TestArgv(t *testing.T) {
