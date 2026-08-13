@@ -1,0 +1,267 @@
+package libc
+
+import (
+	"crypto/rand"
+	"os"
+	"sync"
+	"sync/atomic"
+	"unsafe"
+)
+
+// errno for the process; __errno_location returns &errnoTLS.
+var errnoTLS int32
+
+// ErrnoLocation is __errno_location.
+func ErrnoLocation() *int32 { return &errnoTLS }
+
+func setErrno(e int32) { atomic.StoreInt32(&errnoTLS, e) }
+
+// fd table: 0/1/2 = stdin/out/err; others are opened files.
+var (
+	fdMu   sync.Mutex
+	fdTab  = map[int32]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
+	fdNext int32 = 3
+)
+
+func fdGet(fd int32) *os.File {
+	fdMu.Lock()
+	defer fdMu.Unlock()
+	return fdTab[fd]
+}
+
+// Open is open/open64(path, flags[, mode]). Returns fd or -1.
+func Open(path *byte, flags int32, mode ...int32) int32 {
+	if path == nil {
+		setErrno(14) // EFAULT
+		return -1
+	}
+	name := GoString(path)
+	// Ignore most flags; O_RDONLY=0, O_WRONLY=1, O_RDWR=2.
+	how := os.O_RDONLY
+	acc := flags & 3
+	switch acc {
+	case 1:
+		how = os.O_WRONLY
+	case 2:
+		how = os.O_RDWR
+	}
+	if flags&64 != 0 { // O_CREAT
+		how |= os.O_CREATE
+	}
+	if flags&512 != 0 { // O_TRUNC
+		how |= os.O_TRUNC
+	}
+	if flags&1024 != 0 { // O_APPEND
+		how |= os.O_APPEND
+	}
+	perm := os.FileMode(0o666)
+	if len(mode) > 0 {
+		perm = os.FileMode(mode[0] & 0o777)
+	}
+	f, err := os.OpenFile(name, how, perm)
+	if err != nil {
+		setErrno(2) // ENOENT-ish
+		return -1
+	}
+	fdMu.Lock()
+	fd := fdNext
+	fdNext++
+	fdTab[fd] = f
+	fdMu.Unlock()
+	return fd
+}
+
+// Open64 is open64 — same as Open.
+func Open64(path *byte, flags int32, mode ...int32) int32 {
+	return Open(path, flags, mode...)
+}
+
+// Close is close(fd).
+func Close(fd int32) int32 {
+	if fd < 3 {
+		return 0
+	}
+	fdMu.Lock()
+	f := fdTab[fd]
+	delete(fdTab, fd)
+	fdMu.Unlock()
+	if f == nil {
+		setErrno(9) // EBADF
+		return -1
+	}
+	if err := f.Close(); err != nil {
+		setErrno(5)
+		return -1
+	}
+	return 0
+}
+
+// Read is read(fd, buf, n).
+func Read(fd int32, buf *byte, n int64) int64 {
+	f := fdGet(fd)
+	if f == nil || buf == nil || n <= 0 {
+		if f == nil {
+			setErrno(9)
+		}
+		return -1
+	}
+	nr, err := f.Read(unsafe.Slice(buf, int(n)))
+	if err != nil && nr == 0 {
+		// EOF → 0
+		return 0
+	}
+	return int64(nr)
+}
+
+// Write is write(fd, buf, n).
+func Write(fd int32, buf *byte, n int64) int64 {
+	f := fdGet(fd)
+	if f == nil || buf == nil {
+		if f == nil {
+			setErrno(9)
+		}
+		return -1
+	}
+	if n <= 0 {
+		return 0
+	}
+	nw, err := f.Write(unsafe.Slice(buf, int(n)))
+	if err != nil {
+		setErrno(5)
+		return -1
+	}
+	return int64(nw)
+}
+
+// Sigaltstack is sigaltstack(2). Report existing stack (flags=0, not
+// SS_DISABLE) so rustc stack_overflow::make_handler skips mmap.
+// stack_t: { void *ss_sp; int ss_flags; size_t ss_size } @0,8,16.
+func Sigaltstack(ss, oss *byte) int32 {
+	if oss != nil {
+		base := unsafe.Pointer(oss)
+		*(**byte)(base) = nil
+		*(*int32)(unsafe.Add(base, 8)) = 0 // not SS_DISABLE
+		*(*uint64)(unsafe.Add(base, 16)) = 0
+	}
+	_ = ss // install accepted
+	return 0
+}
+
+// Mmap64 is mmap64. Anonymous maps use Malloc; MAP_FAILED is (void*)-1.
+func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte {
+	_, _, _, _ = addr, prot, flags, offset
+	if length <= 0 {
+		setErrno(22)
+		return (*byte)(unsafe.Pointer(^uintptr(0)))
+	}
+	// File maps: still allocate; content not filled (rare at startup).
+	_ = fd
+	p := Malloc[byte](length)
+	if p == nil {
+		setErrno(12) // ENOMEM
+		return (*byte)(unsafe.Pointer(^uintptr(0)))
+	}
+	return p
+}
+
+// Munmap is munmap(2).
+func Munmap(addr *byte, length int64) int32 {
+	_ = length
+	if addr != nil {
+		Free(addr)
+	}
+	return 0
+}
+
+// Mprotect is mprotect(2). Always succeeds in this model.
+func Mprotect(addr *byte, length int64, prot int32) int32 {
+	_, _, _ = addr, length, prot
+	return 0
+}
+
+// Getauxval is getauxval(3). AT_MINSIGSTKSZ=51, AT_PAGESIZE=6.
+func Getauxval(typ int64) int64 {
+	switch typ {
+	case 6: // AT_PAGESIZE
+		return 4096
+	case 51: // AT_MINSIGSTKSZ
+		return 2048
+	default:
+		return 0
+	}
+}
+
+// Gettid is gettid(2). Single-threaded: same as pid 1 stand-in.
+func Gettid() int32 { return 1 }
+
+// Getpid is getpid(2).
+func Getpid() int32 { return 1 }
+
+// Getenv is getenv(3). Always nil (no process env for fixtures).
+func Getenv(name *byte) *byte {
+	_ = name
+	return nil
+}
+
+// Getcwd is getcwd(3).
+func Getcwd(buf *byte, size int64) *byte {
+	if buf == nil || size <= 0 {
+		return nil
+	}
+	wd, err := os.Getwd()
+	if err != nil || int64(len(wd)+1) > size {
+		setErrno(34) // ERANGE
+		return nil
+	}
+	dst := unsafe.Slice(buf, int(size))
+	copy(dst, wd)
+	dst[len(wd)] = 0
+	return buf
+}
+
+// Fstat64 is fstat64 — zero-fill and succeed (size fields left 0).
+func Fstat64(fd int32, st *byte) int32 {
+	_ = fd
+	if st != nil {
+		// struct size varies; clear a generous region.
+		Memset(st, 0, 256)
+	}
+	return 0
+}
+
+// Stat64 is stat64 — same as fstat for our needs.
+func Stat64(path *byte, st *byte) int32 {
+	_ = path
+	return Fstat64(0, st)
+}
+
+// Lseek64 is lseek64.
+func Lseek64(fd int32, offset int64, whence int32) int64 {
+	f := fdGet(fd)
+	if f == nil {
+		setErrno(9)
+		return -1
+	}
+	// os.File has Seek
+	n, err := f.Seek(offset, int(whence))
+	if err != nil {
+		setErrno(22)
+		return -1
+	}
+	return n
+}
+
+// Getrandom is getrandom(2).
+func Getrandom(buf *byte, buflen int64, flags int32) int64 {
+	_ = flags
+	if buf == nil || buflen <= 0 {
+		return 0
+	}
+	dst := unsafe.Slice(buf, int(buflen))
+	n, err := rand.Read(dst)
+	if err != nil {
+		setErrno(5)
+		return -1
+	}
+	return int64(n)
+}

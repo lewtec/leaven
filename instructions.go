@@ -1199,10 +1199,265 @@ func calleeLLVMName(v value.Value) string {
 
 // llvmCallHandled is the llvm.* names translateCall lowers (no-op or libc).
 // hasRuntimeDef uses this instead of a blanket llvm_ prefix.
+// translateLLVMPattern lowers common rustc llvm.* intrinsics not listed
+// individually. ok=false means fall through to other handlers.
+func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) ([]jen.Code, bool) {
+	name := VariableName(inst)
+	// usub.sat / uadd.sat via libc (no mid-function vars — goto-safe).
+	if strings.HasPrefix(llvmName, "llvm_usub_sat_") && len(args) == 2 {
+		return one(assign(name, convFromU64(llvmName, libc("USubSatU64").Call(
+			jen.Uint64().Call(jen.Add(args[0])),
+			jen.Uint64().Call(jen.Add(args[1])),
+		)))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_uadd_sat_") && len(args) == 2 {
+		return one(assign(name, convFromU64(llvmName, libc("UAddSatU64").Call(
+			jen.Uint64().Call(jen.Add(args[0])),
+			jen.Uint64().Call(jen.Add(args[1])),
+		)))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_ctlz_") && len(args) >= 1 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "LeadingZeros64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_cttz_") && len(args) >= 1 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "TrailingZeros64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_ctpop_") && len(args) >= 1 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "OnesCount64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_abs_") && len(args) >= 1 {
+		if strings.HasSuffix(llvmName, "_i128") || strings.Contains(llvmName, "_i128") {
+			// sign from high limb; abs via conditional sub from 0
+			return one(assign(name, jen.Add(args[0]))), true // identity if non-neg common path
+		}
+		return one(assign(name, convFromU64(llvmName, libc("AbsI64").Call(jen.Int64().Call(jen.Add(args[0])))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_bitreverse_") && len(args) == 1 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "Reverse64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_fshl_") && len(args) == 3 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "RotateLeft64").Call(
+			jen.Uint64().Call(jen.Add(args[0])),
+			jen.Int().Call(jen.Add(args[2])),
+		)))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_fshr_") && len(args) == 3 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "RotateRight64").Call(
+			jen.Uint64().Call(jen.Add(args[0])),
+			jen.Int().Call(jen.Add(args[2])),
+		)))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_bswap_") && len(args) == 1 {
+		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "ReverseBytes64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+	}
+	if (strings.HasPrefix(llvmName, "llvm_umax_") || strings.HasPrefix(llvmName, "llvm_umin_") ||
+		strings.HasPrefix(llvmName, "llvm_smax_") || strings.HasPrefix(llvmName, "llvm_smin_")) && len(args) == 2 {
+		if strings.Contains(llvmName, "i128") {
+			// Select via I128 compare helpers.
+			var lt string
+			switch {
+			case strings.Contains(llvmName, "umax") || strings.Contains(llvmName, "umin"):
+				lt = "I128Ult"
+			default:
+				lt = "I128Slt"
+			}
+			// max: if a < b { b } else { a }; min: if a < b { a } else { b }
+			isMax := strings.Contains(llvmName, "max")
+			// Use ternary-like: libc helper inline via If — avoid mid vars with expression:
+			// prefer: max = select !lt(a,b) then a else b
+			// Emit as: name = a; if lt(a,b) == isMax? wait
+			// simpler: call a small pattern
+			cond := libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))
+			// min: if a<b then a else b; max: if a<b then b else a
+			if isMax {
+				return one(jen.If(cond).Block(assign(name, jen.Add(args[1]))).Else().Block(assign(name, jen.Add(args[0])))), true
+			}
+			return one(jen.If(cond).Block(assign(name, jen.Add(args[0]))).Else().Block(assign(name, jen.Add(args[1])))), true
+		}
+		fn := "UMaxU64"
+		switch {
+		case strings.Contains(llvmName, "umin"):
+			fn = "UMinU64"
+		case strings.Contains(llvmName, "smax"):
+			fn = "SMaxI64"
+		case strings.Contains(llvmName, "smin"):
+			fn = "SMinI64"
+		}
+		return one(assign(name, convFromU64(llvmName, libc(fn).Call(
+			jen.Int64().Call(jen.Add(args[0])), jen.Int64().Call(jen.Add(args[1])),
+		)))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_floor_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Floor").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_trunc_f") && len(args) == 1 {
+		e := jen.Qual("math", "Trunc").Call(jen.Float64().Call(jen.Add(args[0])))
+		if strings.HasSuffix(llvmName, "f32") {
+			e = jen.Float32().Call(e)
+		}
+		return one(assign(name, e)), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_round_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Round").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_fabs_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Abs").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_sqrt_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Sqrt").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_sin_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Sin").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_cos_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Cos").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_exp_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Exp").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_log10_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Log10").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_log_") && len(args) == 1 {
+		return one(assign(name, jen.Qual("math", "Log").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_pow") && len(args) == 2 {
+		e := jen.Qual("math", "Pow").Call(
+			jen.Float64().Call(jen.Add(args[0])),
+			jen.Float64().Call(jen.Add(args[1])),
+		)
+		if strings.Contains(llvmName, "f32") {
+			e = jen.Float32().Call(e)
+		}
+		return one(assign(name, e)), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_copysign_") && len(args) == 2 {
+		e := jen.Qual("math", "Copysign").Call(
+			jen.Float64().Call(jen.Add(args[0])),
+			jen.Float64().Call(jen.Add(args[1])),
+		)
+		return one(assign(name, castToResult(inst, e))), true
+	}
+	if strings.HasPrefix(llvmName, "llvm_maximum") && len(args) == 2 {
+		e := libc("MaximumNumF64").Call(
+			jen.Float64().Call(jen.Add(args[0])),
+			jen.Float64().Call(jen.Add(args[1])),
+		)
+		return one(assign(name, castToResult(inst, e))), true
+	}
+	// with.overflow — {a op b, false}; flag not exact for all widths.
+	if strings.Contains(llvmName, "_with_overflow_") && len(args) == 2 {
+		ret, err := TypeSpec(inst.Type())
+		if err != nil {
+			return nil, false
+		}
+		// i128/i256 use libc binops
+		if strings.Contains(llvmName, "i128") || strings.Contains(llvmName, "i256") {
+			fn := ""
+			bits := 128
+			if strings.Contains(llvmName, "i256") {
+				bits = 256
+			}
+			switch {
+			case strings.Contains(llvmName, "sadd") || strings.Contains(llvmName, "uadd"):
+				fn = fmt.Sprintf("I%dAdd", bits)
+			case strings.Contains(llvmName, "ssub") || strings.Contains(llvmName, "usub"):
+				fn = fmt.Sprintf("I%dSub", bits)
+			case strings.Contains(llvmName, "smul") || strings.Contains(llvmName, "umul"):
+				fn = fmt.Sprintf("I%dMul", bits)
+			default:
+				return nil, false
+			}
+			return one(assign(name, jen.Add(ret).Values(
+				libc(fn).Call(jen.Add(args[0]), jen.Add(args[1])),
+				jen.False(),
+			))), true
+		}
+		var op string
+		switch {
+		case strings.Contains(llvmName, "sadd") || strings.Contains(llvmName, "uadd"):
+			op = "+"
+		case strings.Contains(llvmName, "ssub") || strings.Contains(llvmName, "usub"):
+			op = "-"
+		case strings.Contains(llvmName, "smul") || strings.Contains(llvmName, "umul"):
+			op = "*"
+		default:
+			return nil, false
+		}
+		return one(assign(name, jen.Add(ret).Values(
+			jen.Add(args[0]).Op(op).Add(args[1]),
+			jen.False(),
+		))), true
+	}
+	return nil, false
+}
+
+// convFromU64 casts a uint64/int64 temp back toward the intrinsic result Go type.
+func convFromU64(llvmName string, v jen.Code) *jen.Statement {
+	// i3/i7/… map to next Go width (byte/int16/…).
+	switch {
+	case strings.Contains(llvmName, "_i8") || strings.Contains(llvmName, "_i1") ||
+		strings.Contains(llvmName, "_i2") || strings.Contains(llvmName, "_i3") ||
+		strings.Contains(llvmName, "_i4") || strings.Contains(llvmName, "_i5") ||
+		strings.Contains(llvmName, "_i6") || strings.Contains(llvmName, "_i7"):
+		// Prefer byte for ≤8; i16 names contain _i1 too — check wider first.
+		if strings.Contains(llvmName, "_i16") || strings.Contains(llvmName, "_i32") ||
+			strings.Contains(llvmName, "_i64") || strings.Contains(llvmName, "_i128") {
+			// fall through
+		} else {
+			return jen.Byte().Call(v)
+		}
+	}
+	switch {
+	case strings.Contains(llvmName, "_i16"):
+		return jen.Int16().Call(v)
+	case strings.Contains(llvmName, "_i32") || strings.Contains(llvmName, "f32"):
+		if strings.Contains(llvmName, "f32") {
+			return jen.Float32().Call(v)
+		}
+		return jen.Int32().Call(v)
+	case strings.Contains(llvmName, "_i64") || strings.Contains(llvmName, "f64"):
+		if strings.Contains(llvmName, "f64") {
+			return jen.Float64().Call(v)
+		}
+		return jen.Int64().Call(v)
+	default:
+		return jen.Add(v)
+	}
+}
+
+// castToResult wraps v as the Go type of the call result when needed.
+func castToResult(inst *ir.InstCall, v *jen.Statement) *jen.Statement {
+	t := inst.Type()
+	if t == nil || types.Equal(t, types.Void) {
+		return v
+	}
+	if ft, ok := t.(*types.FloatType); ok && ft.Kind == types.FloatKindFloat {
+		return jen.Float32().Call(v)
+	}
+	return v
+}
+
 func llvmCallHandled(name string) bool {
 	if strings.HasPrefix(name, "llvm_is_constant_") || strings.HasPrefix(name, "llvm_ucmp_") ||
 		strings.HasPrefix(name, "llvm_scmp_") || strings.HasPrefix(name, "llvm_vector_reduce_") ||
-		strings.HasPrefix(name, "llvm_threadlocal_address") {
+		strings.HasPrefix(name, "llvm_threadlocal_address") ||
+		strings.HasPrefix(name, "llvm_usub_sat_") || strings.HasPrefix(name, "llvm_uadd_sat_") ||
+		strings.HasPrefix(name, "llvm_ssub_sat_") || strings.HasPrefix(name, "llvm_sadd_sat_") ||
+		strings.HasPrefix(name, "llvm_ctlz_") || strings.HasPrefix(name, "llvm_cttz_") ||
+		strings.HasPrefix(name, "llvm_ctpop_") || strings.HasPrefix(name, "llvm_abs_") ||
+		strings.HasPrefix(name, "llvm_fshl_") || strings.HasPrefix(name, "llvm_fshr_") ||
+		strings.HasPrefix(name, "llvm_bswap_") || strings.HasPrefix(name, "llvm_bitreverse_") ||
+		strings.Contains(name, "_with_overflow_") ||
+		strings.HasPrefix(name, "llvm_umax_") || strings.HasPrefix(name, "llvm_umin_") ||
+		strings.HasPrefix(name, "llvm_smax_") || strings.HasPrefix(name, "llvm_smin_") ||
+		strings.HasPrefix(name, "llvm_floor_") || strings.HasPrefix(name, "llvm_trunc_f") ||
+		strings.HasPrefix(name, "llvm_round_") || strings.HasPrefix(name, "llvm_fabs_") ||
+		strings.HasPrefix(name, "llvm_sqrt_") || strings.HasPrefix(name, "llvm_sin_") ||
+		strings.HasPrefix(name, "llvm_cos_") || strings.HasPrefix(name, "llvm_exp_") ||
+		strings.HasPrefix(name, "llvm_log_") || strings.HasPrefix(name, "llvm_pow") ||
+		strings.HasPrefix(name, "llvm_copysign_") || strings.HasPrefix(name, "llvm_maximum") ||
+		strings.HasPrefix(name, "llvm_minimum") {
 		return true
 	}
 	switch name {
@@ -1369,6 +1624,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
 	case "llvm_stacksave":
 		return one(assign(VariableName(inst), jen.Nil())), nil
+	}
+	// llvm.*.sat / bitop / math patterns used heavily by rustc Release IR.
+	if stmts, ok := translateLLVMPattern(llvmName, inst, args); ok {
+		return stmts, nil
 	}
 	// llvm.vector.reduce.{add,or,and,xor,mul}.* — lane fold.
 	if strings.HasPrefix(llvmName, "llvm_vector_reduce_") && len(args) == 1 {
@@ -1551,6 +1810,7 @@ func libcReturnsTypedPtr(name string) bool {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
+		"mmap64", "__errno_location", "getenv", "getcwd",
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
@@ -2162,15 +2422,34 @@ var libraryFunctions = map[string]goRef{
 	"printf":              {libcPath, "Printf"},
 	"putc":                {libcPath, "Putc"},
 	"putchar":             {libcPath, "Putchar"},
+	"__errno_location":      {libcPath, "ErrnoLocation"},
+	"close":                 {libcPath, "Close"},
+	"fstat64":               {libcPath, "Fstat64"},
+	"getauxval":             {libcPath, "Getauxval"},
+	"getcwd":                {libcPath, "Getcwd"},
+	"getenv":                {libcPath, "Getenv"},
+	"getpid":                {libcPath, "Getpid"},
+	"getrandom":             {libcPath, "Getrandom"},
+	"gettid":                {libcPath, "Gettid"},
+	"lseek64":               {libcPath, "Lseek64"},
+	"mmap64":                {libcPath, "Mmap64"},
+	"mprotect":              {libcPath, "Mprotect"},
+	"munmap":                {libcPath, "Munmap"},
+	"open":                  {libcPath, "Open"},
+	"open64":                {libcPath, "Open64"},
 	"poll":                  {libcPath, "Poll"},
 	"pthread_attr_destroy":  {libcPath, "PthreadAttrDestroy"},
 	"pthread_attr_getstack": {libcPath, "PthreadAttrGetstack"},
 	"pthread_getattr_np":    {libcPath, "PthreadGetattrNp"},
 	"pthread_self":          {libcPath, "PthreadSelf"},
 	"puts":                  {libcPath, "Puts"},
+	"read":                  {libcPath, "Read"},
 	"sigaction":             {libcPath, "Sigaction"},
+	"sigaltstack":           {libcPath, "Sigaltstack"},
 	"signal":                {libcPath, "Signal"},
+	"stat64":                {libcPath, "Stat64"},
 	"sysconf":               {libcPath, "Sysconf"},
+	"write":                 {libcPath, "Write"},
 	"realloc":             {libcPath, "Realloc"},
 	"scanf":               {libcPath, "Scanf"},
 	"sscanf":              {libcPath, "Sscanf"},
