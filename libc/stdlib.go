@@ -87,13 +87,19 @@ func Arc4randomBuf(buf *byte, n int64) {
 	}
 }
 
-// Free is C free(p).
+// Free is C free(p). Also accepts RustAlloc / operator new blocks (Go heap
+// pinned in allocs); those must not go to the modernc slab free.
 func Free(p *byte) {
 	if p == nil {
 		return
 	}
+	u := uintptr(unsafe.Pointer(p))
+	if _, ok := allocs.Load(u); ok {
+		RustDealloc(unsafe.Pointer(p), 0, 1)
+		return
+	}
 	allocatorMu.Lock()
-	err := allocator.UintptrFree(uintptr(unsafe.Pointer(p)))
+	err := allocator.UintptrFree(u)
 	allocatorMu.Unlock()
 	if err != nil {
 		return

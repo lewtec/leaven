@@ -95,11 +95,79 @@ func testAssimilateRhai(t *testing.T) {
 		t.Fatalf("no rhai_run-*.ll after cargo rustc (err=%v)", err)
 	}
 
-	script := filepath.Join(t.TempDir(), "probe.rhai")
-	if err := os.WriteFile(script, []byte("print(40 + 2);\n"), 0644); err != nil {
+	// Several scripts on the same leaven'd rhai-run binary. simple is the
+	// smoke case; the rest hit loops, recursion, strings, arrays, maps, float.
+	probes := []struct {
+		name string
+		src  string
+	}{
+		{"simple", "print(40 + 2);\n"},
+		{"arith", "let a = 10;\nlet b = 32;\nprint(a + b);\nprint(a * b);\nprint(a - b);\nprint(b / a);\n"},
+		{"loop", "let sum = 0;\nfor i in 1..=100 {\n    sum += i;\n}\nprint(sum);\n"},
+		{"fn", "fn fib(n) {\n    if n <= 1 { return n; }\n    fib(n-1) + fib(n-2)\n}\nprint(fib(15));\n"},
+		{"string", "let s = \"hello\";\nprint(s);\nprint(s + \" world\");\nprint(s.len());\n"},
+		{"array", "let a = [1, 2, 3, 4, 5];\nlet sum = 0;\nfor x in a {\n    sum += x;\n}\nprint(sum);\nprint(a.len());\n"},
+		{"map", "let m = #{ a: 1, b: 2, c: 3 };\nprint(m.a + m.b + m.c);\n"},
+		{"mixed", "fn fact(n) {\n    if n <= 1 { return 1; }\n    n * fact(n - 1)\n}\nlet xs = [1, 2, 3, 4, 5, 6];\nlet acc = 0;\nfor x in xs {\n    acc += fact(x);\n}\nprint(acc);\nprint(\"done\");\nprint(2.5 * 4.0);\n"},
+	}
+	dir := t.TempDir()
+	// Compile IR once; reuse Go binary across scripts (same as csmith multi-seed).
+	// crossCheck recompiles each time — too slow for 8 scripts. Build once.
+	ll := matches[0]
+	m, err := parseIRFile(ll)
+	if err != nil {
+		t.Fatalf("parse %s: %v\n%s", filepath.Base(ll), err, irSnippet(ll, err))
+	}
+	var buf bytes.Buffer
+	if err := Compile(&buf, m, "main"); err != nil {
+		t.Fatalf("compile %s: %v", filepath.Base(ll), err)
+	}
+	src, err := format.Source(buf.Bytes())
+	if err != nil {
+		t.Fatalf("gofmt %s: %v", filepath.Base(ll), err)
+	}
+	goDir := filepath.Join(dir, "go")
+	if err := os.MkdirAll(goDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	crossCheck(t, native, matches[0], []string{script})
+	if err := os.WriteFile(filepath.Join(goDir, "main.go"), src, 0644); err != nil {
+		t.Fatal(err)
+	}
+	modRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod := fmt.Sprintf("module leavenfixture\n\ngo 1.22\n\nrequire github.com/lewtec/leaven v0.0.0\n\nreplace github.com/lewtec/leaven => %s\n", modRoot)
+	if err := os.WriteFile(filepath.Join(goDir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = goDir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, tailBytes(out, 2000))
+	}
+	bin := filepath.Join(goDir, "leaven.bin")
+	gobuild := exec.Command("go", "build", "-o", bin, ".")
+	gobuild.Dir = goDir
+	if out, err := gobuild.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, clipEnds(out, 4000))
+	}
+
+	for _, p := range probes {
+		p := p
+		t.Run(p.name, func(t *testing.T) {
+			script := filepath.Join(dir, p.name+".rhai")
+			if err := os.WriteFile(script, []byte(p.src), 0644); err != nil {
+				t.Fatal(err)
+			}
+			want := runTimeout(t, 30*time.Second, native, script)
+			got := runTimeout(t, 3*time.Minute, bin, script)
+			if !bytes.Equal(want, got) {
+				t.Fatalf("native vs leaven mismatch\n---- native (%d) ----\n%s\n---- leaven (%d) ----\n%s",
+					len(want), tailBytes(want, 1500), len(got), tailBytes(got, 1500))
+			}
+		})
+	}
 }
 
 type compileCommand struct {
