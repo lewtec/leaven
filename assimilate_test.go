@@ -316,7 +316,8 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 		_ = build.Process.Kill()
 		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
-	return runTimeout(t, 30*time.Second, bin, args...)
+	// -O0 csmith Go is much slower than native; seed=1 can exceed 30s.
+	return runTimeout(t, 3*time.Minute, bin, args...)
 }
 
 func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byte {
