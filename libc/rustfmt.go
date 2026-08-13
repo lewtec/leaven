@@ -12,6 +12,45 @@ const rustArgSize = 16
 
 type rustFmtFn func(val, formatter unsafe.Pointer) bool
 
+// write_str method: fn(*mut W, *const u8, usize) -> bool (Ok=false).
+type rustWriteStrFn func(w, data unsafe.Pointer, n int64) bool
+
+func rustStdoutWriteStr(_ unsafe.Pointer, data unsafe.Pointer, n int64) bool {
+	if data != nil && n > 0 {
+		os.Stdout.Write(unsafe.Slice((*byte)(data), int(n)))
+	}
+	return false
+}
+
+// Minimal Formatter for RustPrint: flags=0 so pad takes the write_str path.
+// Layout: { data:ptr, vtable:ptr, flags:i32, … } — first 24 bytes matter.
+var (
+	rustPrintVtable struct {
+		drop                  unsafe.Pointer
+		size, align           uint64
+		writeStr, writeChar, writeFmt unsafe.Pointer
+	}
+	rustPrintFmt struct {
+		data   unsafe.Pointer
+		vtable unsafe.Pointer
+		flags  int32
+		_pad   [4]byte
+	}
+	rustPrintFmtInit bool
+)
+
+func rustPrintFormatter() unsafe.Pointer {
+	if !rustPrintFmtInit {
+		rustPrintVtable.size = 8
+		rustPrintVtable.align = 8
+		tmp := rustStdoutWriteStr
+		rustPrintVtable.writeStr = *(*unsafe.Pointer)(unsafe.Pointer(&tmp))
+		rustPrintFmt.vtable = unsafe.Pointer(&rustPrintVtable)
+		rustPrintFmtInit = true
+	}
+	return unsafe.Pointer(&rustPrintFmt)
+}
+
 // RustPrint is std::io::stdio::_print(template, args).
 // Template encoding: rustc 1.97 fmt::Arguments (byte pieces + 0xC0 placeholders).
 func RustPrint(tmpl, args unsafe.Pointer) {
@@ -20,6 +59,7 @@ func RustPrint(tmpl, args unsafe.Pointer) {
 	}
 	p := tmpl
 	next := 0
+	formatter := rustPrintFormatter()
 	for {
 		n := *(*byte)(p)
 		p = unsafe.Add(p, 1)
@@ -64,8 +104,7 @@ func RustPrint(tmpl, args unsafe.Pointer) {
 		slot := unsafe.Add(args, idx*rustArgSize)
 		val := *(*unsafe.Pointer)(slot)
 		fn := *(*rustFmtFn)(unsafe.Add(slot, 8))
-		var dummy [24]byte
-		fn(val, unsafe.Pointer(&dummy[0]))
+		fn(val, formatter)
 	}
 }
 

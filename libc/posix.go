@@ -3,6 +3,7 @@ package libc
 import (
 	"crypto/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -217,6 +218,124 @@ func Getcwd(buf *byte, size int64) *byte {
 	copy(dst, wd)
 	dst[len(wd)] = 0
 	return buf
+}
+
+// PATH_MAX for realpath resolved buffer when resolved is non-nil.
+const pathMax = 4096
+
+// Dlsym is dlsym(3). Always nil so rust getrandom uses the file backend
+// (calling a Go func through a C fnptr cast is not defined).
+func Dlsym(handle, name *byte) *byte {
+	_, _ = handle, name
+	return nil
+}
+
+// Linux x86_64 syscall numbers used by rustc std / getrandom.
+const (
+	sysGettid = 186
+	sysFutex  = 202
+	sysStatx  = 332
+)
+
+// Syscall is the libc syscall(2) shim for a few numbers rustc needs.
+// Single-threaded: futex wait/wake are no-ops that succeed.
+func Syscall(nr int64, args ...interface{}) int64 {
+	switch nr {
+	case sysGettid:
+		return int64(Gettid())
+	case sysFutex:
+		// futex(uaddr, op, val, timeout, uaddr2, val3) — ignore, single-thread.
+		return 0
+	case sysStatx:
+		// statx(dirfd, path, flags, mask, statxbuf)
+		var path *byte
+		var buf *byte
+		var dirfd, flags, mask int32
+		if len(args) > 0 {
+			dirfd = syscallI32(args[0])
+		}
+		if len(args) > 1 {
+			path = syscallBytePtr(args[1])
+		}
+		if len(args) > 2 {
+			flags = syscallI32(args[2])
+		}
+		if len(args) > 3 {
+			mask = syscallI32(args[3])
+		}
+		if len(args) > 4 {
+			buf = syscallBytePtr(args[4])
+		}
+		return int64(Statx(dirfd, path, flags, mask, buf))
+	default:
+		setErrno(38) // ENOSYS
+		return -1
+	}
+}
+
+func syscallI32(v interface{}) int32 {
+	switch x := v.(type) {
+	case int32:
+		return x
+	case int64:
+		return int32(x)
+	case int:
+		return int32(x)
+	default:
+		return 0
+	}
+}
+
+func syscallBytePtr(v interface{}) *byte {
+	switch x := v.(type) {
+	case *byte:
+		return x
+	case unsafe.Pointer:
+		return (*byte)(x)
+	case nil:
+		return nil
+	default:
+		return nil
+	}
+}
+
+// Realpath is realpath(3). resolved nil → malloc; else write into pathMax buf.
+func Realpath(path *byte, resolved *byte) *byte {
+	if path == nil {
+		setErrno(14) // EFAULT
+		return nil
+	}
+	abs, err := filepath.Abs(GoString(path))
+	if err != nil {
+		setErrno(2) // ENOENT-ish
+		return nil
+	}
+	// Clean + require the path to exist (glibc realpath does).
+	abs = filepath.Clean(abs)
+	if _, err := os.Stat(abs); err != nil {
+		setErrno(2)
+		return nil
+	}
+	need := len(abs) + 1
+	if resolved == nil {
+		buf := Malloc[byte](int64(need))
+		if buf == nil {
+			setErrno(12) // ENOMEM
+			return nil
+		}
+		dst := unsafe.Slice(buf, need)
+		copy(dst, abs)
+		dst[len(abs)] = 0
+		return buf
+	}
+	if need > pathMax {
+		setErrno(36) // ENAMETOOLONG
+		return nil
+	}
+	dst := unsafe.Slice(resolved, pathMax)
+	copy(dst, abs)
+	dst[len(abs)] = 0
+	return resolved
 }
 
 // Fstat64 is fstat64 — zero-fill and succeed (size fields left 0).

@@ -146,30 +146,32 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		name := VariableName(inst)
+		// Force align ≥8 so pointers never have LSB set (Rust niches / tagged
+		// ptrs). new([0]byte) and new(struct{}) can be 1-byte aligned.
+		allocAlign8 := func(elem *jen.Statement) *jen.Statement {
+			return unsafePtr(addrOf(jen.New(jen.Struct(
+				jen.Id("_").Index(jen.Lit(0)).Uint64(),
+				jen.Id("v").Add(elem),
+				jen.Id("b").Byte(),
+			)).Dot("v")))
+		}
 		if inst.NElems == nil {
-			if _, ok := inst.ElemType.(*types.ArrayType); ok {
-				// If it's an array, allocate an extra byte to allow indexing off the end.
-				return one(assign(name, unsafePtr(addrOf(jen.New(jen.Struct(
-					jen.Id("v").Add(t),
-					jen.Id("b").Byte(),
-				)).Dot("v"))))), nil
-			}
-			newExpr := jen.New(t)
 			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return one(assign(name, uintptrOfPtr(libc("Retain").Call(newExpr)))), nil
+				return one(assign(name, uintptrOfPtr(libc("Retain").Call(jen.New(t))))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				return one(assign(name, unsafePtr(jen.New(jen.Uintptr())))), nil
+				return one(assign(name, allocAlign8(jen.Uintptr()))), nil
 			}
-			return one(assign(name, unsafePtr(newExpr))), nil
+			return one(assign(name, allocAlign8(t))), nil
 		}
 		nElems, err := translateOp(inst.NElems, "NElems")
 		if err != nil {
 			return nil, err
 		}
+		// Dynamic array: pad length and pin first element (already slice-aligned).
 		return one(assign(name, unsafePtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
 
 	case *ir.InstAnd:
@@ -1810,7 +1812,7 @@ func libcReturnsTypedPtr(name string) bool {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
-		"mmap64", "__errno_location", "getenv", "getcwd",
+		"mmap64", "__errno_location", "getenv", "getcwd", "realpath", "dlsym",
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
@@ -2415,6 +2417,7 @@ var libraryFunctions = map[string]goRef{
 	"llvm_pow_f64":        {"math", "Pow"},
 	"memchr":              {libcPath, "Memchr"},
 	"memcmp":              {libcPath, "Memcmp"},
+	"bcmp":                {libcPath, "Memcmp"},
 	"__memcpy_chk":        {libcPath, "MemcpyChk"},
 	"memmove":             {libcPath, "Memmove"},
 	"memset_pattern16":    {libcPath, "MemsetPattern16"},
@@ -2424,6 +2427,7 @@ var libraryFunctions = map[string]goRef{
 	"putchar":             {libcPath, "Putchar"},
 	"__errno_location":      {libcPath, "ErrnoLocation"},
 	"close":                 {libcPath, "Close"},
+	"dlsym":                 {libcPath, "Dlsym"},
 	"fstat64":               {libcPath, "Fstat64"},
 	"getauxval":             {libcPath, "Getauxval"},
 	"getcwd":                {libcPath, "Getcwd"},
@@ -2444,11 +2448,13 @@ var libraryFunctions = map[string]goRef{
 	"pthread_self":          {libcPath, "PthreadSelf"},
 	"puts":                  {libcPath, "Puts"},
 	"read":                  {libcPath, "Read"},
+	"realpath":              {libcPath, "Realpath"},
 	"sigaction":             {libcPath, "Sigaction"},
 	"sigaltstack":           {libcPath, "Sigaltstack"},
 	"signal":                {libcPath, "Signal"},
 	"stat64":                {libcPath, "Stat64"},
 	"sysconf":               {libcPath, "Sysconf"},
+	"syscall":               {libcPath, "Syscall"},
 	"write":                 {libcPath, "Write"},
 	"realloc":             {libcPath, "Realloc"},
 	"scanf":               {libcPath, "Scanf"},
