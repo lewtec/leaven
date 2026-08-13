@@ -106,7 +106,7 @@ func Read(fd int32, buf *byte, n int64) int64 {
 		}
 		return -1
 	}
-	nr, err := f.Read(unsafe.Slice(buf, int(n)))
+	nr, err := f.Read(Bytes(buf, int(n)))
 	if err != nil && nr == 0 {
 		// EOF → 0
 		return 0
@@ -126,7 +126,7 @@ func Write(fd int32, buf *byte, n int64) int64 {
 	if n <= 0 {
 		return 0
 	}
-	nw, err := f.Write(unsafe.Slice(buf, int(n)))
+	nw, err := f.Write(Bytes(buf, int(n)))
 	if err != nil {
 		setErrno(5)
 		return -1
@@ -214,7 +214,7 @@ func Getcwd(buf *byte, size int64) *byte {
 		setErrno(34) // ERANGE
 		return nil
 	}
-	dst := unsafe.Slice(buf, int(size))
+	dst := Bytes(buf, int(size))
 	copy(dst, wd)
 	dst[len(wd)] = 0
 	return buf
@@ -323,7 +323,7 @@ func Realpath(path *byte, resolved *byte) *byte {
 			setErrno(12) // ENOMEM
 			return nil
 		}
-		dst := unsafe.Slice(buf, need)
+		dst := Bytes(buf, need)
 		copy(dst, abs)
 		dst[len(abs)] = 0
 		return buf
@@ -332,7 +332,7 @@ func Realpath(path *byte, resolved *byte) *byte {
 		setErrno(36) // ENAMETOOLONG
 		return nil
 	}
-	dst := unsafe.Slice(resolved, pathMax)
+	dst := Bytes(resolved, pathMax)
 	copy(dst, abs)
 	dst[len(abs)] = 0
 	return resolved
@@ -376,7 +376,7 @@ func Getrandom(buf *byte, buflen int64, flags int32) int64 {
 	if buf == nil || buflen <= 0 {
 		return 0
 	}
-	dst := unsafe.Slice(buf, int(buflen))
+	dst := Bytes(buf, int(buflen))
 	n, err := rand.Read(dst)
 	if err != nil {
 		setErrno(5)

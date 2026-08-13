@@ -61,8 +61,8 @@ func setIfstreamABI(this *byte, fail, eof bool) {
 	if this == nil {
 		return
 	}
-	base := unsafe.Pointer(this)
-	*(*unsafe.Pointer)(base) = StandinVptr()
+	base := Ptr(this)
+	Store(base, 0, StandinVptr())
 	st := int32(0)
 	if fail {
 		st |= iosFailbit
@@ -70,14 +70,14 @@ func setIfstreamABI(this *byte, fail, eof bool) {
 	if eof {
 		st |= iosEofbit
 	}
-	*(*int32)(unsafe.Add(base, iosStateOff)) = st
+	Store(base, iosStateOff, st)
 }
 
 func streamOf(this *byte) *fileStream {
 	if this == nil {
 		return &fileStream{fail: true}
 	}
-	if v, ok := streams.Load(uintptr(unsafe.Pointer(this))); ok {
+	if v, ok := streams.Load(Addr(this)); ok {
 		return v.(*fileStream)
 	}
 	return &fileStream{fail: true}
@@ -101,7 +101,7 @@ func IfstreamOpen(this *byte, path *byte, mode int32) {
 			}
 		}
 	}
-	streams.Store(uintptr(unsafe.Pointer(this)), st)
+	streams.Store(Addr(this), st)
 	setIfstreamABI(this, st.fail, st.eof)
 }
 
@@ -145,7 +145,7 @@ func IfstreamClose(this *byte) {
 	if this == nil {
 		return
 	}
-	if v, ok := streams.LoadAndDelete(uintptr(unsafe.Pointer(this))); ok {
+	if v, ok := streams.LoadAndDelete(Addr(this)); ok {
 		s := v.(*fileStream)
 		if s.f != nil {
 			_ = s.f.Close()
@@ -206,8 +206,8 @@ func InitOstream(this unsafe.Pointer) {
 	if this == nil {
 		return
 	}
-	*(*unsafe.Pointer)(this) = StandinVptr()
-	*(*unsafe.Pointer)(unsafe.Add(this, iosCtypeOff)) = unsafe.Pointer(&standinCtype[0])
+	Store(this, 0, StandinVptr())
+	Store(this, iosCtypeOff, Ptr(&standinCtype[0]))
 }
 
 // CtypeWidenInit is ctype<char>::_M_widen_init. Identity table, widen_ok=1.
@@ -215,9 +215,9 @@ func CtypeWidenInit(this *byte) {
 	if this == nil {
 		return
 	}
-	base := unsafe.Pointer(this)
-	*(*byte)(unsafe.Add(base, ctypeWidenOkOff)) = 1
-	tab := unsafe.Slice((*byte)(unsafe.Add(base, ctypeWidenTabOff)), 256)
+	base := Ptr(this)
+	Store[byte](base, ctypeWidenOkOff, 1)
+	tab := Bytes(As[byte](Off(base, ctypeWidenTabOff)), 256)
 	for i := range tab {
 		tab[i] = byte(i)
 	}
@@ -231,7 +231,7 @@ func ostringBuf(out *byte) *[]byte {
 	if out == nil {
 		return nil
 	}
-	if v, ok := ostringStreams.Load(uintptr(unsafe.Pointer(out))); ok {
+	if v, ok := ostringStreams.Load(Addr(out)); ok {
 		return v.(*[]byte)
 	}
 	return nil
@@ -260,7 +260,7 @@ func OStringStreamCtor(this *byte) {
 		return
 	}
 	buf := []byte{}
-	ostringStreams.Store(uintptr(unsafe.Pointer(this)), &buf)
+	ostringStreams.Store(Addr(this), &buf)
 	// Stand-in vptr only (first word); no ctype slot in this size.
 	*(*unsafe.Pointer)(unsafe.Pointer(this)) = StandinVptr()
 }
@@ -272,7 +272,7 @@ func StringstreamDefaultCtor(this *byte) {
 		return
 	}
 	buf := []byte{}
-	base := uintptr(unsafe.Pointer(this))
+	base := Addr(this)
 	ostringStreams.Store(base, &buf)
 	ostringStreams.Store(base+stringstreamOstreamOff, &buf)
 }
@@ -282,7 +282,7 @@ func OStringStreamClose(this *byte) {
 	if this == nil {
 		return
 	}
-	ostringStreams.Delete(uintptr(unsafe.Pointer(this)))
+	ostringStreams.Delete(Addr(this))
 }
 
 // StringstreamDefaultClose is basic_stringstream dtor (default or string ctor).
@@ -290,7 +290,7 @@ func StringstreamDefaultClose(this *byte) {
 	if this == nil {
 		return
 	}
-	base := uintptr(unsafe.Pointer(this))
+	base := Addr(this)
 	ostringStreams.Delete(base)
 	ostringStreams.Delete(base + stringstreamOstreamOff)
 	// Also drop the read-side table used by str2int.
@@ -318,7 +318,7 @@ func StringstreamStr(ret, this *byte) { OStringStreamStr(ret, this) }
 // is cout); registered ostringstreams append.
 func OstreamInsert(out *byte, s *byte, n int64) *byte {
 	if s != nil && n > 0 {
-		writeOstream(out, unsafe.Slice(s, int(n)))
+		writeOstream(out, Bytes(s, int(n)))
 	}
 	return out
 }
@@ -332,7 +332,7 @@ func OstreamEndl(out *byte) *byte {
 // OstreamLsCStr is operator<<(ostream&, char const*).
 func OstreamLsCStr(out *byte, s *byte) *byte {
 	if s != nil {
-		writeOstream(out, unsafe.Slice(s, int(Strlen(s))))
+		writeOstream(out, Bytes(s, int(Strlen(s))))
 	}
 	return out
 }
@@ -408,7 +408,7 @@ func IosClear(this *byte, state int32) {
 		return
 	}
 	*(*int32)(unsafe.Add(unsafe.Pointer(this), iosStateOff)) = state
-	if v, ok := streams.Load(uintptr(unsafe.Pointer(this))); ok {
+	if v, ok := streams.Load(Addr(this)); ok {
 		s := v.(*fileStream)
 		s.fail = state&iosFailbit != 0
 		s.eof = state&iosEofbit != 0
@@ -429,10 +429,10 @@ func IstreamGetline(is, str *byte) *byte {
 	if is == nil {
 		return is
 	}
-	v, ok := streams.Load(uintptr(unsafe.Pointer(is)))
+	v, ok := streams.Load(Addr(is))
 	if !ok {
 		st := &fileStream{fail: true, eof: true}
-		streams.Store(uintptr(unsafe.Pointer(is)), st)
+		streams.Store(Addr(is), st)
 		setIfstreamABI(is, true, true)
 		return is
 	}
@@ -478,34 +478,34 @@ func cxxStringAssign(s *byte, data []byte) {
 	if s == nil {
 		return
 	}
-	base := unsafe.Pointer(s)
-	local := (*byte)(unsafe.Add(base, cxxStringLocalOff))
-	old := *(**byte)(base)
+	base := Ptr(s)
+	local := As[byte](Off(base, cxxStringLocalOff))
+	old := Load[*byte](base, 0)
 	if old != nil && old != local {
-		RustDealloc(unsafe.Pointer(old), 0, 1)
+		RustDealloc(Ptr(old), 0, 1)
 	}
 	n := len(data)
 	if n <= cxxStringSSO {
-		dst := unsafe.Slice(local, cxxStringSSO+1)
+		dst := Bytes(local, cxxStringSSO+1)
 		copy(dst, data)
 		dst[n] = 0
-		*(**byte)(base) = local
-		*(*int64)(unsafe.Add(base, cxxStringLenOff)) = int64(n)
+		Store(base, 0, local)
+		Store[int64](base, cxxStringLenOff, int64(n))
 		return
 	}
 	p := RustAlloc(int64(n+1), 1)
 	if p == nil {
 		*local = 0
-		*(**byte)(base) = local
-		*(*int64)(unsafe.Add(base, cxxStringLenOff)) = 0
+		Store(base, 0, local)
+		Store[int64](base, cxxStringLenOff, 0)
 		return
 	}
-	dst := unsafe.Slice((*byte)(p), n+1)
+	dst := Bytes(As[byte](p), n+1)
 	copy(dst, data)
 	dst[n] = 0
-	*(**byte)(base) = (*byte)(p)
-	*(*int64)(unsafe.Add(base, cxxStringLenOff)) = int64(n)
-	*(*uint64)(unsafe.Add(base, cxxStringLocalOff)) = uint64(n)
+	Store(base, 0, As[byte](p))
+	Store[int64](base, cxxStringLenOff, int64(n))
+	Store[uint64](base, cxxStringLocalOff, uint64(n))
 }
 
 // cxxStringBytes reads a libstdc++ __cxx11::basic_string into a Go slice.
@@ -513,13 +513,13 @@ func cxxStringBytes(s *byte) []byte {
 	if s == nil {
 		return nil
 	}
-	base := unsafe.Pointer(s)
-	p := *(**byte)(base)
-	n := *(*int64)(unsafe.Add(base, cxxStringLenOff))
+	base := Ptr(s)
+	p := Load[*byte](base, 0)
+	n := Load[int64](base, cxxStringLenOff)
 	if p == nil || n <= 0 {
 		return nil
 	}
-	return unsafe.Slice(p, int(n))
+	return Bytes(p, int(n))
 }
 
 // stringStream is one C++ stringstream. Keyed by object address; content
@@ -538,7 +538,7 @@ func stringStreamOf(this *byte) *stringStream {
 	if this == nil {
 		return nil
 	}
-	if v, ok := stringStreams.Load(uintptr(unsafe.Pointer(this))); ok {
+	if v, ok := stringStreams.Load(Addr(this)); ok {
 		return v.(*stringStream)
 	}
 	return nil
@@ -554,7 +554,7 @@ func StringstreamCtor(this *byte, str *byte, mode int32) {
 	}
 	data := append([]byte(nil), cxxStringBytes(str)...)
 	st := &stringStream{buf: data, base: 10}
-	stringStreams.Store(uintptr(unsafe.Pointer(this)), st)
+	stringStreams.Store(Addr(this), st)
 	// Stand-in vptr + clear iostate (fail/eof slots at +32 fit in 128).
 	setIfstreamABI(this, false, false)
 }
@@ -564,7 +564,7 @@ func StringstreamClose(this *byte) {
 	if this == nil {
 		return
 	}
-	stringStreams.Delete(uintptr(unsafe.Pointer(this)))
+	stringStreams.Delete(Addr(this))
 	setIfstreamABI(this, true, false)
 }
 

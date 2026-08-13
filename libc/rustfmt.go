@@ -61,22 +61,22 @@ func RustPrint(tmpl, args unsafe.Pointer) {
 	next := 0
 	formatter := rustPrintFormatter()
 	for {
-		n := *(*byte)(p)
-		p = unsafe.Add(p, 1)
+		n := Load[byte](p, 0)
+		p = Off(p, 1)
 		if n == 0 {
 			return
 		}
 		if n < 128 {
-			os.Stdout.Write(unsafe.Slice((*byte)(p), int(n)))
-			p = unsafe.Add(p, int(n))
+			os.Stdout.Write(Bytes(As[byte](p), int(n)))
+			p = Off(p, int(n))
 			continue
 		}
 		if n == 128 {
-			lenb := unsafe.Slice((*byte)(p), 2)
+			lenb := Bytes(As[byte](p), 2)
 			nlen := int(lenb[0]) | int(lenb[1])<<8
-			p = unsafe.Add(p, 2)
-			os.Stdout.Write(unsafe.Slice((*byte)(p), nlen))
-			p = unsafe.Add(p, nlen)
+			p = Off(p, 2)
+			os.Stdout.Write(Bytes(As[byte](p), nlen))
+			p = Off(p, nlen)
 			continue
 		}
 		if n < 0xC0 {
@@ -94,16 +94,16 @@ func RustPrint(tmpl, args unsafe.Pointer) {
 		}
 		idx := next
 		if n&8 != 0 {
-			ib := unsafe.Slice((*byte)(unsafe.Add(p, skip)), 2)
+			ib := Bytes(As[byte](Off(p, skip)), 2)
 			idx = int(ib[0]) | int(ib[1])<<8
 			skip += 2
 		} else {
 			next++
 		}
-		p = unsafe.Add(p, skip)
-		slot := unsafe.Add(args, idx*rustArgSize)
-		val := *(*unsafe.Pointer)(slot)
-		fn := *(*rustFmtFn)(unsafe.Add(slot, 8))
+		p = Off(p, skip)
+		slot := Off(args, idx*rustArgSize)
+		val := Load[unsafe.Pointer](slot, 0)
+		fn := Load[rustFmtFn](slot, 8)
 		fn(val, formatter)
 	}
 }
