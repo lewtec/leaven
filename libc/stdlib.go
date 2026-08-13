@@ -54,15 +54,11 @@ func Calloc[T any](count, size int64) *T {
 	if n == 0 {
 		n = 1
 	}
-	allocatorMu.Lock()
-	p, err := allocator.UintptrCalloc(int(n))
-	if err != nil || p == 0 {
-		allocatorMu.Unlock()
+	p := xmalloc(n)
+	if p == 0 {
 		return nil
 	}
-	// slabLive under the same lock as freelist so reuse cannot race map updates.
-	slabLive.Store(p, struct{}{})
-	allocatorMu.Unlock()
+	clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), int(n)))
 	return (*T)(unsafe.Pointer(p))
 }
 
