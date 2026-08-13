@@ -35,6 +35,57 @@ func Poll(fds *byte, nfds int64, timeout int32) int32 {
 	return int32(nfds)
 }
 
+// Signal is signal(2). Returns previous disposition (pretend SIG_DFL=0).
+// rhai-run ignores SIGPIPE (13) with SIG_IGN (1).
+func Signal(sig int32, handler int64) int64 {
+	_, _ = sig, handler
+	return 0
+}
+
+// Sysconf is sysconf(3). Linux _SC_PAGESIZE is 30.
+func Sysconf(name int32) int64 {
+	switch name {
+	case 30: // _SC_PAGESIZE
+		return 4096
+	default:
+		return -1
+	}
+}
+
+// PthreadSelf is pthread_self. Single-threaded: fixed non-zero id.
+func PthreadSelf() int64 { return 1 }
+
+// PthreadGetattrNp fills a dummy attr (stack base/size via getstack).
+func PthreadGetattrNp(thread int64, attr *byte) int32 {
+	_, _ = thread, attr
+	return 0
+}
+
+// PthreadAttrGetstack reports a synthetic stack for stack-overflow guards.
+func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
+	_ = attr
+	if stackaddr != nil {
+		// Fake stack base.
+		*(*unsafe.Pointer)(unsafe.Pointer(stackaddr)) = unsafe.Pointer(uintptr(0x7fff00000000))
+	}
+	if stacksize != nil {
+		*(*uint64)(unsafe.Pointer(stacksize)) = 8 << 20 // 8 MiB
+	}
+	return 0
+}
+
+// PthreadAttrDestroy is a no-op for the dummy attr.
+func PthreadAttrDestroy(attr *byte) int32 {
+	_ = attr
+	return 0
+}
+
+// Sigaction is sigaction(2). No-op success for rhai-run startup.
+func Sigaction(signum int32, act, oldact *byte) int32 {
+	_, _, _ = signum, act, oldact
+	return 0
+}
+
 func Putc(c int32, stream *os.File) int32 {
 	_, err := stream.Write([]byte{byte(c)})
 	if err != nil {
