@@ -37,7 +37,7 @@ func TestQual(t *testing.T) {
 		t.Fatalf("os.File: %s", got)
 	}
 	f := jen.NewFile("p")
-	f.Var().Id("x").Op("=").Add(libcT(libc.As[byte], Qual[byte](), jen.Id("p")))
+	f.Var().Id("x").Op("=").Add(emitAs(Qual[byte](), jen.Id("p")))
 	var buf bytes.Buffer
 	if err := f.Render(&buf); err != nil {
 		t.Fatal(err)

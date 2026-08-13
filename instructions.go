@@ -1538,7 +1538,9 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		}
 	case "llvm_va_start":
 		if len(args) == 1 {
-			return one(emitStore(Qual[unsafe.Pointer](), args[0], jen.Lit(8), emitPtr(addrOf(jen.Id("varargs"))))), nil
+			return one(Sym(libc.Store[unsafe.Pointer]).Types(Qual[unsafe.Pointer]()).Call(
+				args[0], jen.Lit(8), emitPtr(addrOf(jen.Id("varargs"))),
+			)), nil
 		}
 	case "llvm_va_end", "llvm_lifetime_start", "llvm_lifetime_end", "llvm_stackrestore":
 		return nil, nil
@@ -1792,7 +1794,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
 			}
-			callee = libcT(libc.FuncFromCode[func()], ft, fn)
+			callee = Sym(libc.FuncFromCode[func()]).Types(ft).Call(fn)
 		}
 	}
 

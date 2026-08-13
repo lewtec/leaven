@@ -166,19 +166,12 @@ func reflectType(t reflect.Type) *jen.Statement {
 	}
 }
 
-// libcT is fn[t](args…). fn is a libc generic (As, Load, …). t is Qual[T]() or TypeSpec.
-func libcT(fn any, t jen.Code, args ...jen.Code) *jen.Statement {
-	return Sym(fn).Types(t).Call(args...)
-}
-
 var (
 	symPtr    = Sym(libc.Ptr[byte])
 	symAs     = Sym(libc.As[byte])
 	symAddr   = Sym(libc.Addr[byte])
 	symOff    = Sym(libc.Off)
 	symAddPtr = Sym(libc.AddPointer[byte])
-	symLoad   = Sym(libc.Load[byte])
-	symStore  = Sym(libc.Store[byte])
 )
 
 // emitPtr is libc.Ptr(p) — (void *)p.
@@ -204,16 +197,6 @@ func emitOff(p, n jen.Code) *jen.Statement {
 // emitAddPtr is libc.AddPointer[T](p, i).
 func emitAddPtr(t, p, i jen.Code) *jen.Statement {
 	return symAddPtr.Types(t).Call(p, i)
-}
-
-// emitLoad is libc.Load[T](p, off).
-func emitLoad(t, p, off jen.Code) *jen.Statement {
-	return symLoad.Types(t).Call(p, off)
-}
-
-// emitStore is libc.Store[T](p, off, v).
-func emitStore(t, p, off, v jen.Code) *jen.Statement {
-	return symStore.Types(t).Call(p, off, v)
 }
 
 // emitUP is unsafe.Pointer(x) for integer bit patterns (inttoptr),
