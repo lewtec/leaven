@@ -2,6 +2,7 @@ package leaven
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/enum"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 // moduleFuncNames / moduleTypeNames are filled by collectModuleNames so locals
@@ -225,7 +227,7 @@ func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
 }
 
 func fnPtrBitcast(from *jen.Statement) *jen.Statement {
-	return libc("FuncCode").Call(from)
+	return Sym(libc.FuncCode[func()]).Call(from)
 }
 
 // FormatValue formats a constant or variable as it should appear in an expression.
@@ -426,11 +428,11 @@ func formatExpr(v value.Value) (expr, error) {
 		var c *jen.Statement
 		switch result {
 		case "+Inf":
-			c = jen.Qual("math", "Inf").Call(jen.Lit(1))
+			c = Sym(math.Inf).Call(jen.Lit(1))
 		case "-Inf":
-			c = jen.Qual("math", "Inf").Call(jen.Lit(-1))
+			c = Sym(math.Inf).Call(jen.Lit(-1))
 		case "NaN":
-			c = jen.Qual("math", "NaN").Call()
+			c = Sym(math.NaN).Call()
 		default:
 			c = jen.Op(result)
 		}
@@ -557,10 +559,10 @@ func zeroOf(typ types.Type) (expr, error) {
 			return val(jen.False()), nil
 		}
 		if t.BitSize == 128 {
-			return val(libc("I128").Values()), nil
+			return val(Qual[libc.I128]().Values()), nil
 		}
 		if t.BitSize == 256 {
-			return val(libc("I256").Values()), nil
+			return val(Qual[libc.I256]().Values()), nil
 		}
 		return val(jen.Lit(0)), nil
 	case *types.FloatType:
@@ -604,7 +606,7 @@ func intFromBig(x *big.Int, bitSize uint64) (int64, error) {
 
 func i128Lit(x *big.Int) *jen.Statement {
 	lo, hi := i128Limbs(x)
-	return libc("I128").Values(jen.Dict{
+	return Qual[libc.I128]().Values(jen.Dict{
 		jen.Id("Lo"): litUint64(lo),
 		jen.Id("Hi"): litUint64(hi),
 	})
@@ -624,39 +626,39 @@ func i256Lit(x *big.Int) *jen.Statement {
 	loMask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
 	lo := new(big.Int).And(u, loMask)
 	hi := new(big.Int).Rsh(u, 128)
-	return libc("I256").Values(jen.Dict{
+	return Qual[libc.I256]().Values(jen.Dict{
 		jen.Id("Lo"): i128Lit(lo),
 		jen.Id("Hi"): i128Lit(hi),
 	})
 }
 
-func wideICmp(bits uint64, pred enum.IPred) (string, bool) {
-	var op string
+func wideICmp(bits uint64, pred enum.IPred) (*jen.Statement, bool) {
+	var i128, i256 any
 	switch pred {
 	case enum.IPredEQ:
-		op = "Eq"
+		i128, i256 = libc.I128Eq, libc.I256Eq
 	case enum.IPredNE:
-		op = "Ne"
+		i128, i256 = libc.I128Ne, libc.I256Ne
 	case enum.IPredSGE:
-		op = "Sge"
+		i128, i256 = libc.I128Sge, libc.I256Sge
 	case enum.IPredSGT:
-		op = "Sgt"
+		i128, i256 = libc.I128Sgt, libc.I256Sgt
 	case enum.IPredSLE:
-		op = "Sle"
+		i128, i256 = libc.I128Sle, libc.I256Sle
 	case enum.IPredSLT:
-		op = "Slt"
+		i128, i256 = libc.I128Slt, libc.I256Slt
 	case enum.IPredUGE:
-		op = "Uge"
+		i128, i256 = libc.I128Uge, libc.I256Uge
 	case enum.IPredUGT:
-		op = "Ugt"
+		i128, i256 = libc.I128Ugt, libc.I256Ugt
 	case enum.IPredULE:
-		op = "Ule"
+		i128, i256 = libc.I128Ule, libc.I256Ule
 	case enum.IPredULT:
-		op = "Ult"
+		i128, i256 = libc.I128Ult, libc.I256Ult
 	default:
-		return "", false
+		return nil, false
 	}
-	return wideFn(bits, op), true
+	return wideSym(bits, i128, i256), true
 }
 
 // formatICmp translates an icmp predicate and operands to a Go comparison expr.
@@ -674,7 +676,7 @@ func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error)
 		if err != nil {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", yVal, err)
 		}
-		return libc(fn).Call(x, y), nil
+		return fn.Call(x, y), nil
 	}
 	var op string
 	format := FormatValue
@@ -737,24 +739,24 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	}
 	if toType.BitSize == 128 {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			return libc("I128FromU64").Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
+			return Sym(libc.I128FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
 				jen.False(): jen.Lit(0),
 			}).Index(src)), nil
 		}
-		return libc("I128FromU64").Call(jen.Uint64().Call(src)), nil
+		return Sym(libc.I128FromU64).Call(jen.Uint64().Call(src)), nil
 	}
 	if toType.BitSize == 256 {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			return libc("I256FromU64").Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
+			return Sym(libc.I256FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
 				jen.False(): jen.Lit(0),
 			}).Index(src)), nil
 		}
 		if isI128(from.Type()) {
-			return libc("I256FromI128").Call(src), nil
+			return Sym(libc.I256FromI128).Call(src), nil
 		}
-		return libc("I256FromU64").Call(jen.Uint64().Call(src)), nil
+		return Sym(libc.I256FromU64).Call(jen.Uint64().Call(src)), nil
 	}
 	w := goIntBits(toType.BitSize)
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
@@ -779,24 +781,24 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	}
 	if toType.BitSize == 128 {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			return libc("I128FromI64").Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
+			return Sym(libc.I128FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
 				jen.False(): jen.Lit(0),
 			}).Index(src)), nil
 		}
-		return libc("I128FromI64").Call(jen.Int64().Call(src)), nil
+		return Sym(libc.I128FromI64).Call(jen.Int64().Call(src)), nil
 	}
 	if toType.BitSize == 256 {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			return libc("I256FromI64").Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
+			return Sym(libc.I256FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
 				jen.False(): jen.Lit(0),
 			}).Index(src)), nil
 		}
 		if isI128(from.Type()) {
-			return libc("I256FromI128S").Call(src), nil
+			return Sym(libc.I256FromI128S).Call(src), nil
 		}
-		return libc("I256FromI64").Call(jen.Int64().Call(src)), nil
+		return Sym(libc.I256FromI64).Call(jen.Int64().Call(src)), nil
 	}
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 		// Go has no int32(bool). sext i1: true → -1.
@@ -939,7 +941,7 @@ func formatBinConst(op string, x, y constant.Constant) (expr, error) {
 		if !ok {
 			return expr{}, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
 		}
-		return val(libc(fn).Call(l, r)), nil
+		return val(fn.Call(l, r)), nil
 	}
 	return val(jen.Parens(bin(l, op, r))), nil
 }
@@ -961,15 +963,15 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		switch {
 		case it.BitSize == 1:
-			return libc("I128TruncI1").Call(src), nil
+			return Sym(libc.I128TruncI1).Call(src), nil
 		case it.BitSize <= 8:
-			return libc("I128TruncI8").Call(src), nil
+			return Sym(libc.I128TruncI8).Call(src), nil
 		case it.BitSize <= 16:
-			return libc("I128TruncI16").Call(src), nil
+			return Sym(libc.I128TruncI16).Call(src), nil
 		case it.BitSize <= 32:
-			return libc("I128TruncI32").Call(src), nil
+			return Sym(libc.I128TruncI32).Call(src), nil
 		default:
-			return libc("I128TruncI64").Call(src), nil
+			return Sym(libc.I128TruncI64).Call(src), nil
 		}
 	}
 	if isI256(from.Type()) {
@@ -979,17 +981,17 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		switch {
 		case it.BitSize == 1:
-			return libc("I256TruncI1").Call(src), nil
+			return Sym(libc.I256TruncI1).Call(src), nil
 		case it.BitSize <= 8:
-			return libc("I256TruncI8").Call(src), nil
+			return Sym(libc.I256TruncI8).Call(src), nil
 		case it.BitSize <= 16:
-			return libc("I256TruncI16").Call(src), nil
+			return Sym(libc.I256TruncI16).Call(src), nil
 		case it.BitSize <= 32:
-			return libc("I256TruncI32").Call(src), nil
+			return Sym(libc.I256TruncI32).Call(src), nil
 		case it.BitSize == 128:
-			return libc("I256TruncI128").Call(src), nil
+			return Sym(libc.I256TruncI128).Call(src), nil
 		default:
-			return libc("I256TruncI64").Call(src), nil
+			return Sym(libc.I256TruncI64).Call(src), nil
 		}
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {

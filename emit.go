@@ -2,10 +2,15 @@ package leaven
 
 import (
 	"fmt"
+	"math"
 	"reflect"
+	"runtime"
+	"strings"
+	"unsafe"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/libc"
 )
 
 const libcPath = "github.com/lewtec/leaven/libc"
@@ -24,8 +29,47 @@ func (r goRef) code() *jen.Statement {
 	return jen.Qual(r.pkg, r.name)
 }
 
-func libc(name string) *jen.Statement {
-	return jen.Qual(libcPath, name)
+// Sym is jen.Qual for a package-level func. Generic instantiations drop [T].
+func Sym(fn any) *jen.Statement {
+	pkg, name := funcPkgName(fn)
+	return jen.Qual(pkg, name)
+}
+
+func funcPkgName(fn any) (pkg, name string) {
+	rv := reflect.ValueOf(fn)
+	if rv.Kind() != reflect.Func {
+		panic(fmt.Sprintf("Sym: not a func: %T", fn))
+	}
+	f := runtime.FuncForPC(rv.Pointer())
+	if f == nil {
+		panic(fmt.Sprintf("Sym: no PC: %T", fn))
+	}
+	full := f.Name()
+	if i := strings.IndexByte(full, '['); i >= 0 {
+		full = full[:i]
+	}
+	lastSlash := strings.LastIndexByte(full, '/')
+	rest := full
+	if lastSlash >= 0 {
+		rest = full[lastSlash+1:]
+	}
+	dot := strings.IndexByte(rest, '.')
+	if dot < 0 {
+		panic(fmt.Sprintf("Sym: no pkg: %s", f.Name()))
+	}
+	return full[:len(full)-len(rest)+dot], rest[dot+1:]
+}
+
+// lib is goRef for a package-level func (library maps).
+func lib(fn any) goRef {
+	pkg, name := funcPkgName(fn)
+	return goRef{pkg: pkg, name: name}
+}
+
+// typ is goRef for a named type.
+func typ[T any]() goRef {
+	t := reflect.TypeFor[T]()
+	return goRef{pkg: t.PkgPath(), name: t.Name()}
 }
 
 func newGoFile(packageName string) *jen.File {
@@ -106,7 +150,7 @@ func reflectType(t reflect.Type) *jen.Statement {
 	case reflect.String:
 		return jen.String()
 	case reflect.UnsafePointer:
-		return jen.Qual("unsafe", "Pointer")
+		return Qual[unsafe.Pointer]()
 	case reflect.Ptr:
 		return jen.Op("*").Add(reflectType(t.Elem()))
 	case reflect.Slice:
@@ -125,50 +169,50 @@ func reflectType(t reflect.Type) *jen.Statement {
 	}
 }
 
-// libcT is libc.Name[t](args…). t is Qual[T]() or TypeSpec.
-func libcT(name string, t jen.Code, args ...jen.Code) *jen.Statement {
-	return libc(name).Types(t).Call(args...)
+// libcT is fn[t](args…). fn is a libc generic (As, Load, …). t is Qual[T]() or TypeSpec.
+func libcT(fn any, t jen.Code, args ...jen.Code) *jen.Statement {
+	return Sym(fn).Types(t).Call(args...)
 }
 
 // emitPtr is libc.Ptr(p) — (void *)p.
 func emitPtr(p jen.Code) *jen.Statement {
-	return libc("Ptr").Call(p)
+	return Sym(libc.Ptr[byte]).Call(p)
 }
 
 // emitAs is libc.As[T](p) — (T *)p. t is the element type, not *T.
 func emitAs(t, p jen.Code) *jen.Statement {
-	return libcT("As", t, p)
+	return libcT(libc.As[byte], t, p)
 }
 
 // emitAddr is libc.Addr(p) — (uintptr)p.
 func emitAddr(p jen.Code) *jen.Statement {
-	return libc("Addr").Call(p)
+	return Sym(libc.Addr[byte]).Call(p)
 }
 
 // emitOff is libc.Off(p, n) — (char *)p + n.
 func emitOff(p, n jen.Code) *jen.Statement {
-	return libc("Off").Call(p, n)
+	return Sym(libc.Off).Call(p, n)
 }
 
 // emitAddPtr is libc.AddPointer[T](p, i).
 func emitAddPtr(t, p, i jen.Code) *jen.Statement {
-	return libcT("AddPointer", t, p, i)
+	return libcT(libc.AddPointer[byte], t, p, i)
 }
 
 // emitLoad is libc.Load[T](p, off).
 func emitLoad(t, p, off jen.Code) *jen.Statement {
-	return libcT("Load", t, p, off)
+	return libcT(libc.Load[byte], t, p, off)
 }
 
 // emitStore is libc.Store[T](p, off, v).
 func emitStore(t, p, off, v jen.Code) *jen.Statement {
-	return libcT("Store", t, p, off, v)
+	return libcT(libc.Store[byte], t, p, off, v)
 }
 
 // emitUP is unsafe.Pointer(x) for integer bit patterns (inttoptr),
 // not a Go *T. Use emitPtr when x is already a pointer.
 func emitUP(x jen.Code) *jen.Statement {
-	return jen.Qual("unsafe", "Pointer").Call(x)
+	return Qual[unsafe.Pointer]().Call(x)
 }
 
 // ptrToUint is uintptr(unsafe.Pointer(p)). emitUP so untyped nil is valid.
@@ -199,9 +243,9 @@ func goBitsType(bits uint64, unsigned bool) *jen.Statement {
 		}
 		return jen.Int64()
 	case 128:
-		return libc("I128")
+		return Qual[libc.I128]()
 	case 256:
-		return libc("I256")
+		return Qual[libc.I256]()
 	default:
 		kind := "int"
 		if unsigned {
@@ -233,11 +277,11 @@ func wideBits(t types.Type) (uint64, bool) {
 	}
 }
 
-func wideFn(bits uint64, op string) string {
+func wideSym(bits uint64, i128, i256 any) *jen.Statement {
 	if bits == 256 {
-		return "I256" + op
+		return Sym(i256)
 	}
-	return "I128" + op
+	return Sym(i128)
 }
 
 func litUntyped(n int64) *jen.Statement {
@@ -269,36 +313,36 @@ func isStdStream(name string) bool {
 }
 
 func initStdStream(name string) *jen.Statement {
-	return libc("InitOstream").Call(emitPtr(addrOf(jen.Id(name))))
+	return Sym(libc.InitOstream).Call(emitPtr(addrOf(jen.Id(name))))
 }
 
-func i1PackFn(n uint64) (string, bool) {
+func i1PackFn(n uint64) (any, bool) {
 	switch n {
 	case 8:
-		return "I1Pack8", true
+		return libc.I1Pack8, true
 	case 16:
-		return "I1Pack16", true
+		return libc.I1Pack16, true
 	case 32:
-		return "I1Pack32", true
+		return libc.I1Pack32, true
 	case 64:
-		return "I1Pack64", true
+		return libc.I1Pack64, true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
-func i1UnpackFn(n uint64) (string, bool) {
+func i1UnpackFn(n uint64) (any, bool) {
 	switch n {
 	case 8:
-		return "I1Unpack8", true
+		return libc.I1Unpack8, true
 	case 16:
-		return "I1Unpack16", true
+		return libc.I1Unpack16, true
 	case 32:
-		return "I1Unpack32", true
+		return libc.I1Unpack32, true
 	case 64:
-		return "I1Unpack64", true
+		return libc.I1Unpack64, true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
@@ -314,7 +358,7 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 		if !ok {
 			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
 		}
-		return conv(goIntType(it.BitSize), libc(fn).Call(src)), nil
+		return conv(goIntType(it.BitSize), Sym(fn).Call(src)), nil
 	}
 	if n, ok := i1VectorLen(to); ok {
 		it, ok := from.(*types.IntType)
@@ -325,7 +369,7 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 		if !ok {
 			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
 		}
-		return libc(fn).Call(conv(goIntType(it.BitSize), src)), nil
+		return Sym(fn).Call(conv(goIntType(it.BitSize), src)), nil
 	}
 	return nil, nil
 }
@@ -370,18 +414,18 @@ func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, err
 	case fromF != nil && toI != nil:
 		switch bits {
 		case 32:
-			return conv(goIntType(32), jen.Qual("math", "Float32bits").Call(src)), nil
+			return conv(goIntType(32), Sym(math.Float32bits).Call(src)), nil
 		case 64:
-			return conv(goIntType(64), jen.Qual("math", "Float64bits").Call(src)), nil
+			return conv(goIntType(64), Sym(math.Float64bits).Call(src)), nil
 		default:
 			return nil, fmt.Errorf("%w: %v and %v", errUnsupportedFloatType, from, to)
 		}
 	case fromI != nil && toF != nil:
 		switch bits {
 		case 32:
-			return jen.Qual("math", "Float32frombits").Call(jen.Uint32().Call(src)), nil
+			return Sym(math.Float32frombits).Call(jen.Uint32().Call(src)), nil
 		case 64:
-			return jen.Qual("math", "Float64frombits").Call(jen.Uint64().Call(src)), nil
+			return Sym(math.Float64frombits).Call(jen.Uint64().Call(src)), nil
 		default:
 			return nil, fmt.Errorf("%w: %v and %v", errUnsupportedFloatType, from, to)
 		}

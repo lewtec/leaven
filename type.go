@@ -2,11 +2,14 @@ package leaven
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"unsafe"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/libc"
 )
 
 // taggedPointerTypes are LLVM pointer types that appear as the sole field of a
@@ -114,7 +117,7 @@ func typeDefinitionIgnoringTagged(t types.Type) (*jen.Statement, error) {
 	switch t := t.(type) {
 	case *types.PointerType:
 		if t.IsOpaque() {
-			return jen.Qual("unsafe", "Pointer"), nil
+			return Qual[unsafe.Pointer](), nil
 		}
 		if _, ok := t.ElemType.(*types.FuncType); ok {
 			return TypeDefinition(t.ElemType)
@@ -183,10 +186,10 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			return goIntType(t.BitSize), nil
 		case t.BitSize == 128:
 			// rustc i128/u128 and TypeId. Two limbs, not int64.
-			return libc("I128"), nil
+			return Qual[libc.I128](), nil
 		case t.BitSize == 256:
 			// rustc core::fmt::num::__fmt_inner widens u128 to i256.
-			return libc("I256"), nil
+			return Qual[libc.I256](), nil
 		default:
 			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
 			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
@@ -199,7 +202,7 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		}
 		// Every LLVM pointer value is unsafe.Pointer. Pointee type lives on
 		// load/store/gep, not on the pointer.
-		return jen.Qual("unsafe", "Pointer"), nil
+		return Qual[unsafe.Pointer](), nil
 
 	case *types.StructType:
 		var fields []jen.Code
@@ -342,8 +345,8 @@ func TypeName(t types.Type) string {
 }
 
 var libraryTypes = map[string]goRef{
-	"FILE":     {pkg: "os", name: "File"},
-	"_IO_FILE": {pkg: "os", name: "File"}, // glibc / clang struct name for FILE
+	"FILE":     typ[os.File](),
+	"_IO_FILE": typ[os.File](), // glibc / clang struct name for FILE
 }
 
 // compatiblePointerTypes returns whether casting t1 to t2 is allowed.

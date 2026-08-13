@@ -11,6 +11,7 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 func Compile(out io.Writer, m *ir.Module, packageName string) error {
@@ -233,7 +234,7 @@ func vttStandin(name string, t types.Type) *jen.Statement {
 	}
 	elems := make([]jen.Code, n)
 	for i := range elems {
-		elems[i] = libc("StandinVptr").Call()
+		elems[i] = Sym(libc.StandinVptr).Call()
 	}
 	arr := jen.Index(litUntyped(int64(n))).Qual("unsafe", "Pointer").Values(elems...)
 	if wrap {
@@ -275,7 +276,7 @@ func writeCMainArgs(g *jen.Group, fn *ir.Func) {
 		g.Id(VariableName(fn.Params[0])).Op("=").Int32().Call(jen.Len(jen.Qual("os", "Args")))
 	}
 	if len(fn.Params) >= 2 {
-		g.Id(VariableName(fn.Params[1])).Op("=").Add(libc("Argv").Call())
+		g.Id(VariableName(fn.Params[1])).Op("=").Add(Sym(libc.Argv).Call())
 	}
 }
 

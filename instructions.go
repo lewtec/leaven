@@ -2,8 +2,11 @@ package leaven
 
 import (
 	"fmt"
+	"math"
+	"math/bits"
 	"os"
 	"strings"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/dave/jennifer/jen"
@@ -12,6 +15,7 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/enum"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 func translateOp(v value.Value, what string) (*jen.Statement, error) {
@@ -48,7 +52,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return one(vectorBin(vecBin{dest: name, op: "+", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "Add")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128Add, libc.I256Add).Call(x, y))), nil
 		}
 		if ciy, ok := inst.Y.(*constant.Int); ok && ciy.X.Sign() == -1 {
 			// Use the constant's own minus sign.
@@ -60,7 +64,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		// Ordering is recorded on the IR; Go has no distinct fence
 		// opcodes. The atomic bump is the same compiler barrier rustc
 		// uses empty asm ~{memory} for.
-		return one(libc("Fence").Call()), nil
+		return one(Sym(libc.Fence).Call()), nil
 
 	case *ir.InstCmpXchg:
 		ptr, err := translateOp(inst.Ptr, "pointer")
@@ -167,7 +171,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return one(assign(name, emitAddr(libc("Retain").Call(jen.New(t))))), nil
+				return one(assign(name, emitAddr(Sym(libc.Retain[byte]).Call(jen.New(t))))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
@@ -199,7 +203,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "And")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128And, libc.I256And).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "&&", y))), nil
@@ -220,7 +224,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "AShr")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128AShr, libc.I256AShr).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
 			return one(assign(name, jen.Byte().Call(bin(x, ">>", y)))), nil
@@ -390,7 +394,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			yf = jen.Float64().Call(y)
 			wrapF32 = true
 		}
-		mod := jen.Qual("math", "Mod").Call(xf, yf)
+		mod := Sym(math.Mod).Call(xf, yf)
 		if wrapF32 {
 			mod = jen.Float32().Call(mod)
 		}
@@ -502,7 +506,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "LShr")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128LShr, libc.I256LShr).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
 			return one(assign(name, conv(goIntType(t.BitSize), bin(x, ">>", y)))), nil
@@ -529,7 +533,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "Or")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128Or, libc.I256Or).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "||", y))), nil
@@ -625,7 +629,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(VariableName(inst), libc(wideFn(bits, "Shl")).Call(x, y))), nil
+			return one(assign(VariableName(inst), wideSym(bits, libc.I128Shl, libc.I256Shl).Call(x, y))), nil
 		}
 		return one(assign(VariableName(inst), bin(x, "<<", y))), nil
 
@@ -763,7 +767,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, libc(wideFn(bits, "Xor")).Call(x, y))), nil
+			return one(assign(name, wideSym(bits, libc.I128Xor, libc.I256Xor).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
 			return one(assign(name, bin(x, "!=", y))), nil
@@ -840,36 +844,36 @@ type llvmBin struct {
 	x, y value.Value
 }
 
-func wideBinFunc(bits uint64, op string, ashr bool) (string, bool) {
+func wideBinFunc(bits uint64, op string, ashr bool) (*jen.Statement, bool) {
 	if ashr && (op == ">>" || op == "ashr") {
-		return wideFn(bits, "AShr"), true
+		return wideSym(bits, libc.I128AShr, libc.I256AShr), true
 	}
-	var name string
+	var i128, i256 any
 	switch op {
 	case "+":
-		name = "Add"
+		i128, i256 = libc.I128Add, libc.I256Add
 	case "-":
-		name = "Sub"
+		i128, i256 = libc.I128Sub, libc.I256Sub
 	case "*":
-		name = "Mul"
+		i128, i256 = libc.I128Mul, libc.I256Mul
 	case "&":
-		name = "And"
+		i128, i256 = libc.I128And, libc.I256And
 	case "|":
-		name = "Or"
+		i128, i256 = libc.I128Or, libc.I256Or
 	case "^":
-		name = "Xor"
+		i128, i256 = libc.I128Xor, libc.I256Xor
 	case "<<":
-		name = "Shl"
+		i128, i256 = libc.I128Shl, libc.I256Shl
 	case ">>", "lshr":
-		name = "LShr"
+		i128, i256 = libc.I128LShr, libc.I256LShr
 	case "ashr":
-		name = "AShr"
+		i128, i256 = libc.I128AShr, libc.I256AShr
 	case "/", "%":
-		return "", false
+		return nil, false
 	default:
-		return "", false
+		return nil, false
 	}
-	return wideFn(bits, name), true
+	return wideSym(bits, i128, i256), true
 }
 
 func translateVectorICmp(inst *ir.InstICmp) ([]jen.Code, error) {
@@ -952,7 +956,7 @@ func translateI128Bin(name, op string, x, y value.Value, ashr bool) ([]jen.Code,
 	if err != nil {
 		return nil, true, err
 	}
-	return one(assign(name, libc(fn).Call(xv, yv))), true, nil
+	return one(assign(name, fn.Call(xv, yv))), true, nil
 }
 
 func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
@@ -1072,9 +1076,9 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
 	}
 	if bits, ok := wideBits(inst.Type()); ok {
-		fn := wideFn(bits, "SDiv")
+		fn := wideSym(bits, libc.I128SDiv, libc.I256SDiv)
 		if b.op == "%" {
-			fn = wideFn(bits, "SRem")
+			fn = wideSym(bits, libc.I128SRem, libc.I256SRem)
 		}
 		xv, err := translateOp(b.x, "left operand")
 		if err != nil {
@@ -1084,7 +1088,7 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), libc(fn).Call(xv, yv))), nil
+		return one(assign(VariableName(inst), fn.Call(xv, yv))), nil
 	}
 	xv, err := FormatSigned(b.x)
 	if err != nil {
@@ -1126,9 +1130,9 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		return one(vectorBin(vecBin{dest: name, op: b.op, x: xv, y: yv})), nil
 	}
 	if bits, ok := wideBits(inst.Type()); ok {
-		fn := wideFn(bits, "UDiv")
+		fn := wideSym(bits, libc.I128UDiv, libc.I256UDiv)
 		if b.op == "%" {
-			fn = wideFn(bits, "URem")
+			fn = wideSym(bits, libc.I128URem, libc.I256URem)
 		}
 		xv, err := translateOp(b.x, "left operand")
 		if err != nil {
@@ -1138,7 +1142,7 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), libc(fn).Call(xv, yv))), nil
+		return one(assign(VariableName(inst), fn.Call(xv, yv))), nil
 	}
 	xv, err := FormatUnsigned(b.x)
 	if err != nil {
@@ -1218,38 +1222,38 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 	name := VariableName(inst)
 	// usub.sat / uadd.sat via libc (no mid-function vars — goto-safe).
 	if strings.HasPrefix(llvmName, "llvm_usub_sat_") && len(args) == 2 {
-		return one(assign(name, convFromU64(llvmName, libc("USubSatU64").Call(
+		return one(assign(name, convFromU64(llvmName, Sym(libc.USubSatU64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Uint64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_uadd_sat_") && len(args) == 2 {
-		return one(assign(name, convFromU64(llvmName, libc("UAddSatU64").Call(
+		return one(assign(name, convFromU64(llvmName, Sym(libc.UAddSatU64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Uint64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_ctlz_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "LeadingZeros64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(bits.LeadingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_cttz_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "TrailingZeros64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(bits.TrailingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_ctpop_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "OnesCount64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(bits.OnesCount64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_abs_") && len(args) >= 1 {
 		if strings.HasSuffix(llvmName, "_i128") || strings.Contains(llvmName, "_i128") {
 			// sign from high limb; abs via conditional sub from 0
 			return one(assign(name, jen.Add(args[0]))), true // identity if non-neg common path
 		}
-		return one(assign(name, convFromU64(llvmName, libc("AbsI64").Call(jen.Int64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(libc.AbsI64).Call(jen.Int64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_bitreverse_") && len(args) == 1 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "Reverse64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(bits.Reverse64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_fshl_") && len(args) == 3 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "RotateLeft64").Call(
+		return one(assign(name, convFromU64(llvmName, Sym(bits.RotateLeft64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Int().Call(jen.Add(args[2])),
 		)))), true
@@ -1261,81 +1265,74 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_bswap_") && len(args) == 1 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "ReverseBytes64").Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return one(assign(name, convFromU64(llvmName, Sym(bits.ReverseBytes64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if (strings.HasPrefix(llvmName, "llvm_umax_") || strings.HasPrefix(llvmName, "llvm_umin_") ||
 		strings.HasPrefix(llvmName, "llvm_smax_") || strings.HasPrefix(llvmName, "llvm_smin_")) && len(args) == 2 {
 		if strings.Contains(llvmName, "i128") {
 			// Select via I128 compare helpers.
-			var lt string
-			switch {
-			case strings.Contains(llvmName, "umax") || strings.Contains(llvmName, "umin"):
-				lt = "I128Ult"
-			default:
-				lt = "I128Slt"
+			lt := libc.I128Slt
+			if strings.Contains(llvmName, "umax") || strings.Contains(llvmName, "umin") {
+				lt = libc.I128Ult
 			}
 			// max: if a < b { b } else { a }; min: if a < b { a } else { b }
 			isMax := strings.Contains(llvmName, "max")
-			// Use ternary-like: libc helper inline via If — avoid mid vars with expression:
-			// prefer: max = select !lt(a,b) then a else b
-			// Emit as: name = a; if lt(a,b) == isMax? wait
-			// simpler: call a small pattern
-			cond := libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))
+			cond := Sym(lt).Call(jen.Add(args[0]), jen.Add(args[1]))
 			// min: if a<b then a else b; max: if a<b then b else a
 			if isMax {
 				return one(jen.If(cond).Block(assign(name, jen.Add(args[1]))).Else().Block(assign(name, jen.Add(args[0])))), true
 			}
 			return one(jen.If(cond).Block(assign(name, jen.Add(args[0]))).Else().Block(assign(name, jen.Add(args[1])))), true
 		}
-		fn := "UMaxU64"
+		fn := any(libc.UMaxU64)
 		switch {
 		case strings.Contains(llvmName, "umin"):
-			fn = "UMinU64"
+			fn = libc.UMinU64
 		case strings.Contains(llvmName, "smax"):
-			fn = "SMaxI64"
+			fn = libc.SMaxI64
 		case strings.Contains(llvmName, "smin"):
-			fn = "SMinI64"
+			fn = libc.SMinI64
 		}
-		return one(assign(name, convFromU64(llvmName, libc(fn).Call(
+		return one(assign(name, convFromU64(llvmName, Sym(fn).Call(
 			jen.Int64().Call(jen.Add(args[0])), jen.Int64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_floor_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Floor").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Floor).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_trunc_f") && len(args) == 1 {
-		e := jen.Qual("math", "Trunc").Call(jen.Float64().Call(jen.Add(args[0])))
+		e := Sym(math.Trunc).Call(jen.Float64().Call(jen.Add(args[0])))
 		if strings.HasSuffix(llvmName, "f32") {
 			e = jen.Float32().Call(e)
 		}
 		return one(assign(name, e)), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_round_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Round").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Round).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_fabs_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Abs").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Abs).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_sqrt_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Sqrt").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Sqrt).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_sin_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Sin").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Sin).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_cos_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Cos").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Cos).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_exp_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Exp").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Exp).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_log10_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Log10").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Log10).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_log_") && len(args) == 1 {
-		return one(assign(name, jen.Qual("math", "Log").Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return one(assign(name, Sym(math.Log).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_pow") && len(args) == 2 {
-		e := jen.Qual("math", "Pow").Call(
+		e := Sym(math.Pow).Call(
 			jen.Float64().Call(jen.Add(args[0])),
 			jen.Float64().Call(jen.Add(args[1])),
 		)
@@ -1345,14 +1342,14 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		return one(assign(name, e)), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_copysign_") && len(args) == 2 {
-		e := jen.Qual("math", "Copysign").Call(
+		e := Sym(math.Copysign).Call(
 			jen.Float64().Call(jen.Add(args[0])),
 			jen.Float64().Call(jen.Add(args[1])),
 		)
 		return one(assign(name, castToResult(inst, e))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_maximum") && len(args) == 2 {
-		e := libc("MaximumNumF64").Call(
+		e := Sym(libc.MaximumNumF64).Call(
 			jen.Float64().Call(jen.Add(args[0])),
 			jen.Float64().Call(jen.Add(args[1])),
 		)
@@ -1366,23 +1363,23 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		}
 		// i128/i256 use libc binops
 		if strings.Contains(llvmName, "i128") || strings.Contains(llvmName, "i256") {
-			fn := ""
-			bits := 128
+			bits := uint64(128)
 			if strings.Contains(llvmName, "i256") {
 				bits = 256
 			}
+			var fn *jen.Statement
 			switch {
 			case strings.Contains(llvmName, "sadd") || strings.Contains(llvmName, "uadd"):
-				fn = fmt.Sprintf("I%dAdd", bits)
+				fn = wideSym(bits, libc.I128Add, libc.I256Add)
 			case strings.Contains(llvmName, "ssub") || strings.Contains(llvmName, "usub"):
-				fn = fmt.Sprintf("I%dSub", bits)
+				fn = wideSym(bits, libc.I128Sub, libc.I256Sub)
 			case strings.Contains(llvmName, "smul") || strings.Contains(llvmName, "umul"):
-				fn = fmt.Sprintf("I%dMul", bits)
+				fn = wideSym(bits, libc.I128Mul, libc.I256Mul)
 			default:
 				return nil, false
 			}
 			return one(assign(name, jen.Add(ret).Values(
-				libc(fn).Call(jen.Add(args[0]), jen.Add(args[1])),
+				fn.Call(jen.Add(args[0]), jen.Add(args[1])),
 				jen.False(),
 			))), true
 		}
@@ -1505,7 +1502,7 @@ func llvmCallHandled(name string) bool {
 
 func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	if ia, ok := inst.Callee.(*ir.InlineAsm); ok {
-		return one(libc("InlineAsm").Call(jen.Lit(ia.Asm), jen.Lit(ia.Constraint))), nil
+		return one(Sym(libc.InlineAsm).Call(jen.Lit(ia.Asm), jen.Lit(ia.Constraint))), nil
 	}
 	llvmName := calleeLLVMName(inst.Callee)
 	switch llvmName {
@@ -1533,7 +1530,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				et = t
 			}
 		}
-		callee = libc(strings.Title(llvmName)).Types(et)
+		callee = jen.Qual(libcPath, strings.Title(llvmName)).Types(et)
 		typedPtr = true
 	case "leaven_va_start":
 		if len(args) == 1 {
@@ -1547,18 +1544,18 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		return nil, nil
 	case "vsnprintf":
 		if len(args) == 4 {
-			return one(assign(VariableName(inst), libc("Vsnprintf").Call(
+			return one(assign(VariableName(inst), Sym(libc.Vsnprintf).Call(
 				asBytePtr(args[0]), args[1], asBytePtr(args[2]),
 				emitAs(Qual[byte](), args[3]),
 			))), nil
 		}
 	case "ldexp":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), jen.Qual("math", "Ldexp").Call(args[0], jen.Int().Call(args[1])))), nil
+			return one(assign(VariableName(inst), Sym(math.Ldexp).Call(args[0], jen.Int().Call(args[1])))), nil
 		}
 	case "llvm_fabs_f32":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), jen.Float32().Call(jen.Qual("math", "Abs").Call(jen.Float64().Call(args[0]))))), nil
+			return one(assign(VariableName(inst), jen.Float32().Call(Sym(math.Abs).Call(jen.Float64().Call(args[0]))))), nil
 		}
 	case "llvm_fmuladd_f64", "llvm_fmuladd_f32":
 		if len(args) == 3 {
@@ -1566,70 +1563,70 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		}
 	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64",
 		"llvm_memcpy_p0_p0_i64", "llvm_memmove_p0_p0_i64":
-		return one(libc("Memmove").Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
+		return one(Sym(libc.Memmove).Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
 	case "llvm_memset_p0i8_i64", "llvm_memset_p0_i64":
-		return one(libc("Memset").Call(asBytePtr(args[0]), args[1], args[2])), nil
+		return one(Sym(libc.Memset).Call(asBytePtr(args[0]), args[1], args[2])), nil
 	case "llvm_abs_i32":
 		if len(args) >= 1 {
-			return one(assign(VariableName(inst), libc("AbsI32").Call(args[0]))), nil
+			return one(assign(VariableName(inst), Sym(libc.AbsI32).Call(args[0]))), nil
 		}
 	case "llvm_sadd_with_overflow_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("SAddWithOverflowI32").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.SAddWithOverflowI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umax_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("UMaxU64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.UMaxU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umin_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("UMinU64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.UMinU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umax_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("UMaxU32").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.UMaxU32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umin_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("UMinU32").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.UMinU32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smax_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("SMaxI64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.SMaxI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smin_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("SMinI64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.SMinI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smax_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("SMaxI32").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.SMaxI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smin_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("SMinI32").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.SMinI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_trap":
-		return one(libc("Abort").Call()), nil
+		return one(Sym(libc.Abort).Call()), nil
 	case "llvm_ceil_f64":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), jen.Qual("math", "Ceil").Call(args[0]))), nil
+			return one(assign(VariableName(inst), Sym(math.Ceil).Call(args[0]))), nil
 		}
 	case "llvm_vector_reduce_add_v4i32":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), libc("VecReduceAddV4I32").Call(args[0]))), nil
+			return one(assign(VariableName(inst), Sym(libc.VecReduceAddV4I32).Call(args[0]))), nil
 		}
 	case "llvm_load_relative_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("LoadRelativeI64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.LoadRelativeI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_ctpop_i64":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), jen.Qual("math/bits", "OnesCount64").Call(jen.Uint64().Call(args[0])))), nil
+			return one(assign(VariableName(inst), Sym(bits.OnesCount64).Call(jen.Uint64().Call(args[0])))), nil
 		}
 	case "llvm_umul_with_overflow_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), libc("UMulWithOverflowU64").Call(args[0], args[1]))), nil
+			return one(assign(VariableName(inst), Sym(libc.UMulWithOverflowU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_objectsize_i64_p0i8":
 		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
@@ -1686,27 +1683,27 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			unsigned := strings.HasPrefix(llvmName, "llvm_ucmp_")
 			// i128/i256: use libc compares (no Go < on structs).
 			if strings.Contains(llvmName, "i128") {
-				lt, eq := "I128Slt", "I128Eq"
+				lt, eq := any(libc.I128Slt), any(libc.I128Eq)
 				if unsigned {
-					lt = "I128Ult"
+					lt = libc.I128Ult
 				}
 				return []jen.Code{
-					jen.If(libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+					jen.If(Sym(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
 						assign(name, jen.Lit(255)),
-					).Else().If(libc(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+					).Else().If(Sym(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
 						assign(name, jen.Lit(0)),
 					).Else().Block(assign(name, jen.Lit(1))),
 				}, nil
 			}
 			if strings.Contains(llvmName, "i256") {
-				lt, eq := "I256Slt", "I256Eq"
+				lt, eq := any(libc.I256Slt), any(libc.I256Eq)
 				if unsigned {
-					lt = "I256Ult"
+					lt = libc.I256Ult
 				}
 				return []jen.Code{
-					jen.If(libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+					jen.If(Sym(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
 						assign(name, jen.Lit(255)),
-					).Else().If(libc(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+					).Else().If(Sym(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
 						assign(name, jen.Lit(0)),
 					).Else().Block(assign(name, jen.Lit(1))),
 				}, nil
@@ -1766,21 +1763,21 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
 		} else if isRustAlloc(llvmName) {
-			fn := "RustAlloc"
+			fn := any(libc.RustAlloc)
 			if strings.Contains(llvmName, "zeroed") {
-				fn = "RustAllocZeroed"
+				fn = libc.RustAllocZeroed
 			}
-			return one(assign(VariableName(inst), libc(fn).Call(args...))), nil
+			return one(assign(VariableName(inst), Sym(fn).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_dealloc") {
-			return one(libc("RustDealloc").Call(args...)), nil
+			return one(Sym(libc.RustDealloc).Call(args...)), nil
 		} else if strings.Contains(llvmName, "__rust_realloc") {
-			return one(assign(VariableName(inst), libc("RustRealloc").Call(args...))), nil
+			return one(assign(VariableName(inst), Sym(libc.RustRealloc).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_no_alloc_shim") {
 			return nil, nil
 		} else if llvmName == "_Znwm" || llvmName == "_Znam" {
-			return one(assign(VariableName(inst), libc("RustAlloc").Call(args[0], jen.Lit(1)))), nil
+			return one(assign(VariableName(inst), Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), nil
 		} else if strings.HasPrefix(llvmName, "_Zdl") || strings.HasPrefix(llvmName, "_Zda") {
-			return one(libc("RustDealloc").Call(args[0], jen.Lit(0), jen.Lit(1))), nil
+			return one(Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))), nil
 		} else if _, ok := inst.Callee.(*ir.Func); ok {
 			callee = jen.Id(VariableName(inst.Callee.(value.Named)))
 			if c, ok := namedRef(llvmName); ok {
@@ -1795,7 +1792,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
 			}
-			callee = libcT("FuncFromCode", ft, fn)
+			callee = libcT(libc.FuncFromCode[func()], ft, fn)
 		}
 	}
 
@@ -1852,9 +1849,9 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 	}
 	switch goIntBits(it.BitSize) {
 	case 32:
-		return jen.Qual("sync/atomic", "AddInt32"), true
+		return Sym(atomic.AddInt32), true
 	case 64:
-		return jen.Qual("sync/atomic", "AddInt64"), true
+		return Sym(atomic.AddInt64), true
 	default:
 		return nil, false
 	}
@@ -1862,16 +1859,16 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 
 func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 	// Go has no SwapInt8; libc CAS-loop on the holding word.
-	return atomicWordFunc(t, "SwapPointer", "AtomicSwapI8", "SwapInt32", "SwapInt64")
+	return atomicWordFunc(t, atomic.SwapPointer, libc.AtomicSwapI8, atomic.SwapInt32, atomic.SwapInt64)
 }
 
 func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
-	return atomicWordFunc(t, "CompareAndSwapPointer", "AtomicCASI8", "CompareAndSwapInt32", "CompareAndSwapInt64")
+	return atomicWordFunc(t, atomic.CompareAndSwapPointer, libc.AtomicCASI8, atomic.CompareAndSwapInt32, atomic.CompareAndSwapInt64)
 }
 
-func atomicWordFunc(t types.Type, ptr, i8, i32, i64 string) (*jen.Statement, bool) {
+func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) {
 	if _, ok := t.(*types.PointerType); ok {
-		return jen.Qual("sync/atomic", ptr), true
+		return Sym(ptr), true
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
@@ -1879,11 +1876,11 @@ func atomicWordFunc(t types.Type, ptr, i8, i32, i64 string) (*jen.Statement, boo
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return libc(i8), true
+		return Sym(i8), true
 	case 32:
-		return jen.Qual("sync/atomic", i32), true
+		return Sym(i32), true
 	case 64:
-		return jen.Qual("sync/atomic", i64), true
+		return Sym(i64), true
 	default:
 		return nil, false
 	}
@@ -1891,19 +1888,19 @@ func atomicWordFunc(t types.Type, ptr, i8, i32, i64 string) (*jen.Statement, boo
 
 func atomicLoadFunc(t types.Type) *jen.Statement {
 	if _, ok := t.(*types.PointerType); ok {
-		return jen.Qual("sync/atomic", "LoadPointer")
+		return Sym(atomic.LoadPointer)
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
-		return jen.Qual("sync/atomic", "LoadInt64")
+		return Sym(atomic.LoadInt64)
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return libc("AtomicLoadI8")
+		return Sym(libc.AtomicLoadI8)
 	case 32:
-		return jen.Qual("sync/atomic", "LoadInt32")
+		return Sym(atomic.LoadInt32)
 	default:
-		return jen.Qual("sync/atomic", "LoadInt64")
+		return Sym(atomic.LoadInt64)
 	}
 }
 
@@ -1935,7 +1932,7 @@ func formatAggregateIndex(base *jen.Statement, t types.Type, indices []uint64) (
 // Crate hashes change; match the stable path suffix.
 func rustRuntime(name string) *jen.Statement {
 	if strings.Contains(name, "stdio6__print") {
-		return libc("RustPrint")
+		return Sym(libc.RustPrint)
 	}
 	if !strings.Contains(name, "7Display3fmt") {
 		return nil
@@ -1950,9 +1947,9 @@ func rustRuntime(name string) *jen.Statement {
 	}
 	switch rest[0] {
 	case 'l': // i32
-		return libc("RustFmtI32")
+		return Sym(libc.RustFmtI32)
 	case 'j': // usize
-		return libc("RustFmtUsize")
+		return Sym(libc.RustFmtUsize)
 	default:
 		return nil
 	}
@@ -2040,15 +2037,15 @@ const (
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "_Rb_tree_decrement"):
-		return libc("RbTreeDecrement"), cxxTreeWalk, true
+		return Sym(libc.RbTreeDecrement), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_increment"):
-		return libc("RbTreeIncrement"), cxxTreeWalk, true
+		return Sym(libc.RbTreeIncrement), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_insert_and_rebalance"):
-		return libc("RbTreeInsertAndRebalance"), cxxTreeInsert, true
+		return Sym(libc.RbTreeInsertAndRebalance), cxxTreeInsert, true
 	case strings.Contains(name, "_Rb_tree_rebalance_for_erase"):
-		return libc("RbTreeRebalanceForErase"), cxxTreeErase, true
+		return Sym(libc.RbTreeRebalanceForErase), cxxTreeErase, true
 	case isRbTreeDefaultCtor(name):
-		return libc("RbTreeInit"), cxxTreeInit, true
+		return Sym(libc.RbTreeInit), cxxTreeInit, true
 	default:
 		return nil, 0, false
 	}
@@ -2063,7 +2060,7 @@ func isRbTreeDefaultCtor(name string) bool {
 
 func cxxIONamed(name string) (*jen.Statement, bool) {
 	if cxxNoopDtor(name) {
-		return libc("CxxNoop"), true
+		return Sym(libc.CxxNoop), true
 	}
 	fn, _, ok := cxxIOKind(name)
 	return fn, ok
@@ -2285,55 +2282,55 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "4endlI") || strings.HasPrefix(name, "_ZSt4endl"):
-		return libc("OstreamEndl"), cxxIOEndl, true
+		return Sym(libc.OstreamEndl), cxxIOEndl, true
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
-		return libc("OstreamLsCStr"), cxxIOLsCStr, true
+		return Sym(libc.OstreamLsCStr), cxxIOLsCStr, true
 	// operator<<(ostream&, char)
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
-		return libc("OstreamPut"), cxxIOPut, true
+		return Sym(libc.OstreamPut), cxxIOPut, true
 	// operator<<(ostream&, basic_string const&)
 	case strings.Contains(name, "lsIcSt11char_traits") && strings.Contains(name, "basic_string"):
-		return libc("OstreamLsString"), cxxIOLsCStr, true
+		return Sym(libc.OstreamLsString), cxxIOLsCStr, true
 	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
-		return libc("OstreamInsertU64"), cxxIOInsertU64, true
+		return Sym(libc.OstreamInsertU64), cxxIOInsertU64, true
 	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
-		return libc("OstreamInsertI64"), cxxIOInsertI64, true
+		return Sym(libc.OstreamInsertI64), cxxIOInsertI64, true
 	case strings.Contains(name, "So3putE"):
-		return libc("OstreamPut"), cxxIOPut, true
+		return Sym(libc.OstreamPut), cxxIOPut, true
 	case strings.Contains(name, "So5flushE"):
-		return libc("OstreamFlush"), cxxIOFlush, true
+		return Sym(libc.OstreamFlush), cxxIOFlush, true
 	case strings.Contains(name, "5ctypeIcE13_M_widen_init"):
-		return libc("CtypeWidenInit"), cxxIOCtypeInit, true
+		return Sym(libc.CtypeWidenInit), cxxIOCtypeInit, true
 	case strings.Contains(name, "SolsEPFRSoS_E"):
 		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
-		return libc("OstreamEndl"), cxxIOEndl, true
+		return Sym(libc.OstreamEndl), cxxIOEndl, true
 	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
 		switch {
 		case strings.HasSuffix(name, "PKc"):
-			return libc("OstreamLsCStr"), cxxIOLsCStr, true
+			return Sym(libc.OstreamLsCStr), cxxIOLsCStr, true
 		case strings.HasSuffix(name, "PKv"):
 			// operator<<(void const*)
-			return libc("OstreamInsertPtr"), cxxIOInsertPtr, true
+			return Sym(libc.OstreamInsertPtr), cxxIOInsertPtr, true
 		// signed: char(a)/short(s)/int(i)/long(l)/long long(x)
 		case strings.HasSuffix(name, "Ea"), strings.HasSuffix(name, "Es"),
 			strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
 			strings.HasSuffix(name, "Ex"):
-			return libc("OstreamInsertI64"), cxxIOInsertI64, true
+			return Sym(libc.OstreamInsertI64), cxxIOInsertI64, true
 		// unsigned: zero-extend to u64 (Go uint64(intN(-1)) sign-extends).
 		case strings.HasSuffix(name, "Eh"): // unsigned char
-			return libc("OstreamInsertU64"), cxxIOInsertU8, true
+			return Sym(libc.OstreamInsertU64), cxxIOInsertU8, true
 		case strings.HasSuffix(name, "Et"): // unsigned short
-			return libc("OstreamInsertU64"), cxxIOInsertU16, true
+			return Sym(libc.OstreamInsertU64), cxxIOInsertU16, true
 		case strings.HasSuffix(name, "Ej"): // unsigned int
-			return libc("OstreamInsertU64"), cxxIOInsertU32, true
+			return Sym(libc.OstreamInsertU64), cxxIOInsertU32, true
 		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
-			return libc("OstreamInsertU64"), cxxIOInsertU64, true
+			return Sym(libc.OstreamInsertU64), cxxIOInsertU64, true
 		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"):
-			return libc("OstreamInsertF64"), cxxIOInsertF64, true
+			return Sym(libc.OstreamInsertF64), cxxIOInsertF64, true
 		case strings.HasSuffix(name, "Eb"):
-			return libc("OstreamInsertBool"), cxxIOInsertBool, true
+			return Sym(libc.OstreamInsertBool), cxxIOInsertBool, true
 		case strings.HasSuffix(name, "Ec"):
-			return libc("OstreamPut"), cxxIOPut, true
+			return Sym(libc.OstreamPut), cxxIOPut, true
 		}
 	}
 	return nil, 0, false
@@ -2387,38 +2384,38 @@ func isIstreamIosManip(name string) bool {
 
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
-		return libc("OstreamInsert"), cxxIOInsert, true
+		return Sym(libc.OstreamInsert), cxxIOInsert, true
 	}
 	if isGetline(name) {
-		return libc("IstreamGetline"), cxxIOGetline, true
+		return Sym(libc.IstreamGetline), cxxIOGetline, true
 	}
 	if isIstreamIosManip(name) {
-		return libc("IstreamApplyIosManip"), cxxIOManip, true
+		return Sym(libc.IstreamApplyIosManip), cxxIOManip, true
 	}
 	if isIstreamExtractI32(name) {
-		return libc("IstreamExtractI32"), cxxIOExtractI32, true
+		return Sym(libc.IstreamExtractI32), cxxIOExtractI32, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
 	}
 	if isIosBaseCtor(name) {
-		return libc("IosBaseCtor"), cxxIOIosBase, true
+		return Sym(libc.IosBaseCtor), cxxIOIosBase, true
 	}
 	if isLocaleCtor(name) {
-		return libc("LocaleCtor"), cxxIOIosBase, true
+		return Sym(libc.LocaleCtor), cxxIOIosBase, true
 	}
 	if isStringstream(name) {
 		switch {
 		case strings.Contains(name, "3strE"):
-			return libc("StringstreamStr"), cxxIOOStringStreamStr, true
+			return Sym(libc.StringstreamStr), cxxIOOStringStreamStr, true
 		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
 		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev"):
-			return libc("StringstreamDefaultCtor"), cxxIOOStringStreamCtor, true
+			return Sym(libc.StringstreamDefaultCtor), cxxIOOStringStreamCtor, true
 		case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"):
-			return libc("StringstreamCtor"), cxxIOStringstreamCtor, true
+			return Sym(libc.StringstreamCtor), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
 			// Prefer default-close if we might have dual keys; safe for both.
-			return libc("StringstreamDefaultClose"), cxxIOClose, true
+			return Sym(libc.StringstreamDefaultClose), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
@@ -2426,11 +2423,11 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if isOstringstream(name) {
 		switch {
 		case strings.Contains(name, "C1E") || strings.Contains(name, "C2E"):
-			return libc("OStringStreamCtor"), cxxIOOStringStreamCtor, true
+			return Sym(libc.OStringStreamCtor), cxxIOOStringStreamCtor, true
 		case strings.Contains(name, "3strE"):
-			return libc("OStringStreamStr"), cxxIOOStringStreamStr, true
+			return Sym(libc.OStringStreamStr), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
-			return libc("OStringStreamClose"), cxxIOClose, true
+			return Sym(libc.OStringStreamClose), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
@@ -2440,123 +2437,123 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	switch {
 	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"), strings.Contains(name, "4openE"):
-		return libc("IfstreamOpen"), cxxIOOpen, true
+		return Sym(libc.IfstreamOpen), cxxIOOpen, true
 	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"), strings.Contains(name, "5closeE"):
-		return libc("IfstreamClose"), cxxIOClose, true
+		return Sym(libc.IfstreamClose), cxxIOClose, true
 	default:
 		return nil, 0, false
 	}
 }
 
 var libraryFunctions = map[string]goRef{
-	"abort":          {libcPath, "Abort"},
-	"arc4random_buf": {libcPath, "Arc4randomBuf"},
-	"__cxa_atexit":   {libcPath, "CxaAtexit"},
-	"__dynamic_cast": {libcPath, "DynamicCast"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":                                        {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":                                        {libcPath, "IfstreamOpen"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                                           {libcPath, "IfstreamClose"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                                           {libcPath, "IfstreamCloseVTT"},
-	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                                                       {libcPath, "IfstreamClose"},
-	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                                                        {libcPath, "FilebufClose"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             {libcPath, "IosFail"},
-	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              {libcPath, "IosClear"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              {libcPath, "IosEof"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                                                {libcPath, "IosNot"},
-	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               {libcPath, "IosBool"},
-	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            {libcPath, "OstreamInsert"},
-	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": {libcPath, "IstreamGetline"},
+	"abort":          lib(libc.Abort),
+	"arc4random_buf": lib(libc.Arc4randomBuf),
+	"__cxa_atexit":   lib(libc.CxaAtexit),
+	"__dynamic_cast": lib(libc.DynamicCast),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode":                                        lib(libc.IfstreamOpen),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2EPKcSt13_Ios_Openmode":                                        lib(libc.IfstreamOpen),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev":                                                           lib(libc.IfstreamClose),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEED2Ev":                                                           lib(libc.IfstreamCloseVTT),
+	"_ZNSt14basic_ifstreamIcSt11char_traitsIcEE5closeEv":                                                       lib(libc.IfstreamClose),
+	"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv":                                                        lib(libc.FilebufClose),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             lib(libc.IosFail),
+	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              lib(libc.IosClear),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              lib(libc.IosEof),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEntEv":                                                                lib(libc.IosNot),
+	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               lib(libc.IosBool),
+	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            lib(libc.OstreamInsert),
+	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": lib(libc.IstreamGetline),
 	// stringstream / istream >> are matched by cxxIOKind (arg reshaping).
-	"__assert_fail":         {libcPath, "AssertFail"},
-	"fabs":                  {"math", "Abs"},
-	"fmod":                  {"math", "Mod"},
-	"pow":                   {"math", "Pow"},
-	"__ctype_b_loc":         {libcPath, "CtypeBLoc"},
-	"dup":                   {libcPath, "Dup"},
-	"fclose":                {libcPath, "Fclose"},
-	"fdopen":                {libcPath, "Fdopen"},
-	"fprintf":               {libcPath, "Fprintf"},
-	"fputc":                 {libcPath, "Fputc"},
-	"fputs":                 {libcPath, "Fputs"},
-	"free":                  {libcPath, "Free"},
-	"getchar":               {libcPath, "Getchar"},
-	"exit":                  {libcPath, "Exit"},
-	"iswalnum":              {libcPath, "Iswalnum"},
-	"iswalpha":              {libcPath, "Iswalpha"},
-	"iswblank":              {libcPath, "Iswblank"},
-	"iswcntrl":              {libcPath, "Iswcntrl"},
-	"iswdigit":              {libcPath, "Iswdigit"},
-	"iswlower":              {libcPath, "Iswlower"},
-	"iswspace":              {libcPath, "Iswspace"},
-	"iswupper":              {libcPath, "Iswupper"},
-	"iswxdigit":             {libcPath, "Iswxdigit"},
-	"leaven_va_arg":         {libcPath, "VAArg"},
-	"towlower":              {libcPath, "Towlower"},
-	"towupper":              {libcPath, "Towupper"},
-	"llvm_fabs_f64":         {"math", "Abs"},
-	"llvm_fabs_f80":         {"math", "Abs"},
-	"llvm_maximumnum_f64":   {libcPath, "MaximumNumF64"},
-	"llvm_pow_f64":          {"math", "Pow"},
-	"memchr":                {libcPath, "Memchr"},
-	"memcmp":                {libcPath, "Memcmp"},
-	"bcmp":                  {libcPath, "Memcmp"},
-	"__memcpy_chk":          {libcPath, "MemcpyChk"},
-	"memmove":               {libcPath, "Memmove"},
-	"memset_pattern16":      {libcPath, "MemsetPattern16"},
-	"__memset_chk":          {libcPath, "MemsetChk"},
-	"printf":                {libcPath, "Printf"},
-	"putc":                  {libcPath, "Putc"},
-	"putchar":               {libcPath, "Putchar"},
-	"__errno_location":      {libcPath, "ErrnoLocation"},
-	"close":                 {libcPath, "Close"},
-	"dlsym":                 {libcPath, "Dlsym"},
-	"fstat64":               {libcPath, "Fstat64"},
-	"getauxval":             {libcPath, "Getauxval"},
-	"getcwd":                {libcPath, "Getcwd"},
-	"getenv":                {libcPath, "Getenv"},
-	"getpid":                {libcPath, "Getpid"},
-	"getrandom":             {libcPath, "Getrandom"},
-	"gettid":                {libcPath, "Gettid"},
-	"lseek64":               {libcPath, "Lseek64"},
-	"mmap64":                {libcPath, "Mmap64"},
-	"mprotect":              {libcPath, "Mprotect"},
-	"munmap":                {libcPath, "Munmap"},
-	"open":                  {libcPath, "Open"},
-	"open64":                {libcPath, "Open64"},
-	"poll":                  {libcPath, "Poll"},
-	"pthread_attr_destroy":  {libcPath, "PthreadAttrDestroy"},
-	"pthread_attr_getstack": {libcPath, "PthreadAttrGetstack"},
-	"pthread_getattr_np":    {libcPath, "PthreadGetattrNp"},
-	"pthread_self":          {libcPath, "PthreadSelf"},
-	"puts":                  {libcPath, "Puts"},
-	"read":                  {libcPath, "Read"},
-	"realpath":              {libcPath, "Realpath"},
-	"sigaction":             {libcPath, "Sigaction"},
-	"sigaltstack":           {libcPath, "Sigaltstack"},
-	"signal":                {libcPath, "Signal"},
-	"stat64":                {libcPath, "Stat64"},
-	"sysconf":               {libcPath, "Sysconf"},
-	"syscall":               {libcPath, "Syscall"},
-	"write":                 {libcPath, "Write"},
-	"realloc":               {libcPath, "Realloc"},
-	"scanf":                 {libcPath, "Scanf"},
-	"sscanf":                {libcPath, "Sscanf"},
-	"__isoc23_sscanf":       {libcPath, "Sscanf"},
-	"srand48":               {libcPath, "Srand48"},
-	"lrand48":               {libcPath, "Lrand48"},
-	"statx":                 {libcPath, "Statx"},
-	"snprintf":              {libcPath, "Snprintf"},
-	"sqrt":                  {"math", "Sqrt"},
-	"__strcat_chk":          {libcPath, "StrcatChk"},
-	"strchr":                {libcPath, "Strchr"},
-	"strcmp":                {libcPath, "Strcmp"},
-	"strcpy":                {libcPath, "Strcpy"},
-	"strcspn":               {libcPath, "Strcspn"},
-	"strlen":                {libcPath, "Strlen"},
-	"strncat":               {libcPath, "Strncat"},
-	"strncmp":               {libcPath, "Strncmp"},
-	"strncpy":               {libcPath, "Strncpy"},
-	"strrchr":               {libcPath, "Strrchr"},
-	"strspn":                {libcPath, "Strspn"},
-	"strstr":                {libcPath, "Strstr"},
+	"__assert_fail":         lib(libc.AssertFail),
+	"fabs":                  lib(math.Abs),
+	"fmod":                  lib(math.Mod),
+	"pow":                   lib(math.Pow),
+	"__ctype_b_loc":         lib(libc.CtypeBLoc),
+	"dup":                   lib(libc.Dup),
+	"fclose":                lib(libc.Fclose),
+	"fdopen":                lib(libc.Fdopen),
+	"fprintf":               lib(libc.Fprintf),
+	"fputc":                 lib(libc.Fputc),
+	"fputs":                 lib(libc.Fputs),
+	"free":                  lib(libc.Free),
+	"getchar":               lib(libc.Getchar),
+	"exit":                  lib(libc.Exit),
+	"iswalnum":              lib(libc.Iswalnum),
+	"iswalpha":              lib(libc.Iswalpha),
+	"iswblank":              lib(libc.Iswblank),
+	"iswcntrl":              lib(libc.Iswcntrl),
+	"iswdigit":              lib(libc.Iswdigit),
+	"iswlower":              lib(libc.Iswlower),
+	"iswspace":              lib(libc.Iswspace),
+	"iswupper":              lib(libc.Iswupper),
+	"iswxdigit":             lib(libc.Iswxdigit),
+	"leaven_va_arg":         lib(libc.VAArg),
+	"towlower":              lib(libc.Towlower),
+	"towupper":              lib(libc.Towupper),
+	"llvm_fabs_f64":         lib(math.Abs),
+	"llvm_fabs_f80":         lib(math.Abs),
+	"llvm_maximumnum_f64":   lib(libc.MaximumNumF64),
+	"llvm_pow_f64":          lib(math.Pow),
+	"memchr":                lib(libc.Memchr),
+	"memcmp":                lib(libc.Memcmp),
+	"bcmp":                  lib(libc.Memcmp),
+	"__memcpy_chk":          lib(libc.MemcpyChk),
+	"memmove":               lib(libc.Memmove),
+	"memset_pattern16":      lib(libc.MemsetPattern16),
+	"__memset_chk":          lib(libc.MemsetChk),
+	"printf":                lib(libc.Printf),
+	"putc":                  lib(libc.Putc),
+	"putchar":               lib(libc.Putchar),
+	"__errno_location":      lib(libc.ErrnoLocation),
+	"close":                 lib(libc.Close),
+	"dlsym":                 lib(libc.Dlsym),
+	"fstat64":               lib(libc.Fstat64),
+	"getauxval":             lib(libc.Getauxval),
+	"getcwd":                lib(libc.Getcwd),
+	"getenv":                lib(libc.Getenv),
+	"getpid":                lib(libc.Getpid),
+	"getrandom":             lib(libc.Getrandom),
+	"gettid":                lib(libc.Gettid),
+	"lseek64":               lib(libc.Lseek64),
+	"mmap64":                lib(libc.Mmap64),
+	"mprotect":              lib(libc.Mprotect),
+	"munmap":                lib(libc.Munmap),
+	"open":                  lib(libc.Open),
+	"open64":                lib(libc.Open64),
+	"poll":                  lib(libc.Poll),
+	"pthread_attr_destroy":  lib(libc.PthreadAttrDestroy),
+	"pthread_attr_getstack": lib(libc.PthreadAttrGetstack),
+	"pthread_getattr_np":    lib(libc.PthreadGetattrNp),
+	"pthread_self":          lib(libc.PthreadSelf),
+	"puts":                  lib(libc.Puts),
+	"read":                  lib(libc.Read),
+	"realpath":              lib(libc.Realpath),
+	"sigaction":             lib(libc.Sigaction),
+	"sigaltstack":           lib(libc.Sigaltstack),
+	"signal":                lib(libc.Signal),
+	"stat64":                lib(libc.Stat64),
+	"sysconf":               lib(libc.Sysconf),
+	"syscall":               lib(libc.Syscall),
+	"write":                 lib(libc.Write),
+	"realloc":               lib(libc.Realloc),
+	"scanf":                 lib(libc.Scanf),
+	"sscanf":                lib(libc.Sscanf),
+	"__isoc23_sscanf":       lib(libc.Sscanf),
+	"srand48":               lib(libc.Srand48),
+	"lrand48":               lib(libc.Lrand48),
+	"statx":                 lib(libc.Statx),
+	"snprintf":              lib(libc.Snprintf),
+	"sqrt":                  lib(math.Sqrt),
+	"__strcat_chk":          lib(libc.StrcatChk),
+	"strchr":                lib(libc.Strchr),
+	"strcmp":                lib(libc.Strcmp),
+	"strcpy":                lib(libc.Strcpy),
+	"strcspn":               lib(libc.Strcspn),
+	"strlen":                lib(libc.Strlen),
+	"strncat":               lib(libc.Strncat),
+	"strncmp":               lib(libc.Strncmp),
+	"strncpy":               lib(libc.Strncpy),
+	"strrchr":               lib(libc.Strrchr),
+	"strspn":                lib(libc.Strspn),
+	"strstr":                lib(libc.Strstr),
 }
