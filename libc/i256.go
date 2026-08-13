@@ -128,31 +128,29 @@ func i256FromBig(x *big.Int) I256 {
 	return I256{Lo: i128FromBig(lo), Hi: i128FromBig(hi)}
 }
 
-func I256UDiv(a, b I256) I256 {
+func i256ZeroB(b I256, what string) {
 	if b.Lo == (I128{}) && b.Hi == (I128{}) {
-		panic("i256 udiv by zero")
+		panic("i256 " + what + " by zero")
 	}
+}
+
+func I256UDiv(a, b I256) I256 {
+	i256ZeroB(b, "udiv")
 	return i256FromBig(new(big.Int).Div(i256U(a), i256U(b)))
 }
 
 func I256SDiv(a, b I256) I256 {
-	if b.Lo == (I128{}) && b.Hi == (I128{}) {
-		panic("i256 sdiv by zero")
-	}
+	i256ZeroB(b, "sdiv")
 	return i256FromBig(new(big.Int).Quo(i256S(a), i256S(b)))
 }
 
 func I256URem(a, b I256) I256 {
-	if b.Lo == (I128{}) && b.Hi == (I128{}) {
-		panic("i256 urem by zero")
-	}
+	i256ZeroB(b, "urem")
 	return i256FromBig(new(big.Int).Rem(i256U(a), i256U(b)))
 }
 
 func I256SRem(a, b I256) I256 {
-	if b.Lo == (I128{}) && b.Hi == (I128{}) {
-		panic("i256 srem by zero")
-	}
+	i256ZeroB(b, "srem")
 	return i256FromBig(new(big.Int).Rem(i256S(a), i256S(b)))
 }
 

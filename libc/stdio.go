@@ -100,12 +100,7 @@ func Putchar(c int32) int32 {
 
 // Fprintf is C fprintf(stream, format, ...).
 func Fprintf(stream *os.File, format *byte, args ...any) int32 {
-	f := fixPrintfFormat(format, args)
-	n, err := fmt.Fprintf(stream, f, args...)
-	if err != nil {
-		return -1
-	}
-	return int32(n)
+	return printfTo(stream, format, args)
 }
 
 // Fputs is C fputs(s, stream).

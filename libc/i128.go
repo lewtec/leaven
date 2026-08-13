@@ -104,31 +104,29 @@ func i128FromBig(x *big.Int) I128 {
 	return I128{Lo: lo, Hi: hi}
 }
 
-func I128UDiv(a, b I128) I128 {
+func i128ZeroB(b I128, what string) {
 	if b.Lo == 0 && b.Hi == 0 {
-		panic("i128 udiv by zero")
+		panic("i128 " + what + " by zero")
 	}
+}
+
+func I128UDiv(a, b I128) I128 {
+	i128ZeroB(b, "udiv")
 	return i128FromBig(new(big.Int).Div(i128U(a), i128U(b)))
 }
 
 func I128SDiv(a, b I128) I128 {
-	if b.Lo == 0 && b.Hi == 0 {
-		panic("i128 sdiv by zero")
-	}
+	i128ZeroB(b, "sdiv")
 	return i128FromBig(new(big.Int).Quo(i128S(a), i128S(b)))
 }
 
 func I128URem(a, b I128) I128 {
-	if b.Lo == 0 && b.Hi == 0 {
-		panic("i128 urem by zero")
-	}
+	i128ZeroB(b, "urem")
 	return i128FromBig(new(big.Int).Rem(i128U(a), i128U(b)))
 }
 
 func I128SRem(a, b I128) I128 {
-	if b.Lo == 0 && b.Hi == 0 {
-		panic("i128 srem by zero")
-	}
+	i128ZeroB(b, "srem")
 	return i128FromBig(new(big.Int).Rem(i128S(a), i128S(b)))
 }
 

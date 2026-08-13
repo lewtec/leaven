@@ -3,6 +3,7 @@ package libc
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"unicode"
@@ -28,6 +29,44 @@ func asUnsigned(a any) any {
 	}
 }
 
+// parseCFormatSpec reads a C %…verb starting at format[pct] ('%').
+// verb=='%' with empty flags is a literal %%. ok is false if the string
+// ends mid-spec.
+func parseCFormatSpec(format []byte, pct int) (flags string, verb byte, after int, ok bool) {
+	i := pct + 1
+	if i < len(format) && format[i] == '%' {
+		return "", '%', i + 1, true
+	}
+	for i < len(format) {
+		switch format[i] {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '#', '-', '.', ',', ' ', 'h', 'j', 'l':
+			i++
+			continue
+		}
+		break
+	}
+	if i >= len(format) {
+		return "", 0, i, false
+	}
+	flags = string(format[pct:i])
+	verb = format[i]
+	flags = strings.ReplaceAll(flags, "h", "")
+	flags = strings.ReplaceAll(flags, "j", "")
+	flags = strings.ReplaceAll(flags, "l", "")
+	if j := strings.Index(flags, "#0"); j >= 0 && verb == 'x' {
+		k := j + 2
+		for k < len(flags) && '0' <= flags[k] && flags[k] <= '9' {
+			k++
+		}
+		n, err := strconv.Atoi(flags[j+2 : k])
+		if err != nil {
+			n = 0
+		}
+		flags = flags[:j+2] + fmt.Sprint(n-2) + flags[k:]
+	}
+	return flags, verb, i + 1, true
+}
+
 // fixPrintfFormat converts a printf format string from C-style to Go-style,
 // and makes needed changes to the other arguments as well.
 //
@@ -42,48 +81,18 @@ func fixPrintfFormat(f *byte, args []any) string {
 			continue
 		}
 		buf.Write(format[start:i])
-		start = i
-		i++
-		if i < len(format) && format[i] == '%' {
-			buf.WriteByte('%')
-			buf.WriteByte('%')
-			start = i + 1
-			continue
-		}
-		for i < len(format) {
-			c := format[i]
-			switch c {
-			case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '#', '-', '.', ',', ' ', 'h', 'j', 'l':
-				i++
-				continue
-			}
-			break
-		}
-		if i >= len(format) {
-			// The format string ends with an invalid verb.
+		flags, verb, after, ok := parseCFormatSpec(format, i)
+		if !ok {
 			return string(format)
 		}
-		flags, verb := string(format[start:i]), format[i]
-		start = i + 1
-
-		allFlags := flags
-		_ = allFlags
-
-		flags = strings.Replace(flags, "h", "", -1)
-		flags = strings.Replace(flags, "j", "", -1)
-		flags = strings.Replace(flags, "l", "", -1)
-
-		if j := strings.Index(flags, "#0"); j >= 0 && verb == 'x' {
-			k := j + 2
-			for k < len(flags) && '0' <= flags[k] && flags[k] <= '9' {
-				k++
-			}
-			n, err := strconv.Atoi(flags[j+2 : k])
-			if err != nil {
-				n = 0
-			}
-			flags = flags[:j+2] + fmt.Sprint(n-2) + flags[k:]
+		if verb == '%' && flags == "" {
+			buf.WriteString("%%")
+			start = after
+			i = after - 1
+			continue
 		}
+		start = after
+		i = after - 1
 
 		switch verb {
 		default:
@@ -132,13 +141,17 @@ func fixPrintfFormat(f *byte, args []any) string {
 	return buf.String()
 }
 
-func Printf(format *byte, args ...any) int32 {
+func printfTo(w io.Writer, format *byte, args []any) int32 {
 	f := fixPrintfFormat(format, args)
-	n, err := fmt.Printf(f, args...)
+	n, err := fmt.Fprintf(w, f, args...)
 	if err != nil {
 		return -1
 	}
 	return int32(n)
+}
+
+func Printf(format *byte, args ...any) int32 {
+	return printfTo(os.Stdout, format, args)
 }
 
 func Puts(s *byte) int32 {
@@ -161,48 +174,18 @@ func fixScanfFormat(f *byte, args []any) string {
 			continue
 		}
 		buf.Write(format[start:i])
-		start = i
-		i++
-		if i < len(format) && format[i] == '%' {
-			buf.WriteByte('%')
-			buf.WriteByte('%')
-			start = i + 1
-			continue
-		}
-		for i < len(format) {
-			c := format[i]
-			switch c {
-			case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '#', '-', '.', ',', ' ', 'h', 'j', 'l':
-				i++
-				continue
-			}
-			break
-		}
-		if i >= len(format) {
-			// The format string ends with an invalid verb.
+		flags, verb, after, ok := parseCFormatSpec(format, i)
+		if !ok {
 			return string(format)
 		}
-		flags, verb := string(format[start:i]), format[i]
-		start = i + 1
-
-		allFlags := flags
-		_ = allFlags
-
-		flags = strings.Replace(flags, "h", "", -1)
-		flags = strings.Replace(flags, "j", "", -1)
-		flags = strings.Replace(flags, "l", "", -1)
-
-		if j := strings.Index(flags, "#0"); j >= 0 && verb == 'x' {
-			k := j + 2
-			for k < len(flags) && '0' <= flags[k] && flags[k] <= '9' {
-				k++
-			}
-			n, err := strconv.Atoi(flags[j+2 : k])
-			if err != nil {
-				n = 0
-			}
-			flags = flags[:j+2] + fmt.Sprint(n-2) + flags[k:]
+		if verb == '%' && flags == "" {
+			buf.WriteString("%%")
+			start = after
+			i = after - 1
+			continue
 		}
+		start = after
+		i = after - 1
 
 		switch verb {
 		default:
