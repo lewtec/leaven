@@ -1348,6 +1348,9 @@ func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 		return nil, false
 	}
 	switch goIntBits(it.BitSize) {
+	case 8:
+		// Go has no SwapInt8; libc CAS-loop on the holding word.
+		return libc("AtomicSwapI8"), true
 	case 32:
 		return jen.Qual("sync/atomic", "SwapInt32"), true
 	case 64:
