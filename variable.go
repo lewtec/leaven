@@ -796,8 +796,13 @@ func boolToInt(src *jen.Statement, bits uint64, signed bool) *jen.Statement {
 	if signed {
 		t = -1
 	}
+	// byte cannot hold untyped -1; use 255 for i8 all-ones.
+	trueLit := jen.Lit(t)
+	if signed && goIntBits(bits) == 8 {
+		trueLit = jen.Lit(255)
+	}
 	return jen.Map(jen.Bool()).Add(goIntType(goIntBits(bits))).Values(jen.Dict{
-		jen.True():  jen.Lit(t),
+		jen.True():  trueLit,
 		jen.False(): jen.Lit(0),
 	}).Index(src)
 }

@@ -125,6 +125,22 @@ func TestCxxIOCallStringstream(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallOstringstream(t *testing.T) {
+	ctor := "_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEC1Ev"
+	fn, args, retPtr, ok := cxxIOCall(ctor, nil)
+	if !ok || fn == nil || retPtr || len(args) != 1 {
+		t.Fatalf("ctor %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	str := "_ZNKRSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEE3strEv"
+	if _, a, ret, ok := cxxIOCall(str, nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("str ret=%v n=%d", ret, len(a))
+	}
+	dtor := "_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEED1Ev"
+	if _, a, ret, ok := cxxIOCall(dtor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("dtor %v %d", ret, len(a))
+	}
+}
+
 func TestCxxNoopDtor(t *testing.T) {
 	if !cxxNoopDtor("_ZNSt6localeD1Ev") {
 		t.Fatal("locale")

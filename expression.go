@@ -17,6 +17,16 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if vt, ok := src.Type().(*types.VectorType); ok {
 		return vectorGEP(elemType, src, indices, vt)
 	}
+	// Scalar ptr + vector index → vector of pointers (rustc stride loops).
+	if len(indices) > 0 {
+		idx0 := indices[0]
+		if ci, ok := idx0.(*constant.Index); ok {
+			idx0 = ci.Constant
+		}
+		if ivt, ok := idx0.Type().(*types.VectorType); ok {
+			return scalarPtrVectorIndexGEP(elemType, src, indices, ivt)
+		}
+	}
 	if _, ok := src.Type().(*types.PointerType); !ok {
 		return expr{}, fmt.Errorf("%w: %v", errNonPointerSource, src.Type())
 	}
@@ -106,6 +116,40 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 		return addrExpr(result), nil
 	}
 	return val(unsafePtr(result)), nil
+}
+
+// scalarPtrVectorIndexGEP is getelementptr T, ptr %p, <N x iK> %idx.
+func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []value.Value, ivt *types.VectorType) (expr, error) {
+	if len(indices) != 1 {
+		return expr{}, fmt.Errorf("%w: vector index gep extra indices", errUnsupportedIndexType)
+	}
+	srcExpr, err := FormatValue(src)
+	if err != nil {
+		return expr{}, err
+	}
+	idx := indices[0]
+	if ci, ok := idx.(*constant.Index); ok {
+		idx = ci.Constant
+	}
+	idxExpr, err := FormatValue(idx)
+	if err != nil {
+		return expr{}, err
+	}
+	et, err := TypeSpec(elemType)
+	if err != nil {
+		return expr{}, err
+	}
+	n := int64(ivt.Len)
+	elems := make([]jen.Code, n)
+	for i := int64(0); i < n; i++ {
+		// Fresh base each lane — jennifer Statements are mutable builders.
+		base := jen.Parens(ptrTyp(et)).Call(jen.Add(srcExpr))
+		elems[i] = unsafePtr(libc("AddPointer").Types(et).Call(
+			base,
+			jen.Int().Call(jen.Add(idxExpr).Index(litUntyped(i))),
+		))
+	}
+	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
 
 // vectorGEP is getelementptr on a vector of pointers. Each lane is offset

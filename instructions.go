@@ -197,6 +197,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(name, bin(x, "&", y))), nil
 
 	case *ir.InstAShr:
+		if _, ok := inst.Typ.(*types.VectorType); ok {
+			return translateVectorShift(inst, ">>", false)
+		}
 		x, err := FormatSigned(inst.X)
 		if err != nil {
 			return nil, fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
@@ -476,6 +479,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(VariableName(inst), val)), nil
 
 	case *ir.InstLShr:
+		if _, ok := inst.Typ.(*types.VectorType); ok {
+			return translateVectorShift(inst, ">>", true)
+		}
 		x, err := FormatUnsigned(inst.X)
 		if err != nil {
 			return nil, fmt.Errorf("error translating left operand (%v): %w", inst.X, err)
@@ -580,8 +586,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				}
 				return one(assign(name, c)), nil
 			}
-			neg := -1
-			return one(jen.If(from).Block(assign(name, jen.Lit(neg))).Else().Block(assign(name, jen.Lit(0)))), nil
+			// i8 is byte: all-ones is 255, not untyped -1.
+			neg := jen.Lit(-1)
+			if toType.BitSize == 8 {
+				neg = jen.Lit(255)
+			}
+			return one(jen.If(from).Block(assign(name, neg)).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
 		if toType.BitSize == 128 || toType.BitSize == 256 {
 			c, err := formatSExt(inst.From, inst.To)
@@ -593,6 +603,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(name, conv(goIntType(toType.BitSize), from))), nil
 
 	case *ir.InstShl:
+		if _, ok := inst.Typ.(*types.VectorType); ok {
+			return translateVectorShift(inst, "<<", false)
+		}
 		x, err := translateOp(inst.X, "left operand")
 		if err != nil {
 			return nil, err
@@ -910,6 +923,17 @@ func translateI128Bin(name, op string, x, y value.Value, ashr bool) ([]jen.Code,
 }
 
 func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if _, ok := b.x.Type().(*types.VectorType); ok {
+		xv, err := translateOp(b.x, "left operand")
+		if err != nil {
+			return nil, err
+		}
+		yv, err := translateOp(b.y, "right operand")
+		if err != nil {
+			return nil, err
+		}
+		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
+	}
 	if stmts, ok, err := translateI128Bin(VariableName(inst), b.op, b.x, b.y, false); ok {
 		return stmts, err
 	}
@@ -922,6 +946,61 @@ func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		return nil, err
 	}
 	return one(assign(VariableName(inst), bin(xv, b.op, yv))), nil
+}
+
+// translateVectorShift lowers shl/lshr/ashr on <N x iK>. logical selects
+// lshr (unsigned >> per lane); Go int >> is arithmetic.
+func translateVectorShift(inst value.Named, op string, logical bool) ([]jen.Code, error) {
+	var x, y value.Value
+	var typ types.Type
+	switch s := inst.(type) {
+	case *ir.InstShl:
+		x, y, typ = s.X, s.Y, s.Typ
+	case *ir.InstLShr:
+		x, y, typ = s.X, s.Y, s.Typ
+	case *ir.InstAShr:
+		x, y, typ = s.X, s.Y, s.Typ
+	default:
+		return nil, fmt.Errorf("%w: vector shift %T", errUnsupportedInstruction, inst)
+	}
+	xv, err := translateOp(x, "left operand")
+	if err != nil {
+		return nil, err
+	}
+	yv, err := translateOp(y, "right operand")
+	if err != nil {
+		return nil, err
+	}
+	name := VariableName(inst)
+	vt, ok := typ.(*types.VectorType)
+	if !ok {
+		return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
+	}
+	it, ok := vt.ElemType.(*types.IntType)
+	if !ok {
+		return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
+	}
+	// lshr on Go signed ints must cast through unsigned per lane.
+	// Fresh type stmts each Call — reusing one *jen.Statement corrupts emit.
+	if logical && it.BitSize > 8 {
+		lane := func(v jen.Code) *jen.Statement {
+			return goUintType(it.BitSize).Call(v)
+		}
+		return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+			jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(it.BitSize)).Call(
+				bin(lane(jen.Id("v")), ">>", lane(jen.Add(yv).Index(jen.Id("i")))),
+			),
+		)), nil
+	}
+	// ashr i8: lanes are byte; shift as int8 then back.
+	if !logical && op == ">>" && it.BitSize == 8 {
+		return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+			jen.Id(name).Index(jen.Id("i")).Op("=").Add(jen.Byte().Call(
+				bin(jen.Int8().Call(jen.Id("v")), ">>", jen.Add(yv).Index(jen.Id("i"))),
+			)),
+		)), nil
+	}
+	return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
 }
 
 func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
@@ -948,6 +1027,17 @@ func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
 }
 
 func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if _, ok := b.x.Type().(*types.VectorType); ok {
+		xv, err := FormatSigned(b.x)
+		if err != nil {
+			return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
+		}
+		yv, err := FormatSigned(b.y)
+		if err != nil {
+			return nil, fmt.Errorf("error translating right operand (%v): %w", b.y, err)
+		}
+		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
+	}
 	if bits, ok := wideBits(inst.Type()); ok {
 		fn := wideFn(bits, "SDiv")
 		if b.op == "%" {
@@ -979,6 +1069,29 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 }
 
 func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+	if _, ok := b.x.Type().(*types.VectorType); ok {
+		xv, err := FormatUnsigned(b.x)
+		if err != nil {
+			return nil, fmt.Errorf("error translating left operand (%v): %w", b.x, err)
+		}
+		yv, err := FormatUnsigned(b.y)
+		if err != nil {
+			return nil, fmt.Errorf("error translating right operand (%v): %w", b.y, err)
+		}
+		// Go % on signed is truncated toward zero like urem for non-neg;
+		// cast through unsigned per lane when elem is wider than i8.
+		name := VariableName(inst)
+		if vt, ok := b.x.Type().(*types.VectorType); ok {
+			if it, ok := vt.ElemType.(*types.IntType); ok && it.BitSize > 8 {
+				return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(it.BitSize)).Call(
+						bin(goUintType(it.BitSize).Call(jen.Id("v")), b.op, goUintType(it.BitSize).Call(jen.Add(yv).Index(jen.Id("i")))),
+					),
+				)), nil
+			}
+		}
+		return one(vectorBin(vecBin{dest: name, op: b.op, x: xv, y: yv})), nil
+	}
 	if bits, ok := wideBits(inst.Type()); ok {
 		fn := wideFn(bits, "UDiv")
 		if b.op == "%" {
@@ -1064,6 +1177,10 @@ func calleeLLVMName(v value.Value) string {
 // llvmCallHandled is the llvm.* names translateCall lowers (no-op or libc).
 // hasRuntimeDef uses this instead of a blanket llvm_ prefix.
 func llvmCallHandled(name string) bool {
+	if strings.HasPrefix(name, "llvm_is_constant_") || strings.HasPrefix(name, "llvm_ucmp_") ||
+		strings.HasPrefix(name, "llvm_scmp_") || strings.HasPrefix(name, "llvm_vector_reduce_") {
+		return true
+	}
 	switch name {
 	case "llvm_lifetime_start_p0", "llvm_lifetime_end_p0",
 		"llvm_experimental_noalias_scope_decl", "llvm_assume",
@@ -1229,6 +1346,93 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	case "llvm_stacksave":
 		return one(assign(VariableName(inst), jen.Nil())), nil
 	}
+	// llvm.vector.reduce.{add,or,and,xor,mul}.* — lane fold.
+	if strings.HasPrefix(llvmName, "llvm_vector_reduce_") && len(args) == 1 {
+		op := ""
+		switch {
+		case strings.Contains(llvmName, "_add_"):
+			op = "+"
+		case strings.Contains(llvmName, "_or_"):
+			op = "|"
+		case strings.Contains(llvmName, "_and_"):
+			op = "&"
+		case strings.Contains(llvmName, "_xor_"):
+			op = "^"
+		case strings.Contains(llvmName, "_mul_"):
+			op = "*"
+		}
+		if op != "" {
+			name := VariableName(inst)
+			return []jen.Code{
+				assign(name, jen.Add(args[0]).Index(jen.Lit(0))),
+				jen.For(
+					jen.Id("i").Op(":=").Lit(1),
+					jen.Id("i").Op("<").Len(jen.Add(args[0])),
+					jen.Id("i").Op("++"),
+				).Block(
+					jen.Id(name).Op("=").Id(name).Op(op).Add(args[0]).Index(jen.Id("i")),
+				),
+			}, nil
+		}
+	}
+	// llvm.is.constant.* — runtime value is never a compile-time constant.
+	if strings.HasPrefix(llvmName, "llvm_is_constant_") {
+		return one(assign(VariableName(inst), jen.False())), nil
+	}
+	// llvm.ucmp / llvm.scmp → i8 {-1,0,1}. Go byte holds 255/0/1.
+	if strings.HasPrefix(llvmName, "llvm_ucmp_") || strings.HasPrefix(llvmName, "llvm_scmp_") {
+		if len(args) == 2 {
+			name := VariableName(inst)
+			unsigned := strings.HasPrefix(llvmName, "llvm_ucmp_")
+			// i128/i256: use libc compares (no Go < on structs).
+			if strings.Contains(llvmName, "i128") {
+				lt, eq := "I128Slt", "I128Eq"
+				if unsigned {
+					lt = "I128Ult"
+				}
+				return []jen.Code{
+					jen.If(libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+						assign(name, jen.Lit(255)),
+					).Else().If(libc(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+						assign(name, jen.Lit(0)),
+					).Else().Block(assign(name, jen.Lit(1))),
+				}, nil
+			}
+			if strings.Contains(llvmName, "i256") {
+				lt, eq := "I256Slt", "I256Eq"
+				if unsigned {
+					lt = "I256Ult"
+				}
+				return []jen.Code{
+					jen.If(libc(lt).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+						assign(name, jen.Lit(255)),
+					).Else().If(libc(eq).Call(jen.Add(args[0]), jen.Add(args[1]))).Block(
+						assign(name, jen.Lit(0)),
+					).Else().Block(assign(name, jen.Lit(1))),
+				}, nil
+			}
+			// Fresh expressions each use — jennifer Statements mutate.
+			lhs := func() *jen.Statement {
+				a := jen.Add(args[0])
+				if unsigned {
+					return jen.Uint64().Call(a)
+				}
+				return a
+			}
+			rhs := func() *jen.Statement {
+				a := jen.Add(args[1])
+				if unsigned {
+					return jen.Uint64().Call(a)
+				}
+				return a
+			}
+			return []jen.Code{
+				jen.If(lhs().Op("<").Add(rhs())).Block(assign(name, jen.Lit(255))).Else().If(
+					lhs().Op("==").Add(rhs()),
+				).Block(assign(name, jen.Lit(0))).Else().Block(assign(name, jen.Lit(1))),
+			}, nil
+		}
+	}
 
 	if callee == nil {
 		if ref, ok := libraryFunctions[llvmName]; ok {
@@ -1258,7 +1462,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			strings.Contains(llvmName, "throw_bad_alloc") ||
 			strings.Contains(llvmName, "throw_bad_array") {
 			return one(jen.Panic(jen.Lit("runtime error"))), nil
-		} else if strings.Contains(llvmName, "__rust_alloc") && !strings.Contains(llvmName, "dealloc") && !strings.Contains(llvmName, "realloc") && !strings.Contains(llvmName, "zeroed") {
+		} else if strings.Contains(llvmName, "alloc_error_handler") ||
+			strings.Contains(llvmName, "__rust_alloc_error") {
+			return one(jen.Panic(jen.Lit("allocation error"))), nil
+		} else if isRustAlloc(llvmName) {
 			return one(assign(VariableName(inst), libc("RustAlloc").Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_dealloc") {
 			return one(libc("RustDealloc").Call(args...)), nil
@@ -1469,6 +1676,8 @@ const (
 	cxxIOIosBase
 	cxxIOGetline
 	cxxIOStringstreamCtor
+	cxxIOOStringStreamCtor
+	cxxIOOStringStreamStr
 	cxxIOManip
 	cxxIOExtractI32
 )
@@ -1663,6 +1872,22 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			mode = jen.Add(args[2])
 		}
 		return fn, []jen.Code{this, str, mode}, false, true
+	case cxxIOOStringStreamCtor:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		return fn, []jen.Code{this}, false, true
+	case cxxIOOStringStreamStr:
+		// sret string first, then this (LLVM sret param order).
+		ret, this := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			ret = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			this = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{ret, this}, false, true
 	case cxxIOManip:
 		is, manip := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
@@ -1688,13 +1913,19 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 }
 
 // cxxOstreamOp is cout << / endl / put / flush. csmith OutputHeader
-// inlines some of these and calls the rest.
+// inlines some of these and calls the rest. Also gensym's ostringstream.
 func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	switch {
 	case strings.Contains(name, "4endlI") || strings.HasPrefix(name, "_ZSt4endl"):
 		return libc("OstreamEndl"), cxxIOEndl, true
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
 		return libc("OstreamLsCStr"), cxxIOLsCStr, true
+	// operator<<(ostream&, char)
+	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
+		return libc("OstreamPut"), cxxIOPut, true
+	// operator<<(ostream&, basic_string const&)
+	case strings.Contains(name, "lsIcSt11char_traits") && strings.Contains(name, "basic_string"):
+		return libc("OstreamLsString"), cxxIOLsCStr, true
 	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
 		return libc("OstreamInsertU64"), cxxIOInsertU64, true
 	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
@@ -1716,6 +1947,8 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 			return libc("OstreamInsertI64"), cxxIOInsertI64, true
 		case strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
 			return libc("OstreamInsertU64"), cxxIOInsertU64, true
+		case strings.HasSuffix(name, "Ec"):
+			return libc("OstreamPut"), cxxIOPut, true
 		}
 	}
 	return nil, 0, false
@@ -1741,6 +1974,19 @@ func isGetline(name string) bool {
 
 func isStringstream(name string) bool {
 	return strings.Contains(name, "18basic_stringstream")
+}
+
+func isOstringstream(name string) bool {
+	return strings.Contains(name, "19basic_ostringstream")
+}
+
+// isRustAlloc is __rust_alloc / __rust_alloc_zeroed, not *_error_handler.
+func isRustAlloc(name string) bool {
+	if strings.Contains(name, "error") || strings.Contains(name, "dealloc") ||
+		strings.Contains(name, "realloc") {
+		return false
+	}
+	return strings.Contains(name, "__rust_alloc")
 }
 
 func isIstreamExtractI32(name string) bool {
@@ -1782,6 +2028,18 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 			return libc("StringstreamCtor"), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
 			return libc("StringstreamClose"), cxxIOClose, true
+		default:
+			return nil, 0, false
+		}
+	}
+	if isOstringstream(name) {
+		switch {
+		case strings.Contains(name, "C1E") || strings.Contains(name, "C2E"):
+			return libc("OStringStreamCtor"), cxxIOOStringStreamCtor, true
+		case strings.Contains(name, "3strE"):
+			return libc("OStringStreamStr"), cxxIOOStringStreamStr, true
+		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
+			return libc("OStringStreamClose"), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
