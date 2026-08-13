@@ -563,7 +563,8 @@ func reachableBlocks(f *ir.Func) map[*ir.Block]bool {
 				succ = append(succ, c.Target)
 			}
 		case *ir.TermInvoke:
-			succ = []value.Value{term.NormalRetTarget, term.ExceptionRetTarget}
+			// writeFuncBody only emits the normal edge (no landing pads).
+			succ = []value.Value{term.NormalRetTarget}
 		}
 		for _, v := range succ {
 			nb, ok := v.(*ir.Block)
@@ -600,8 +601,8 @@ func blockGotoTargetsFrom(f *ir.Func, from map[*ir.Block]bool) map[*ir.Block]boo
 				add(c.Target)
 			}
 		case *ir.TermInvoke:
+			// Match writeFuncBody: only the normal edge is a real goto.
 			add(term.NormalRetTarget)
-			add(term.ExceptionRetTarget)
 		}
 	}
 	return targets
