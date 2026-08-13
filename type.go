@@ -294,9 +294,21 @@ func TypeName(t types.Type) string {
 		return ""
 	}
 
-	// Sanitize remaining punctuation from LLVM/clang type names
-	// (std::__cxx11::basic_string, templates, etc.).
-	r := strings.NewReplacer(".", "_", "-", "_", ":", "_", "<", "_", ">", "_", ",", "_", " ", "_", "*", "p")
+	// Sanitize remaining punctuation from LLVM/clang/rustc type names
+	// (std::__cxx11::basic_string, smallvec::SmallVec<[usize; 2]>, etc.).
+	r := strings.NewReplacer(
+		".", "_", "-", "_", ":", "_",
+		"<", "_", ">", "_", ",", "_",
+		" ", "_", "*", "p",
+		";", "_", "[", "_", "]", "_",
+		"(", "_", ")", "_",
+		"'", "_", "\"", "_",
+		"/", "_", "\\", "_",
+		"=", "_", "+", "_", "&", "_",
+		"|", "_", "!", "_", "?", "_",
+		"@", "_", "#", "_", "%", "_",
+		"^", "_", "~", "_", "`", "_",
+	)
 	name = r.Replace(name)
 	if name == "" {
 		return ""
