@@ -26,3 +26,23 @@ func TestAtomicSwapI8(t *testing.T) {
 		b[off] = 0
 	}
 }
+
+func TestAtomicCASI8(t *testing.T) {
+	var b [4]byte
+	b[1] = 7
+	if AtomicCASI8(&b[1], 8, 9) {
+		t.Fatal("CAS should fail on mismatch")
+	}
+	if b[1] != 7 {
+		t.Fatalf("value changed on failed CAS: %d", b[1])
+	}
+	if !AtomicCASI8(&b[1], 7, 9) {
+		t.Fatal("CAS should succeed")
+	}
+	if b[1] != 9 {
+		t.Fatalf("after CAS: %d", b[1])
+	}
+	if AtomicLoadI8(&b[1]) != 9 {
+		t.Fatal("load")
+	}
+}

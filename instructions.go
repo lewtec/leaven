@@ -1375,6 +1375,8 @@ func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
 		return nil, false
 	}
 	switch goIntBits(it.BitSize) {
+	case 8:
+		return libc("AtomicCASI8"), true
 	case 32:
 		return jen.Qual("sync/atomic", "CompareAndSwapInt32"), true
 	case 64:
@@ -1393,6 +1395,8 @@ func atomicLoadFunc(t types.Type) *jen.Statement {
 		return jen.Qual("sync/atomic", "LoadInt64")
 	}
 	switch goIntBits(it.BitSize) {
+	case 8:
+		return libc("AtomicLoadI8")
 	case 32:
 		return jen.Qual("sync/atomic", "LoadInt32")
 	default:
