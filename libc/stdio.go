@@ -16,6 +16,25 @@ func Getchar() int32 {
 	return int32(buf[0])
 }
 
+// Poll is poll(2). pollfd is {i32 fd; i16 events; i16 revents} (8 bytes).
+// Marks every slot ready (revents=events) so rhai-run stdin checks proceed.
+func Poll(fds *byte, nfds int64, timeout int32) int32 {
+	_ = timeout
+	if fds == nil || nfds <= 0 {
+		return 0
+	}
+	const pollfdSize = 8
+	const eventsOff = 4
+	const reventsOff = 6
+	base := unsafe.Pointer(fds)
+	for i := int64(0); i < nfds; i++ {
+		p := unsafe.Add(base, i*pollfdSize)
+		ev := *(*int16)(unsafe.Add(p, eventsOff))
+		*(*int16)(unsafe.Add(p, reventsOff)) = ev
+	}
+	return int32(nfds)
+}
+
 func Putc(c int32, stream *os.File) int32 {
 	_, err := stream.Write([]byte{byte(c)})
 	if err != nil {

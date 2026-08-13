@@ -297,7 +297,19 @@ func (inst *InstSelect) String() string {
 func (inst *InstSelect) Type() types.Type {
 	// Cache type if not present.
 	if inst.Typ == nil {
-		inst.Typ = inst.ValueTrue.Type()
+		// @f is typed as ptr-to-sig; before define runs that sig is often the
+		// predeclare stub void(). LLVM 15+ IR writes select of functions as ptr.
+		if _, ok := inst.ValueTrue.(*Func); ok {
+			inst.Typ = types.NewOpaquePointer()
+		} else if pt, ok := inst.ValueTrue.Type().(*types.PointerType); ok && !pt.IsOpaque() {
+			if _, isFn := pt.ElemType.(*types.FuncType); isFn {
+				inst.Typ = types.NewOpaquePointer()
+			} else {
+				inst.Typ = inst.ValueTrue.Type()
+			}
+		} else {
+			inst.Typ = inst.ValueTrue.Type()
+		}
 	}
 	return inst.Typ
 }
@@ -516,25 +528,26 @@ func (inst *InstCall) Operands() []*value.Value {
 }
 
 // Sig returns the function signature of the callee.
+// Call-site return type + arg types win: predeclared funcs start as void()
+// and select of @f can cache that stub before define fills f.Sig.
 func (inst *InstCall) Sig() *types.FuncType {
+	if inst.Typ != nil {
+		if sig, ok := inst.Typ.(*types.FuncType); ok {
+			return sig
+		}
+		// Usual LLVM 15+ form: Typ is the return type only.
+		params := make([]types.Type, len(inst.Args))
+		for i, a := range inst.Args {
+			params[i] = a.Type()
+		}
+		return types.NewFunc(inst.Typ, params...)
+	}
 	if t, ok := inst.Callee.Type().(*types.PointerType); ok && !t.IsOpaque() {
 		if sig, ok := t.ElemType.(*types.FuncType); ok {
 			return sig
 		}
 	}
-	// Opaque callee (LLVM 15+ ptr): use the explicit call type if present.
-	if sig, ok := inst.Typ.(*types.FuncType); ok {
-		return sig
-	}
-	ret := inst.Typ
-	if ret == nil {
-		ret = types.Void
-	}
-	params := make([]types.Type, len(inst.Args))
-	for i, a := range inst.Args {
-		params[i] = a.Type()
-	}
-	return types.NewFunc(ret, params...)
+	return types.NewFunc(types.Void)
 }
 
 // ~~~ [ va_arg ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

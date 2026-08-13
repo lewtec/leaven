@@ -699,6 +699,10 @@ func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error)
 	default:
 		return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
 	}
+	// Go forbids ordered compares on unsafe.Pointer; always use uintptr.
+	if _, ok := xVal.Type().(*types.PointerType); ok {
+		format = FormatUnsigned
+	}
 	x, err := format(xVal)
 	if err != nil {
 		return nil, fmt.Errorf("error translating left operand (%v): %w", xVal, err)

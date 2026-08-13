@@ -643,6 +643,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		)), nil
 
 	case *ir.InstSIToFP:
+		if bits, ok := wideBits(inst.From.Type()); ok {
+			from, err := translateOp(inst.From, "source")
+			if err != nil {
+				return nil, err
+			}
+			// Low 64 bits as signed; enough for Dynamic numeric casts.
+			limb := jen.Add(from).Dot("Lo")
+			if bits == 256 {
+				limb = limb.Dot("Lo")
+			}
+			return one(assign(VariableName(inst), jen.Float64().Call(jen.Int64().Call(limb)))), nil
+		}
 		from, err := FormatSigned(inst.From)
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
@@ -703,6 +715,17 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(assign(VariableName(inst), c)), nil
 
 	case *ir.InstUIToFP:
+		if bits, ok := wideBits(inst.From.Type()); ok {
+			from, err := translateOp(inst.From, "source")
+			if err != nil {
+				return nil, err
+			}
+			limb := jen.Add(from).Dot("Lo")
+			if bits == 256 {
+				limb = limb.Dot("Lo")
+			}
+			return one(assign(VariableName(inst), jen.Float64().Call(limb))), nil
+		}
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.From, err)
@@ -1178,7 +1201,8 @@ func calleeLLVMName(v value.Value) string {
 // hasRuntimeDef uses this instead of a blanket llvm_ prefix.
 func llvmCallHandled(name string) bool {
 	if strings.HasPrefix(name, "llvm_is_constant_") || strings.HasPrefix(name, "llvm_ucmp_") ||
-		strings.HasPrefix(name, "llvm_scmp_") || strings.HasPrefix(name, "llvm_vector_reduce_") {
+		strings.HasPrefix(name, "llvm_scmp_") || strings.HasPrefix(name, "llvm_vector_reduce_") ||
+		strings.HasPrefix(name, "llvm_threadlocal_address") {
 		return true
 	}
 	switch name {
@@ -1373,6 +1397,12 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 					jen.Id(name).Op("=").Id(name).Op(op).Add(args[0]).Index(jen.Id("i")),
 				),
 			}, nil
+		}
+	}
+	// llvm.threadlocal.address — TLS base is the global address in our model.
+	if strings.HasPrefix(llvmName, "llvm_threadlocal_address") {
+		if len(args) == 1 {
+			return one(assign(VariableName(inst), jen.Add(args[0]))), nil
 		}
 	}
 	// llvm.is.constant.* — runtime value is never a compile-time constant.
@@ -1670,6 +1700,7 @@ const (
 	cxxIOLsCStr
 	cxxIOInsertI64
 	cxxIOInsertU64
+	cxxIOInsertF64
 	cxxIOPut
 	cxxIOFlush
 	cxxIOCtypeInit
@@ -1830,6 +1861,15 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			n = jen.Uint64().Call(args[1])
 		}
 		return fn, []jen.Code{os, n}, true, true
+	case cxxIOInsertF64:
+		os, x := jen.Nil(), jen.Lit(0.0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			x = jen.Float64().Call(args[1])
+		}
+		return fn, []jen.Code{os, x}, true, true
 	case cxxIOPut:
 		os, c := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
@@ -1947,6 +1987,8 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 			return libc("OstreamInsertI64"), cxxIOInsertI64, true
 		case strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
 			return libc("OstreamInsertU64"), cxxIOInsertU64, true
+		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"):
+			return libc("OstreamInsertF64"), cxxIOInsertF64, true
 		case strings.HasSuffix(name, "Ec"):
 			return libc("OstreamPut"), cxxIOPut, true
 		}
@@ -2024,10 +2066,16 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if isStringstream(name) {
 		switch {
+		case strings.Contains(name, "3strE"):
+			return libc("StringstreamStr"), cxxIOOStringStreamStr, true
+		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
+		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev"):
+			return libc("StringstreamDefaultCtor"), cxxIOOStringStreamCtor, true
 		case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"):
 			return libc("StringstreamCtor"), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
-			return libc("StringstreamClose"), cxxIOClose, true
+			// Prefer default-close if we might have dual keys; safe for both.
+			return libc("StringstreamDefaultClose"), cxxIOClose, true
 		default:
 			return nil, 0, false
 		}
@@ -2114,6 +2162,7 @@ var libraryFunctions = map[string]goRef{
 	"printf":              {libcPath, "Printf"},
 	"putc":                {libcPath, "Putc"},
 	"putchar":             {libcPath, "Putchar"},
+	"poll":                {libcPath, "Poll"},
 	"puts":                {libcPath, "Puts"},
 	"realloc":             {libcPath, "Realloc"},
 	"scanf":               {libcPath, "Scanf"},
