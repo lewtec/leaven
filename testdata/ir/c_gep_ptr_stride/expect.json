@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "package p",
-        "AddPointer[unsafe.Pointer]",
+        "AddPointer[byte]",
         "unsafe.Pointer("
       ],
       "not_contains": [
