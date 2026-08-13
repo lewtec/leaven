@@ -1523,14 +1523,18 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	var callee *jen.Statement
 	typedPtr := false // Go callee returns *T; LLVM dest is unsafe.Pointer
 	switch llvmName {
-	case "calloc", "malloc":
+	case "malloc", "calloc":
 		et := jen.Byte()
 		if pt, ok := inst.Typ.(*types.PointerType); ok && !pt.IsOpaque() && pt.ElemType != nil {
 			if t, err := TypeSpec(pt.ElemType); err == nil {
 				et = t
 			}
 		}
-		callee = jen.Qual(libcPath, strings.Title(llvmName)).Types(et)
+		fn := any(libc.Malloc[byte])
+		if llvmName == "calloc" {
+			fn = libc.Calloc[byte]
+		}
+		callee = Sym(fn).Types(et)
 		typedPtr = true
 	case "leaven_va_start":
 		if len(args) == 1 {
