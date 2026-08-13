@@ -248,6 +248,11 @@ func writeOstream(out *byte, p []byte) {
 	_, _ = os.Stdout.Write(p)
 }
 
+// stringstreamOstreamOff is the ostream subobject inside basic_stringstream
+// (basic_iostream.base is 16 bytes in this libstdc++ IR). new_ctrl_vars does
+// << on this+16.
+const stringstreamOstreamOff = 16
+
 // OStringStreamCtor is basic_ostringstream default ctor (gensym).
 // Object is ~112 bytes; do not InitOstream (ctype at +240).
 func OStringStreamCtor(this *byte) {
@@ -257,9 +262,19 @@ func OStringStreamCtor(this *byte) {
 	buf := []byte{}
 	ostringStreams.Store(uintptr(unsafe.Pointer(this)), &buf)
 	// Stand-in vptr only (first word); no ctype slot in this size.
-	if this != nil {
-		*(*unsafe.Pointer)(unsafe.Pointer(this)) = StandinVptr()
+	*(*unsafe.Pointer)(unsafe.Pointer(this)) = StandinVptr()
+}
+
+// StringstreamDefaultCtor is basic_stringstream() used by Variable::new_ctrl_vars.
+// Registers both the object and the ostream subobject (+16) for <<.
+func StringstreamDefaultCtor(this *byte) {
+	if this == nil {
+		return
 	}
+	buf := []byte{}
+	base := uintptr(unsafe.Pointer(this))
+	ostringStreams.Store(base, &buf)
+	ostringStreams.Store(base+stringstreamOstreamOff, &buf)
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
@@ -270,7 +285,19 @@ func OStringStreamClose(this *byte) {
 	ostringStreams.Delete(uintptr(unsafe.Pointer(this)))
 }
 
-// OStringStreamStr is basic_ostringstream::str() → basic_string (sret).
+// StringstreamDefaultClose is basic_stringstream dtor (default or string ctor).
+func StringstreamDefaultClose(this *byte) {
+	if this == nil {
+		return
+	}
+	base := uintptr(unsafe.Pointer(this))
+	ostringStreams.Delete(base)
+	ostringStreams.Delete(base + stringstreamOstreamOff)
+	// Also drop the read-side table used by str2int.
+	StringstreamClose(this)
+}
+
+// OStringStreamStr is basic_ostringstream::str() / stringstream::str() → string.
 func OStringStreamStr(ret, this *byte) {
 	if ret == nil {
 		return
@@ -281,6 +308,9 @@ func OStringStreamStr(ret, this *byte) {
 	}
 	cxxStringAssign(ret, data)
 }
+
+// StringstreamStr is an alias of OStringStreamStr for mangling tables.
+func StringstreamStr(ret, this *byte) { OStringStreamStr(ret, this) }
 
 // OstreamInsert is std::__ostream_insert<char>(ostream&, char const*, long).
 // csmith OutputMgr::OutputHeader writes the generated program header
@@ -322,6 +352,26 @@ func OstreamInsertI64(out *byte, n int64) *byte {
 // OstreamInsertU64 is ostream::_M_insert<unsigned long>.
 func OstreamInsertU64(out *byte, n uint64) *byte {
 	writeOstream(out, strconv.AppendUint(nil, n, 10))
+	return out
+}
+
+// ostreamPrecision reads ios_base::_M_precision. With StandinVptr, vbase
+// offset is 0 so ios is at the ostream address; field 1 is i64 @+8.
+// Default precision is 6 (libstdc++). Bookkeeper sets 3 before stats.
+func ostreamPrecision(out *byte) int {
+	if out == nil {
+		return 6
+	}
+	p := *(*int64)(unsafe.Add(unsafe.Pointer(out), 8))
+	if p <= 0 {
+		return 6
+	}
+	return int(p)
+}
+
+// OstreamInsertF64 is operator<<(ostream&, double) / float.
+func OstreamInsertF64(out *byte, x float64) *byte {
+	writeOstream(out, strconv.AppendFloat(nil, x, 'g', ostreamPrecision(out), 64))
 	return out
 }
 

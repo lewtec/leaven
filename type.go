@@ -206,15 +206,25 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		for i, field := range t.Fields {
 			var fieldType *jen.Statement
 			var err error
-			if structFieldUintptr(t, field) {
+			if t.Packed && packedMixesPtrAndInt(t) {
+				// <{ ptr, i32 }>: Go {uintptr,int32} is 16 bytes (align 8);
+				// LLVM packed is 12. Use [8]byte for the ptr slot so the
+				// struct is 12 bytes and parent layouts (vector<bool>) match.
+				// Field access is via unsafe address (see _Bit_iterator_base).
+				if _, ok := field.(*types.PointerType); ok {
+					fieldType = jen.Index(jen.Lit(8)).Byte()
+				} else {
+					fieldType, err = TypeSpec(field)
+				}
+			} else if structFieldUintptr(t, field) {
 				// This slot may hold a tagged non-pointer (union payload or
 				// packed ptr+int). Do not put it in a GC pointer field.
 				fieldType = jen.Uintptr()
 			} else {
 				fieldType, err = TypeSpec(field)
-				if err != nil {
-					return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
-				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
 			}
 			fields = append(fields, jen.Id(fieldName(i)).Add(fieldType))
 		}

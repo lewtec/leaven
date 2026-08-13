@@ -252,3 +252,19 @@ func TestOStringStreamGensym(t *testing.T) {
 	}
 	OStringStreamClose(&oss[0])
 }
+
+func TestStringstreamDefaultNewCtrlVars(t *testing.T) {
+	// Variable::new_ctrl_vars: ss(); << 'i' via this+16; << n; str()
+	var ss [128]byte
+	StringstreamDefaultCtor(&ss[0])
+	os := &ss[stringstreamOstreamOff]
+	OstreamPut(os, 'i')
+	OstreamInsertU64(os, 0)
+	ret := emptyCxxString()
+	StringstreamStr(&ret[0], &ss[0])
+	got := string(cxxStringBytes(&ret[0]))
+	if got != "i0" {
+		t.Fatalf("str %q", got)
+	}
+	StringstreamDefaultClose(&ss[0])
+}
