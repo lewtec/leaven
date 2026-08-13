@@ -89,12 +89,19 @@ func RbTreeIncrement(x *byte) *byte {
 	return (*byte)(unsafe.Pointer(n))
 }
 
-// RbTreeInit is the empty _Rb_tree / map header: red, no root,
-// left/right point at the header. libstdc++ _Rb_tree_header::_M_reset.
-func RbTreeInit(header *byte) {
-	if header == nil {
+// rbTreeImplHeaderOff is the byte offset of _Rb_tree_header inside
+// libstdc++ _Rb_tree_impl when the comparator is empty (EBO as [8 x i8]
+// in clang IR). map/tree default ctors pass `this` (impl start), not the header.
+const rbTreeImplHeaderOff = 8
+
+// RbTreeInit is the empty map / _Rb_tree default ctor. `tree` points at the
+// _Rb_tree / map object (impl start). Header is at +8; left/right self-ref
+// the header node (libstdc++ _Rb_tree_header::_M_reset).
+func RbTreeInit(tree *byte) {
+	if tree == nil {
 		return
 	}
+	header := (*byte)(unsafe.Add(unsafe.Pointer(tree), rbTreeImplHeaderOff))
 	n := rb(header)
 	n.color = rbRed
 	n.parent = nil

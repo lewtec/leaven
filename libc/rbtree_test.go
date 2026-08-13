@@ -41,17 +41,27 @@ func TestRbTreeIncDecHeader(t *testing.T) {
 }
 
 func TestRbTreeInsertEmpty(t *testing.T) {
-	var hdr, a rbNode
-	RbTreeInit((*byte)(unsafe.Pointer(&hdr)))
-	RbTreeInsertAndRebalance(true, (*byte)(unsafe.Pointer(&a)), (*byte)(unsafe.Pointer(&hdr)), (*byte)(unsafe.Pointer(&hdr)))
-	if hdr.parent != unsafe.Pointer(&a) || hdr.left != unsafe.Pointer(&a) || hdr.right != unsafe.Pointer(&a) {
-		t.Fatalf("header %+v", hdr)
+	// Layout matches clang IR _Rb_tree_impl: [8 x i8] pad + header node + count.
+	var impl struct {
+		_     [rbTreeImplHeaderOff]byte
+		hdr   rbNode
+		count uint64
 	}
-	if a.color != rbBlack || a.parent != unsafe.Pointer(&hdr) {
+	var a rbNode
+	RbTreeInit((*byte)(unsafe.Pointer(&impl)))
+	hdr := &impl.hdr
+	RbTreeInsertAndRebalance(true, (*byte)(unsafe.Pointer(&a)), (*byte)(unsafe.Pointer(hdr)), (*byte)(unsafe.Pointer(hdr)))
+	if hdr.parent != unsafe.Pointer(&a) || hdr.left != unsafe.Pointer(&a) || hdr.right != unsafe.Pointer(&a) {
+		t.Fatalf("header %+v", *hdr)
+	}
+	if a.color != rbBlack || a.parent != unsafe.Pointer(hdr) {
 		t.Fatalf("root %+v", a)
 	}
-	if p := RbTreeDecrement((*byte)(unsafe.Pointer(&hdr))); p != (*byte)(unsafe.Pointer(&a)) {
+	if p := RbTreeDecrement((*byte)(unsafe.Pointer(hdr))); p != (*byte)(unsafe.Pointer(&a)) {
 		t.Fatalf("dec end")
+	}
+	if impl.count != 0 {
+		// InsertAndRebalance does not bump count; ctor leaves 0.
 	}
 }
 

@@ -223,46 +223,111 @@ func CtypeWidenInit(this *byte) {
 	}
 }
 
+// ostringStreams is gensym's basic_ostringstream: side table of written bytes.
+// Keyed by object address; << goes here when present, else stdout (cout).
+var ostringStreams sync.Map // uintptr → *[]byte
+
+func ostringBuf(out *byte) *[]byte {
+	if out == nil {
+		return nil
+	}
+	if v, ok := ostringStreams.Load(uintptr(unsafe.Pointer(out))); ok {
+		return v.(*[]byte)
+	}
+	return nil
+}
+
+func writeOstream(out *byte, p []byte) {
+	if len(p) == 0 {
+		return
+	}
+	if b := ostringBuf(out); b != nil {
+		*b = append(*b, p...)
+		return
+	}
+	_, _ = os.Stdout.Write(p)
+}
+
+// OStringStreamCtor is basic_ostringstream default ctor (gensym).
+// Object is ~112 bytes; do not InitOstream (ctype at +240).
+func OStringStreamCtor(this *byte) {
+	if this == nil {
+		return
+	}
+	buf := []byte{}
+	ostringStreams.Store(uintptr(unsafe.Pointer(this)), &buf)
+	// Stand-in vptr only (first word); no ctype slot in this size.
+	if this != nil {
+		*(*unsafe.Pointer)(unsafe.Pointer(this)) = StandinVptr()
+	}
+}
+
+// OStringStreamClose is basic_ostringstream dtor.
+func OStringStreamClose(this *byte) {
+	if this == nil {
+		return
+	}
+	ostringStreams.Delete(uintptr(unsafe.Pointer(this)))
+}
+
+// OStringStreamStr is basic_ostringstream::str() → basic_string (sret).
+func OStringStreamStr(ret, this *byte) {
+	if ret == nil {
+		return
+	}
+	var data []byte
+	if b := ostringBuf(this); b != nil {
+		data = *b
+	}
+	cxxStringAssign(ret, data)
+}
+
 // OstreamInsert is std::__ostream_insert<char>(ostream&, char const*, long).
 // csmith OutputMgr::OutputHeader writes the generated program header
 // through this. Unknown streams go to stdout (DefaultOutputMgr::get_main_out
-// is cout).
+// is cout); registered ostringstreams append.
 func OstreamInsert(out *byte, s *byte, n int64) *byte {
 	if s != nil && n > 0 {
-		_, _ = os.Stdout.Write(unsafe.Slice(s, int(n)))
+		writeOstream(out, unsafe.Slice(s, int(n)))
 	}
 	return out
 }
 
 // OstreamEndl is std::endl. Writes '\n'; flush is a no-op on stdout.
 func OstreamEndl(out *byte) *byte {
-	_, _ = os.Stdout.Write([]byte{'\n'})
+	writeOstream(out, []byte{'\n'})
 	return out
 }
 
 // OstreamLsCStr is operator<<(ostream&, char const*).
 func OstreamLsCStr(out *byte, s *byte) *byte {
 	if s != nil {
-		_, _ = os.Stdout.Write(unsafe.Slice(s, int(Strlen(s))))
+		writeOstream(out, unsafe.Slice(s, int(Strlen(s))))
 	}
+	return out
+}
+
+// OstreamLsString is operator<<(ostream&, basic_string const&).
+func OstreamLsString(out *byte, s *byte) *byte {
+	writeOstream(out, cxxStringBytes(s))
 	return out
 }
 
 // OstreamInsertI64 is ostream::_M_insert<long> / operator<<(long).
 func OstreamInsertI64(out *byte, n int64) *byte {
-	_, _ = os.Stdout.Write(strconv.AppendInt(nil, n, 10))
+	writeOstream(out, strconv.AppendInt(nil, n, 10))
 	return out
 }
 
 // OstreamInsertU64 is ostream::_M_insert<unsigned long>.
 func OstreamInsertU64(out *byte, n uint64) *byte {
-	_, _ = os.Stdout.Write(strconv.AppendUint(nil, n, 10))
+	writeOstream(out, strconv.AppendUint(nil, n, 10))
 	return out
 }
 
-// OstreamPut is ostream::put(char).
+// OstreamPut is ostream::put(char) / operator<<(char).
 func OstreamPut(out *byte, c byte) *byte {
-	_, _ = os.Stdout.Write([]byte{c})
+	writeOstream(out, []byte{c})
 	return out
 }
 

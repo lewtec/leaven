@@ -236,3 +236,19 @@ func TestOstreamInsertWrites(t *testing.T) {
 		t.Fatalf("wrote %q", buf[:n])
 	}
 }
+
+func TestOStringStreamGensym(t *testing.T) {
+	// gensym: oss << basename << count; return oss.str()
+	var oss [112]byte
+	OStringStreamCtor(&oss[0])
+	prefix := append([]byte("func_"), 0)
+	OstreamLsCStr(&oss[0], &prefix[0])
+	OstreamInsertI64(&oss[0], 1)
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &oss[0])
+	got := string(cxxStringBytes(&ret[0]))
+	if got != "func_1" {
+		t.Fatalf("str %q", got)
+	}
+	OStringStreamClose(&oss[0])
+}
