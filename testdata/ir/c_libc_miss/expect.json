@@ -8,13 +8,13 @@
         "\"os\"",
         "\"github.com/lewtec/leaven/libc\"",
         "os.Stderr",
-        "*os.File",
+        "libc.As[os.File]",
         "libc.Fprintf",
         "libc.Abort",
         "libc.Realloc",
-        "func die(msg *byte)",
-        "func grow(p *byte, n int64) *byte",
-        "func release(p *byte)"
+        "func die(msg unsafe.Pointer)",
+        "func grow(p unsafe.Pointer, n int64) unsafe.Pointer",
+        "func release(p unsafe.Pointer)"
       ],
       "not_contains": [
         "type _IO_FILE",

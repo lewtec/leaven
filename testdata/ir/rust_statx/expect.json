@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Statx"
+      ],
+      "not_contains": [
+        "unsatisfied: statx",
+        "unknown type \"extern_weak\"",
+        "func statx"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

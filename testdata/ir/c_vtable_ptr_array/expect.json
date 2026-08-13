@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "[4]unsafe.Pointer",
+        "libc.Ptr(&str)",
+        "libc.Ptr(&typeinfo)",
+        "var p unsafe.Pointer = libc.Ptr(&str)",
+        "libc.FuncCode(dtor)"
+      ],
+      "not_contains": [
+        "unsafe.Pointer(dtor)",
+        "unsafe.Pointer(str)"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

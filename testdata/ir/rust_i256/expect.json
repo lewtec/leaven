@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.I256",
+        "libc.I256FromI128",
+        "libc.I256UDiv"
+      ],
+      "not_contains": [
+        "unsupported integer bit width",
+        "int256"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

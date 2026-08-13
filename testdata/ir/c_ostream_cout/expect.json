@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.InitOstream",
+        "libc.OstreamInsert",
+        "libc.OstreamPut",
+        "var _ZSt4cout"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZSt4cout"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["/*", "\n"],
+    "majors": ["22"]
+  }
+}

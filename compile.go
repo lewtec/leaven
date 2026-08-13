@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 func Compile(out io.Writer, m *ir.Module, packageName string) error {
@@ -36,31 +39,80 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		f.Type().Id(name).Add(def)
 	}
 
+	type deferredInit struct {
+		name string
+		val  *jen.Statement
+	}
+	var deferred []deferredInit
+	var streamInits []string
 	for _, g := range m.Globals {
-		if g.Init == nil {
-			// Just a declaration; skip it.
+		if isLLVMSpecialGlobal(g.Name()) {
+			continue
+		}
+		// Skip i8 stubs created for function aliases (D1/C1); vtables use
+		// moduleFuncAliases to emit the real function pointer instead.
+		if _, ok := moduleFuncAliases[g.Name()]; ok {
+			continue
+		}
+		name := VariableName(g)
+		if g.Init == nil && hasRuntimeDef(name) {
 			continue
 		}
 		t, err := TypeSpec(g.ContentType)
 		if err != nil {
 			return fmt.Errorf("error translating type (%v): %w", g.ContentType, err)
 		}
+		if g.Init == nil {
+			if init := vttStandin(name, g.ContentType); init != nil {
+				f.Var().Id(name).Add(t).Op("=").Add(init)
+				continue
+			}
+			f.Var().Id(name).Add(t)
+			if isStdStream(name) {
+				streamInits = append(streamInits, name)
+			}
+			continue
+		}
 		val, err := FormatValue(g.Init)
 		if err != nil {
 			return fmt.Errorf("error translating initializer (%v): %w", g.Init, err)
 		}
-		f.Var().Id(VariableName(g)).Add(t).Op("=").Add(val)
+		// SSO self-ref (`var x = ...&x`) and C++ vtables (`var vt = dtor`
+		// when dtor stores vt) are Go initialization cycles. Zero the
+		// var and assign in init() after the name exists.
+		if refersToGlobal(g.Init, g) || mentionsFunc(g.Init) {
+			f.Var().Id(name).Add(t)
+			deferred = append(deferred, deferredInit{name, val})
+			continue
+		}
+		f.Var().Id(name).Add(t).Op("=").Add(val)
+	}
+	ctors := globalCtorFuncs(m)
+	if len(deferred) > 0 || len(ctors) > 0 || len(streamInits) > 0 {
+		f.Func().Id("init").Params().BlockFunc(func(g *jen.Group) {
+			for _, d := range deferred {
+				g.Id(d.name).Op("=").Add(d.val)
+			}
+			for _, name := range streamInits {
+				g.Add(initStdStream(name))
+			}
+			for _, fn := range ctors {
+				g.Id(VariableName(fn)).Call()
+			}
+		})
 	}
 
 	for _, fn := range m.Funcs {
-		if fn.Blocks == nil {
-			// Just a declaration, not a definition; skip it.
+		collectFuncLocalNames(fn)
+		name := VariableName(fn)
+		if fn.Blocks == nil && hasRuntimeDef(name) {
 			continue
 		}
 
-		fixMalloc(fn)
+		if fn.Blocks != nil {
+			fixMalloc(fn)
+		}
 
-		name := VariableName(fn)
 		// Only package main gets a Go program entry point from C main.
 		isGoMain := name == "main" && packageName == "main"
 
@@ -71,7 +123,13 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 				if err != nil {
 					return fmt.Errorf("error translating type for parameter %d of %s: %w", i, fn.Name(), err)
 				}
-				params = append(params, jen.Id(VariableName(p)).Add(pt))
+				// Declares often have several unnamed ptr params; VariableName
+				// would make them all arg_v0.
+				pname := VariableName(p)
+				if fn.Blocks == nil {
+					pname = fmt.Sprintf("a%d", i)
+				}
+				params = append(params, jen.Id(pname).Add(pt))
 			}
 			if fn.Sig.Variadic {
 				params = append(params, jen.Id("varargs").Op("...").Interface())
@@ -90,11 +148,15 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			}
 		}
 
-		var bodyErr error
 		decl := f.Func().Id(name).Params(params...)
 		if ret != nil {
 			decl.Add(ret)
 		}
+		if fn.Blocks == nil {
+			decl.Block(jen.Panic(jen.Lit(unsatisfiedMsg(fn.Name()))))
+			continue
+		}
+		var bodyErr error
 		decl.BlockFunc(func(g *jen.Group) {
 			if err := writeFuncBody(g, fn, isGoMain); err != nil {
 				bodyErr = err
@@ -107,6 +169,117 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	return nil
 }
 
+func isLLVMSpecialGlobal(name string) bool {
+	switch name {
+	case "llvm.global_ctors", "llvm.global_dtors", "llvm.used", "llvm.compiler.used":
+		return true
+	default:
+		return false
+	}
+}
+
+// globalCtorFuncs is llvm.global_ctors, lowest priority first.
+func globalCtorFuncs(m *ir.Module) []*ir.Func {
+	var g *ir.Global
+	for _, cand := range m.Globals {
+		if cand.Name() == "llvm.global_ctors" {
+			g = cand
+			break
+		}
+	}
+	if g == nil || g.Init == nil {
+		return nil
+	}
+	arr, ok := g.Init.(*constant.Array)
+	if !ok {
+		return nil
+	}
+	type ent struct {
+		prio int64
+		fn   *ir.Func
+	}
+	var ents []ent
+	for _, el := range arr.Elems {
+		st, ok := el.(*constant.Struct)
+		if !ok || len(st.Fields) < 2 {
+			continue
+		}
+		prio := int64(65535)
+		if n, ok := st.Fields[0].(*constant.Int); ok {
+			prio = n.X.Int64()
+		}
+		fn, ok := st.Fields[1].(*ir.Func)
+		if !ok || fn.Blocks == nil {
+			continue
+		}
+		ents = append(ents, ent{prio, fn})
+	}
+	sort.SliceStable(ents, func(i, j int) bool { return ents[i].prio < ents[j].prio })
+	out := make([]*ir.Func, len(ents))
+	for i, e := range ents {
+		out[i] = e.fn
+	}
+	return out
+}
+
+// vttStandin fills a declare-only Itanium VTT with StandinVptr so
+// inlined dtors can load *(vptr-24) without faulting on nil.
+func vttStandin(name string, t types.Type) *jen.Statement {
+	if !strings.HasPrefix(name, "_ZTT") {
+		return nil
+	}
+	n, wrap := vttLen(t)
+	if n <= 0 {
+		return nil
+	}
+	elems := make([]jen.Code, n)
+	for i := range elems {
+		elems[i] = Sym(libc.StandinVptr).Call()
+	}
+	arr := jen.Index(litUntyped(int64(n))).Qual("unsafe", "Pointer").Values(elems...)
+	if wrap {
+		return jen.Values(arr)
+	}
+	return arr
+}
+
+func vttLen(t types.Type) (n int, wrap bool) {
+	switch t := t.(type) {
+	case *types.ArrayType:
+		if _, ok := t.ElemType.(*types.PointerType); ok {
+			return int(t.Len), false
+		}
+	case *types.StructType:
+		if len(t.Fields) == 1 {
+			if n, wrap := vttLen(t.Fields[0]); n > 0 && !wrap {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// unsatisfiedMsg keeps the panic line short enough that tailBytes / CI
+// still show it. Itanium names alone are hundreds of bytes.
+func unsatisfiedMsg(name string) string {
+	const max = 80
+	if len(name) <= max {
+		return "unsatisfied: " + name
+	}
+	return "unsatisfied: " + name[:max]
+}
+
+// writeCMainArgs binds C main(int argc, char **argv) from os.Args.
+// argc includes argv[0], same as C.
+func writeCMainArgs(g *jen.Group, fn *ir.Func) {
+	if len(fn.Params) >= 1 {
+		g.Id(VariableName(fn.Params[0])).Op("=").Int32().Call(jen.Len(jen.Qual("os", "Args")))
+	}
+	if len(fn.Params) >= 2 {
+		g.Id(VariableName(fn.Params[1])).Op("=").Add(Sym(libc.Argv).Call())
+	}
+}
+
 func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 	type varGroup struct {
 		typ   *jen.Statement
@@ -114,25 +287,63 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 	}
 	groups := make(map[string]*varGroup)
 	var allVars []string
+	addNamed := func(v value.Named) error {
+		if types.Equal(v.Type(), types.Void) {
+			return nil
+		}
+		t, err := TypeSpec(v.Type())
+		if err != nil {
+			return fmt.Errorf("error translating type of %s in %s: %w", v.Ident(), fn.Name(), err)
+		}
+		key := v.Type().String()
+		if groups[key] == nil {
+			groups[key] = &varGroup{typ: t}
+		}
+		groups[key].names = append(groups[key].names, VariableName(v))
+		allVars = append(allVars, VariableName(v))
+		return nil
+	}
+	if isGoMain {
+		for _, p := range fn.Params {
+			if err := addNamed(p); err != nil {
+				return err
+			}
+		}
+	}
 	for _, b := range fn.Blocks {
 		for _, inst := range b.Insts {
-			inst, ok := inst.(value.Named)
+			n, ok := inst.(value.Named)
 			if !ok {
 				continue
 			}
-			if types.Equal(inst.Type(), types.Void) {
-				continue
+			if err := addNamed(n); err != nil {
+				return err
 			}
-			t, err := TypeSpec(inst.Type())
-			if err != nil {
-				return fmt.Errorf("error translating type of %s in %s: %w", inst.Ident(), fn.Name(), err)
+			// cmpxchg temps (name_ok, name_old) must be function-scoped;
+			// mid-function := is illegal when other blocks goto past them.
+			if cx, ok := inst.(*ir.InstCmpXchg); ok {
+				elem, err := TypeSpec(cx.Cmp.Type())
+				if err != nil {
+					return err
+				}
+				base := VariableName(cx)
+				addExtra := func(name string, t *jen.Statement) {
+					key := "extra:" + name
+					if groups[key] == nil {
+						groups[key] = &varGroup{typ: t}
+					}
+					groups[key].names = append(groups[key].names, name)
+					allVars = append(allVars, name)
+				}
+				addExtra(base+"_ok", jen.Bool())
+				addExtra(base+"_old", elem)
 			}
-			key := inst.Type().String()
-			if groups[key] == nil {
-				groups[key] = &varGroup{typ: t}
+		}
+		// invoke's result is the terminator, not an inst.
+		if n, ok := b.Term.(value.Named); ok {
+			if err := addNamed(n); err != nil {
+				return err
 			}
-			groups[key].names = append(groups[key].names, VariableName(inst))
-			allVars = append(allVars, VariableName(inst))
 		}
 	}
 	varTypes := make([]string, 0, len(groups))
@@ -158,11 +369,17 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		g.List(lhs...).Op("=").List(rhs...)
 		g.Line()
 	}
+	if isGoMain {
+		writeCMainArgs(g, fn)
+	}
 
-	gotoTargets := blockGotoTargets(fn)
+	reachable := reachableBlocks(fn)
+	gotoTargets := blockGotoTargetsFrom(fn, reachable)
 
 	for i, b := range fn.Blocks {
-		if i != 0 && !gotoTargets[b] {
+		// Skip unreachable blocks so their successors are not left with
+		// unused labels (Go rejects "label defined and not used").
+		if i != 0 && !reachable[b] {
 			continue
 		}
 		if gotoTargets[b] {
@@ -234,11 +451,6 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 			if isGoMain {
 				g.Qual("os", "Exit").Call(jen.Int().Call(retVal))
 			} else {
-				if want, ok := fn.Sig.RetType.(*types.PointerType); ok && want.IsOpaque() {
-					if have, ok := term.X.Type().(*types.PointerType); ok && !have.IsOpaque() {
-						retVal = unsafePtr(retVal)
-					}
-				}
 				g.Return(retVal)
 			}
 
@@ -290,6 +502,36 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		case *ir.TermUnreachable:
 			g.Panic(jen.Lit("unreachable"))
 
+		case *ir.TermInvoke:
+			call := &ir.InstCall{
+				LocalIdent: term.LocalIdent,
+				Callee:     term.Invokee,
+				Args:       term.Args,
+				Typ:        term.Typ,
+			}
+			translated, err := translateCall(call)
+			if err != nil {
+				return fmt.Errorf("error translating invoke: %w", err)
+			}
+			for _, stmt := range translated {
+				g.Add(stmt)
+			}
+			normal, ok := term.NormalRetTarget.(*ir.Block)
+			if !ok {
+				return fmt.Errorf("invoke normal dest is %T", term.NormalRetTarget)
+			}
+			phis, err := PhiAssignments(b, normal)
+			if err != nil {
+				return fmt.Errorf("error translating phi nodes: %w", err)
+			}
+			if phis != nil {
+				g.Add(phis)
+			}
+			g.Goto().Id(BlockName(normal))
+
+		case *ir.TermResume:
+			g.Panic(jen.Lit("resume"))
+
 		default:
 			return fmt.Errorf("%w: %T", errUnsupportedTerminator, term)
 		}
@@ -300,6 +542,49 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 // blockGotoTargets returns the set of blocks that are targets of an explicit
 // branch/switch in f (i.e. need a Go label).
 func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
+	return blockGotoTargetsFrom(f, reachableBlocks(f))
+}
+
+// reachableBlocks is the set of blocks reachable from the entry via
+// terminators. Unreachable blocks are not emitted.
+func reachableBlocks(f *ir.Func) map[*ir.Block]bool {
+	if len(f.Blocks) == 0 {
+		return nil
+	}
+	reach := make(map[*ir.Block]bool)
+	queue := []*ir.Block{f.Blocks[0]}
+	reach[f.Blocks[0]] = true
+	for len(queue) > 0 {
+		b := queue[0]
+		queue = queue[1:]
+		var succ []value.Value
+		switch term := b.Term.(type) {
+		case *ir.TermBr:
+			succ = []value.Value{term.Target}
+		case *ir.TermCondBr:
+			succ = []value.Value{term.TargetTrue, term.TargetFalse}
+		case *ir.TermSwitch:
+			succ = []value.Value{term.TargetDefault}
+			for _, c := range term.Cases {
+				succ = append(succ, c.Target)
+			}
+		case *ir.TermInvoke:
+			// writeFuncBody only emits the normal edge (no landing pads).
+			succ = []value.Value{term.NormalRetTarget}
+		}
+		for _, v := range succ {
+			nb, ok := v.(*ir.Block)
+			if !ok || reach[nb] {
+				continue
+			}
+			reach[nb] = true
+			queue = append(queue, nb)
+		}
+	}
+	return reach
+}
+
+func blockGotoTargetsFrom(f *ir.Func, from map[*ir.Block]bool) map[*ir.Block]bool {
 	targets := make(map[*ir.Block]bool)
 	add := func(v value.Value) {
 		if b, ok := v.(*ir.Block); ok {
@@ -307,6 +592,9 @@ func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
 		}
 	}
 	for _, b := range f.Blocks {
+		if from != nil && !from[b] {
+			continue
+		}
 		switch term := b.Term.(type) {
 		case *ir.TermBr:
 			add(term.Target)
@@ -318,6 +606,9 @@ func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
 			for _, c := range term.Cases {
 				add(c.Target)
 			}
+		case *ir.TermInvoke:
+			// Match writeFuncBody: only the normal edge is a real goto.
+			add(term.NormalRetTarget)
 		}
 	}
 	return targets

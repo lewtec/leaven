@@ -5,12 +5,11 @@
       "package": "p",
       "contains": [
         "package p",
-        "func(*L, *byte, ...interface{})",
-        "func logf(self *L, fmt *byte, varargs ...interface{})",
-        "*log = logf"
+        "func logf(self unsafe.Pointer, fmt unsafe.Pointer, varargs ...interface{})",
+        "libc.FuncCode(logf)"
       ],
       "not_contains": [
-        "func(*L, *byte)"
+        "unsafe.Pointer(logf)"
       ]
     }
   ]

@@ -16,6 +16,76 @@ func Getchar() int32 {
 	return int32(buf[0])
 }
 
+// Poll is poll(2). pollfd is {i32 fd; i16 events; i16 revents} (8 bytes).
+// Marks every slot ready (revents=events) so rhai-run stdin checks proceed.
+func Poll(fds *byte, nfds int64, timeout int32) int32 {
+	_ = timeout
+	if fds == nil || nfds <= 0 {
+		return 0
+	}
+	const pollfdSize = 8
+	const eventsOff = 4
+	const reventsOff = 6
+	base := Ptr(fds)
+	for i := int64(0); i < nfds; i++ {
+		p := Off(base, int(i*pollfdSize))
+		ev := Load[int16](p, eventsOff)
+		Store(p, reventsOff, ev)
+	}
+	return int32(nfds)
+}
+
+// Signal is signal(2). Returns previous disposition (pretend SIG_DFL=0).
+// rhai-run ignores SIGPIPE (13) with SIG_IGN (1).
+func Signal(sig int32, handler int64) int64 {
+	_, _ = sig, handler
+	return 0
+}
+
+// Sysconf is sysconf(3). Linux _SC_PAGESIZE is 30.
+func Sysconf(name int32) int64 {
+	switch name {
+	case 30: // _SC_PAGESIZE
+		return 4096
+	default:
+		return -1
+	}
+}
+
+// PthreadSelf is pthread_self. Single-threaded: fixed non-zero id.
+func PthreadSelf() int64 { return 1 }
+
+// PthreadGetattrNp fills a dummy attr (stack base/size via getstack).
+func PthreadGetattrNp(thread int64, attr *byte) int32 {
+	_, _ = thread, attr
+	return 0
+}
+
+// PthreadAttrGetstack reports a synthetic stack for stack-overflow guards.
+func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
+	_ = attr
+	if stackaddr != nil {
+		// Fake stack base.
+		Store(Ptr(stackaddr), 0, unsafe.Pointer(uintptr(0x7fff00000000)))
+	}
+	if stacksize != nil {
+		Store[uint64](Ptr(stacksize), 0, 8<<20) // 8 MiB
+	}
+	return 0
+}
+
+// PthreadAttrDestroy is a no-op for the dummy attr.
+func PthreadAttrDestroy(attr *byte) int32 {
+	_ = attr
+	return 0
+}
+
+// Sigaction is sigaction(2). No-op success for rhai-run startup.
+func Sigaction(signum int32, act, oldact *byte) int32 {
+	_, _, _ = signum, act, oldact
+	return 0
+}
+
 func Putc(c int32, stream *os.File) int32 {
 	_, err := stream.Write([]byte{byte(c)})
 	if err != nil {
@@ -30,12 +100,7 @@ func Putchar(c int32) int32 {
 
 // Fprintf is C fprintf(stream, format, ...).
 func Fprintf(stream *os.File, format *byte, args ...any) int32 {
-	f := fixPrintfFormat(format, args)
-	n, err := fmt.Fprintf(stream, f, args...)
-	if err != nil {
-		return -1
-	}
-	return int32(n)
+	return printfTo(stream, format, args)
 }
 
 // Fputs is C fputs(s, stream).
@@ -43,7 +108,7 @@ func Fputs(s *byte, stream *os.File) int32 {
 	if stream == nil {
 		return -1
 	}
-	_, err := stream.Write(unsafe.Slice(s, Strlen(s)))
+	_, err := stream.Write(Bytes(s, int(Strlen(s))))
 	if err != nil {
 		return -1
 	}
@@ -55,12 +120,16 @@ func Fputc(c int32, stream *os.File) int32 {
 	return Putc(c, stream)
 }
 
-// Iswspace is C iswspace(c) from <wctype.h>.
-func Iswspace(c int32) int32 {
-	if unicode.IsSpace(rune(uint32(c))) {
+func cbool(ok bool) int32 {
+	if ok {
 		return 1
 	}
 	return 0
+}
+
+// Iswspace is C iswspace(c) from <wctype.h>.
+func Iswspace(c int32) int32 {
+	return cbool(unicode.IsSpace(rune(uint32(c))))
 }
 
 // Iswblank is C iswblank(c) from <wctype.h>.
@@ -75,50 +144,32 @@ func Iswblank(c int32) int32 {
 // Iswalnum is C iswalnum(c) from <wctype.h>.
 func Iswalnum(c int32) int32 {
 	r := rune(uint32(c))
-	if unicode.IsLetter(r) || unicode.IsDigit(r) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLetter(r) || unicode.IsDigit(r))
 }
 
 // Iswalpha is C iswalpha(c) from <wctype.h>.
 func Iswalpha(c int32) int32 {
-	if unicode.IsLetter(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLetter(rune(uint32(c))))
 }
 
 // Iswdigit is C iswdigit(c) from <wctype.h>.
 func Iswdigit(c int32) int32 {
-	if unicode.IsDigit(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsDigit(rune(uint32(c))))
 }
 
 // Iswlower is C iswlower(c) from <wctype.h>.
 func Iswlower(c int32) int32 {
-	if unicode.IsLower(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsLower(rune(uint32(c))))
 }
 
 // Iswupper is C iswupper(c) from <wctype.h>.
 func Iswupper(c int32) int32 {
-	if unicode.IsUpper(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsUpper(rune(uint32(c))))
 }
 
 // Iswcntrl is C iswcntrl(c) from <wctype.h>.
 func Iswcntrl(c int32) int32 {
-	if unicode.IsControl(rune(uint32(c))) {
-		return 1
-	}
-	return 0
+	return cbool(unicode.IsControl(rune(uint32(c))))
 }
 
 // Iswxdigit is C iswxdigit(c) from <wctype.h>.
@@ -140,8 +191,9 @@ func Towlower(c int32) int32 {
 	return int32(unicode.ToLower(rune(uint32(c))))
 }
 
-// Exit is C exit(status).
+// Exit is C exit(status). Runs __cxa_atexit handlers first.
 func Exit(status int32) {
+	runCxaAtExit()
 	os.Exit(int(status))
 }
 
@@ -187,7 +239,7 @@ func Snprintf(buf *byte, n int64, format *byte, args ...any) int32 {
 	f := fixPrintfFormat(format, args)
 	s := fmt.Sprintf(f, args...)
 	if n > 0 && buf != nil {
-		dst := unsafe.Slice(buf, n)
+		dst := Bytes(buf, int(n))
 		copyLen := len(s)
 		if int64(copyLen) >= n {
 			copyLen = int(n - 1)
@@ -207,7 +259,7 @@ func Snprintf(buf *byte, n int64, format *byte, args ...any) int32 {
 func Vsnprintf(buf *byte, n int64, format *byte, ap *byte) int32 {
 	var args []any
 	if ap != nil {
-		vlPtr := *(**[]interface{})(unsafe.Add(unsafe.Pointer(ap), 8))
+		vlPtr := Load[*[]interface{}](Ptr(ap), 8)
 		if vlPtr != nil {
 			args = append(args, (*vlPtr)...)
 		}

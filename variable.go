@@ -2,7 +2,9 @@ package leaven
 
 import (
 	"fmt"
+	"math"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/dave/jennifer/jen"
@@ -11,25 +13,36 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/enum"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 // moduleFuncNames / moduleTypeNames are filled by collectModuleNames so locals
 // can be renamed when they would shadow a function or type in Go.
+// moduleFuncAliases maps C++ alias names (D1→D2, C1→C2) to the real function:
+// vtables forward-ref aliases before the alias line is parsed, so the parser
+// plants i8 @D1 globals; emit must still produce a real function pointer.
 var (
-	moduleFuncNames map[string]bool
-	moduleTypeNames map[string]bool
+	moduleFuncNames   map[string]bool
+	moduleTypeNames   map[string]bool
+	moduleFuncAliases map[string]*ir.Func
 )
 
 // collectModuleNames records function and type identifiers used in the module.
 func collectModuleNames(m *ir.Module) {
 	moduleFuncNames = make(map[string]bool)
 	moduleTypeNames = make(map[string]bool)
+	moduleFuncAliases = make(map[string]*ir.Func)
 	for _, f := range m.Funcs {
 		moduleFuncNames[rawIdentName(f)] = true
 	}
 	for _, t := range m.TypeDefs {
 		if n := TypeName(t); n != "" {
 			moduleTypeNames[n] = true
+		}
+	}
+	for _, a := range m.Aliases {
+		if f, ok := a.Aliasee.(*ir.Func); ok {
+			moduleFuncAliases[a.Name()] = f
 		}
 	}
 }
@@ -51,8 +64,54 @@ func rawIdentName(v value.Named) string {
 	return name
 }
 
+// funcLocalNames disambiguates Go names inside one function (%0 and %v0
+// both become v0). Filled by collectFuncLocalNames.
+var funcLocalNames map[value.Named]string
+
+func collectFuncLocalNames(fn *ir.Func) {
+	funcLocalNames = make(map[value.Named]string)
+	used := map[string]bool{rawIdentName(fn): true}
+	add := func(v value.Named) {
+		if v == nil || types.Equal(v.Type(), types.Void) {
+			return
+		}
+		if _, ok := funcLocalNames[v]; ok {
+			return
+		}
+		base := variableNameBase(v)
+		name := base
+		for i := 2; used[name]; i++ {
+			name = fmt.Sprintf("%s_%d", base, i)
+		}
+		used[name] = true
+		funcLocalNames[v] = name
+	}
+	for _, p := range fn.Params {
+		add(p)
+	}
+	for _, b := range fn.Blocks {
+		for _, inst := range b.Insts {
+			if n, ok := inst.(value.Named); ok {
+				add(n)
+			}
+		}
+		if n, ok := b.Term.(value.Named); ok {
+			add(n)
+		}
+	}
+}
+
 // VariableName returns the name to use for a local variable or parameter.
 func VariableName(v value.Named) string {
+	if funcLocalNames != nil {
+		if n, ok := funcLocalNames[v]; ok {
+			return n
+		}
+	}
+	return variableNameBase(v)
+}
+
+func variableNameBase(v value.Named) string {
 	name := rawIdentName(v)
 	// Params named like SSA temps (v0, v1, …) collide with anonymous
 	// instructions ("%1" → "v1"). Prefix params so both can coexist.
@@ -93,14 +152,16 @@ func ssaTempName(name string) bool {
 
 func BlockName(v value.Value) string {
 	block := v.(*ir.Block)
-	name := block.Name()
+	// Don't use Name(); numeric labels come back quoted (`"2"`) for LLVM print.
+	name := block.LocalName
 	if name == "" {
-		return "block" + strings.TrimPrefix(block.Ident(), "%")
+		return "block" + strconv.FormatInt(block.LocalID, 10)
 	}
-	if c := name[0]; '0' <= c && c <= '9' {
-		name = "block" + name
+	if _, err := strconv.ParseInt(name, 10, 64); err == nil {
+		return "block" + name
 	}
-	name = strings.Replace(name, ".", "_", -1)
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, "-", "_")
 	if invalidNames[name] {
 		name = "_" + name
 	}
@@ -115,7 +176,8 @@ var invalidNames = map[string]bool{
 	"func": true, "go": true, "goto": true, "if": true, "import": true,
 	"interface": true, "map": true, "package": true, "range": true, "return": true,
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
-	// Common predeclared / special
+	// Common predeclared / special. "_" is the blank identifier (not a value).
+	"_":    true,
 	"init": true, "true": true, "false": true, "iota": true, "nil": true,
 	"bool": true, "byte": true, "error": true, "int": true, "int8": true,
 	"int16": true, "int32": true, "int64": true, "rune": true, "string": true,
@@ -128,10 +190,32 @@ func namedRef(name string) (*jen.Statement, bool) {
 	if ref, ok := libraryFunctions[name]; ok {
 		return ref.code(), true
 	}
+	if c, ok := cxxIONamed(name); ok {
+		return c, true
+	}
+	if c, ok := cxxTreeNamed(name); ok {
+		return c, true
+	}
 	if c := rustRuntime(name); c != nil {
 		return c, true
 	}
 	return nil, false
+}
+
+// hasRuntimeDef reports whether name is provided by libc, a rust shim, or an
+// llvm.* intrinsic that translateCall handles. Declare-only IR symbols with
+// no runtime def become panic/zero stubs.
+func hasRuntimeDef(name string) bool {
+	if _, ok := libraryFunctions[name]; ok {
+		return true
+	}
+	if _, ok := libraryGlobals[name]; ok {
+		return true
+	}
+	if _, ok := namedRef(name); ok {
+		return true
+	}
+	return llvmCallHandled(name)
 }
 
 func compositeValues(elems []jen.Code) *jen.Statement {
@@ -142,12 +226,8 @@ func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
 	return jen.Add(typ).Add(compositeValues(elems))
 }
 
-func fnPtrBitcast(to, from *jen.Statement) *jen.Statement {
-	// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
-	return jen.Func().Params().Add(to).Block(
-		jen.Id("tmp").Op(":=").Add(from),
-		jen.Return(deref(jen.Parens(ptrTyp(to))).Call(unsafePtr(addrOf(jen.Id("tmp"))))),
-	).Call()
+func fnPtrBitcast(from *jen.Statement) *jen.Statement {
+	return Sym(libc.FuncCode[func()]).Call(from)
 }
 
 // FormatValue formats a constant or variable as it should appear in an expression.
@@ -161,13 +241,32 @@ func FormatValue(v value.Value) (*jen.Statement, error) {
 
 func formatExpr(v value.Value) (expr, error) {
 	switch v := v.(type) {
+	case *ir.Func:
+		name := VariableName(v)
+		fn := jen.Id(name)
+		if c, ok := namedRef(name); ok {
+			fn = c
+		}
+		return val(fnPtrBitcast(fn)), nil
+
+	case *ir.Alias:
+		if v.Aliasee == nil {
+			return expr{}, fmt.Errorf("alias %s has no aliasee", v.Name())
+		}
+		return formatExpr(v.Aliasee)
+
 	case *ir.Global:
+		// Forward-ref stub for a function alias (see moduleFuncAliases).
+		if f := moduleFuncAliases[v.Name()]; f != nil {
+			return formatExpr(f)
+		}
 		name := VariableName(v)
 		if types.IsFunc(v.ContentType) {
+			fn := jen.Id(name)
 			if c, ok := namedRef(name); ok {
-				return val(c), nil
+				fn = c
 			}
-			return ident(name), nil
+			return val(fnPtrBitcast(fn)), nil
 		}
 		if ref, ok := libraryGlobals[name]; ok {
 			return addrExpr(ref.code()), nil
@@ -175,11 +274,9 @@ func formatExpr(v value.Value) (expr, error) {
 		return addrExpr(jen.Id(name)), nil
 
 	case value.Named:
-		name := VariableName(v)
-		if c, ok := namedRef(name); ok {
-			return val(c), nil
-		}
-		return ident(name), nil
+		// Locals/params keep their VariableName. namedRef is only for
+		// globals/funcs (e.g. @read → libc.Read); a local %read must not.
+		return ident(VariableName(v)), nil
 
 	case *ir.Arg:
 		return formatExpr(v.Value)
@@ -215,20 +312,40 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
-		to, err := TypeSpec(v.To)
-		if err != nil {
-			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
+		if packed, err := i1VectorBitCast(from, v.From.Type(), v.To); packed != nil || err != nil {
+			if err != nil {
+				return expr{}, err
+			}
+			return val(packed), nil
 		}
-		if isFuncPointerType(v.To) || isFuncPointerType(v.From.Type()) {
-			return val(fnPtrBitcast(to, from)), nil
+		if vec, err := vectorBitCast(from, v.From.Type(), v.To); vec != nil || err != nil {
+			if err != nil {
+				return expr{}, err
+			}
+			return val(vec), nil
+		}
+		if bits, err := scalarBitCast(from, v.From.Type(), v.To); bits != nil || err != nil {
+			if err != nil {
+				return expr{}, err
+			}
+			return val(bits), nil
 		}
 		if isTaggedPointerType(v.To) {
-			return val(uintptrOfPtr(from)), nil
+			return val(ptrToUint(from)), nil
 		}
-		return val(ptrCast(to, from)), nil
+		if isTaggedPointerType(v.From.Type()) {
+			to, err := TypeSpec(v.To)
+			if err != nil {
+				return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
+			}
+			return val(jen.Parens(to).Call(emitUP(from))), nil
+		}
+		// Pointer values are already unsafe.Pointer.
+		return val(from), nil
 
 	case *constant.ExprIntToPtr:
-		from, err := FormatValue(v.From)
+		// Unsigned bit pattern: uintptr(negative int64) is a Go constant overflow.
+		from, err := FormatUnsigned(v.From)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
@@ -236,7 +353,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(jen.Parens(to).Call(unsafePtr(jen.Uintptr().Call(from)))), nil
+		return val(jen.Parens(to).Call(emitUP(jen.Uintptr().Call(from)))), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)
@@ -247,7 +364,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(conv(to, uintptrOfPtr(from))), nil
+		return val(conv(to, ptrToUint(from))), nil
 
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
@@ -284,16 +401,38 @@ func formatExpr(v value.Value) (expr, error) {
 		}
 		return val(c), nil
 
+	case *constant.ExprAdd:
+		return formatBinConst("+", v.X, v.Y)
+	case *constant.ExprSub:
+		return formatBinConst("-", v.X, v.Y)
+	case *constant.ExprMul:
+		return formatBinConst("*", v.X, v.Y)
+	case *constant.ExprAnd:
+		return formatBinConst("&", v.X, v.Y)
+	case *constant.ExprOr:
+		return formatBinConst("|", v.X, v.Y)
+	case *constant.ExprXor:
+		return formatBinConst("^", v.X, v.Y)
+	case *constant.ExprShl:
+		return formatBinConst("<<", v.X, v.Y)
+	case *constant.ExprLShr:
+		return formatBinConst(">>", v.X, v.Y)
+	case *constant.ExprAShr:
+		if _, ok := wideBits(v.X.Type()); ok {
+			return formatBinConst("ashr", v.X, v.Y)
+		}
+		return formatBinConst(">>", v.X, v.Y)
+
 	case *constant.Float:
 		result := v.X.String()
 		var c *jen.Statement
 		switch result {
 		case "+Inf":
-			c = jen.Qual("math", "Inf").Call(jen.Lit(1))
+			c = Sym(math.Inf).Call(jen.Lit(1))
 		case "-Inf":
-			c = jen.Qual("math", "Inf").Call(jen.Lit(-1))
+			c = Sym(math.Inf).Call(jen.Lit(-1))
 		case "NaN":
-			c = jen.Qual("math", "NaN").Call()
+			c = Sym(math.NaN).Call()
 		default:
 			c = jen.Op(result)
 		}
@@ -306,6 +445,12 @@ func formatExpr(v value.Value) (expr, error) {
 		return formatExpr(v.Constant)
 
 	case *constant.Int:
+		if v.Typ.BitSize == 128 {
+			return val(i128Lit(v.X)), nil
+		}
+		if v.Typ.BitSize == 256 {
+			return val(i256Lit(v.X)), nil
+		}
 		if v.Typ.BitSize > 64 {
 			return expr{}, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
 		}
@@ -362,13 +507,6 @@ func formatExpr(v value.Value) (expr, error) {
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}
-			if v.Typ != nil && i < len(v.Typ.Fields) {
-				if want, ok := v.Typ.Fields[i].(*types.PointerType); ok && want.IsOpaque() {
-					if have, ok := c.Type().(*types.PointerType); ok && !have.IsOpaque() {
-						e = unsafePtr(e)
-					}
-				}
-			}
 			elems[i] = e
 		}
 		return val(formatComposite(t, elems)), nil
@@ -394,6 +532,9 @@ func formatExpr(v value.Value) (expr, error) {
 		return val(formatComposite(t, elems)), nil
 
 	case *constant.ZeroInitializer:
+		if it, ok := v.Typ.(*types.IntType); ok && it.BitSize == 1 {
+			return val(jen.False()), nil
+		}
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
@@ -406,16 +547,30 @@ func formatExpr(v value.Value) (expr, error) {
 }
 
 func zeroOf(typ types.Type) (expr, error) {
-	switch typ.(type) {
+	switch t := typ.(type) {
 	case *types.ArrayType, *types.StructType, *types.VectorType:
-		t, err := TypeSpec(typ)
+		ts, err := TypeSpec(typ)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", typ, err)
 		}
-		return val(jen.Add(t).Values()), nil
-	case *types.IntType, *types.FloatType:
+		return val(jen.Add(ts).Values()), nil
+	case *types.IntType:
+		if t.BitSize == 1 {
+			return val(jen.False()), nil
+		}
+		if t.BitSize == 128 {
+			return val(Qual[libc.I128]().Values()), nil
+		}
+		if t.BitSize == 256 {
+			return val(Qual[libc.I256]().Values()), nil
+		}
+		return val(jen.Lit(0)), nil
+	case *types.FloatType:
 		return val(jen.Lit(0)), nil
 	case *types.PointerType:
+		if isTaggedPointerType(t) {
+			return val(jen.Lit(0)), nil
+		}
 		return val(jen.Nil()), nil
 	default:
 		return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, typ)
@@ -423,9 +578,12 @@ func zeroOf(typ types.Type) (expr, error) {
 }
 
 var libraryGlobals = map[string]goRef{
-	"stdin":  {pkg: "os", name: "Stdin"},
-	"stdout": {pkg: "os", name: "Stdout"},
-	"stderr": {pkg: "os", name: "Stderr"},
+	"stdin":                                 {pkg: "os", name: "Stdin"},
+	"stdout":                                {pkg: "os", name: "Stdout"},
+	"stderr":                                {pkg: "os", name: "Stderr"},
+	"_ZTVN10__cxxabiv117__class_type_infoE": {pkg: libcPath, name: "ClassTypeInfoVT"},
+	"_ZTVN10__cxxabiv120__si_class_type_infoE":  {pkg: libcPath, name: "SIClassTypeInfoVT"},
+	"_ZTVN10__cxxabiv121__vmi_class_type_infoE": {pkg: libcPath, name: "VMIClassTypeInfoVT"},
 }
 
 // intFromBig truncates x to bitSize bits and returns it as int64 (two's complement).
@@ -446,8 +604,80 @@ func intFromBig(x *big.Int, bitSize uint64) (int64, error) {
 	return t.Int64(), nil
 }
 
+func i128Lit(x *big.Int) *jen.Statement {
+	lo, hi := i128Limbs(x)
+	return Qual[libc.I128]().Values(jen.Dict{
+		jen.Id("Lo"): litUint64(lo),
+		jen.Id("Hi"): litUint64(hi),
+	})
+}
+
+func i128Limbs(x *big.Int) (lo, hi uint64) {
+	mod := new(big.Int).Lsh(big.NewInt(1), 128)
+	u := new(big.Int).Mod(x, mod)
+	lo = new(big.Int).And(u, new(big.Int).SetUint64(^uint64(0))).Uint64()
+	hi = new(big.Int).Rsh(u, 64).Uint64()
+	return lo, hi
+}
+
+func i256Lit(x *big.Int) *jen.Statement {
+	mod := new(big.Int).Lsh(big.NewInt(1), 256)
+	u := new(big.Int).Mod(x, mod)
+	loMask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+	lo := new(big.Int).And(u, loMask)
+	hi := new(big.Int).Rsh(u, 128)
+	return Qual[libc.I256]().Values(jen.Dict{
+		jen.Id("Lo"): i128Lit(lo),
+		jen.Id("Hi"): i128Lit(hi),
+	})
+}
+
+func wideICmp(bits uint64, pred enum.IPred) (goRef, bool) {
+	var i128, i256 any
+	switch pred {
+	case enum.IPredEQ:
+		i128, i256 = libc.I128Eq, libc.I256Eq
+	case enum.IPredNE:
+		i128, i256 = libc.I128Ne, libc.I256Ne
+	case enum.IPredSGE:
+		i128, i256 = libc.I128Sge, libc.I256Sge
+	case enum.IPredSGT:
+		i128, i256 = libc.I128Sgt, libc.I256Sgt
+	case enum.IPredSLE:
+		i128, i256 = libc.I128Sle, libc.I256Sle
+	case enum.IPredSLT:
+		i128, i256 = libc.I128Slt, libc.I256Slt
+	case enum.IPredUGE:
+		i128, i256 = libc.I128Uge, libc.I256Uge
+	case enum.IPredUGT:
+		i128, i256 = libc.I128Ugt, libc.I256Ugt
+	case enum.IPredULE:
+		i128, i256 = libc.I128Ule, libc.I256Ule
+	case enum.IPredULT:
+		i128, i256 = libc.I128Ult, libc.I256Ult
+	default:
+		return goRef{}, false
+	}
+	return wideSym(bits, i128, i256), true
+}
+
 // formatICmp translates an icmp predicate and operands to a Go comparison expr.
 func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error) {
+	if bits, ok := wideBits(xVal.Type()); ok {
+		fn, ok := wideICmp(bits, pred)
+		if !ok {
+			return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
+		}
+		x, err := FormatValue(xVal)
+		if err != nil {
+			return nil, fmt.Errorf("error translating left operand (%v): %w", xVal, err)
+		}
+		y, err := FormatValue(yVal)
+		if err != nil {
+			return nil, fmt.Errorf("error translating right operand (%v): %w", yVal, err)
+		}
+		return fn.Call(x, y), nil
+	}
 	var op string
 	format := FormatValue
 	switch pred {
@@ -482,6 +712,10 @@ func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error)
 	default:
 		return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, pred)
 	}
+	// Go forbids ordered compares on unsafe.Pointer; always use uintptr.
+	if _, ok := xVal.Type().(*types.PointerType); ok {
+		format = FormatUnsigned
+	}
 	x, err := format(xVal)
 	if err != nil {
 		return nil, fmt.Errorf("error translating left operand (%v): %w", xVal, err)
@@ -502,6 +736,27 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	src, err := FormatUnsigned(from)
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	if toType.BitSize == 128 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return Sym(libc.I128FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
+				jen.True():  jen.Lit(1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		return Sym(libc.I128FromU64).Call(jen.Uint64().Call(src)), nil
+	}
+	if toType.BitSize == 256 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return Sym(libc.I256FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
+				jen.True():  jen.Lit(1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		if isI128(from.Type()) {
+			return Sym(libc.I256FromI128).Call(src), nil
+		}
+		return Sym(libc.I256FromU64).Call(jen.Uint64().Call(src)), nil
 	}
 	w := goIntBits(toType.BitSize)
 	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
@@ -524,7 +779,171 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
+	if toType.BitSize == 128 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return Sym(libc.I128FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
+				jen.True():  jen.Lit(-1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		return Sym(libc.I128FromI64).Call(jen.Int64().Call(src)), nil
+	}
+	if toType.BitSize == 256 {
+		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+			return Sym(libc.I256FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
+				jen.True():  jen.Lit(-1),
+				jen.False(): jen.Lit(0),
+			}).Index(src)), nil
+		}
+		if isI128(from.Type()) {
+			return Sym(libc.I256FromI128S).Call(src), nil
+		}
+		return Sym(libc.I256FromI64).Call(jen.Int64().Call(src)), nil
+	}
+	if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
+		// Go has no int32(bool). sext i1: true → -1.
+		return boolToInt(src, toType.BitSize, true), nil
+	}
 	return conv(goIntType(toType.BitSize), src), nil
+}
+
+// boolToInt is zext/sext of i1. signed: true→-1; unsigned: true→1.
+func boolToInt(src *jen.Statement, bits uint64, signed bool) *jen.Statement {
+	t := 1
+	if signed {
+		t = -1
+	}
+	// byte cannot hold untyped -1; use 255 for i8 all-ones.
+	trueLit := jen.Lit(t)
+	if signed && goIntBits(bits) == 8 {
+		trueLit = jen.Lit(255)
+	}
+	return jen.Map(jen.Bool()).Add(goIntType(goIntBits(bits))).Values(jen.Dict{
+		jen.True():  trueLit,
+		jen.False(): jen.Lit(0),
+	}).Index(src)
+}
+
+// refersToGlobal reports whether c mentions g (e.g. SSO string: ptr GEP into self).
+func refersToGlobal(v value.Value, g *ir.Global) bool {
+	return constRefs(v, func(x value.Value) bool {
+		gg, ok := x.(*ir.Global)
+		return ok && gg == g
+	})
+}
+
+// mentionsFunc reports whether a constant mentions a function (vtable slots).
+// Go treats `var vt = dtor` as depending on dtor; if dtor mentions vt, cycle.
+func mentionsFunc(v value.Value) bool {
+	return constRefs(v, func(x value.Value) bool {
+		_, ok := x.(*ir.Func)
+		return ok
+	})
+}
+
+// constRefs walks a constant. Globals and functions are leaves.
+func constRefs(v value.Value, pred func(value.Value) bool) bool {
+	if v == nil {
+		return false
+	}
+	if pred(v) {
+		return true
+	}
+	switch x := v.(type) {
+	case *ir.Alias:
+		return constRefs(x.Aliasee, pred)
+	case *ir.Arg:
+		return constRefs(x.Value, pred)
+	case *ir.IFunc:
+		return constRefs(x.Resolver, pred)
+	case *constant.Struct:
+		for _, f := range x.Fields {
+			if constRefs(f, pred) {
+				return true
+			}
+		}
+	case *constant.Array:
+		for _, e := range x.Elems {
+			if constRefs(e, pred) {
+				return true
+			}
+		}
+	case *constant.Vector:
+		for _, e := range x.Elems {
+			if constRefs(e, pred) {
+				return true
+			}
+		}
+	case *constant.Index:
+		return constRefs(x.Constant, pred)
+	case *constant.ExprGetElementPtr:
+		if constRefs(x.Src, pred) {
+			return true
+		}
+		for _, idx := range x.Indices {
+			if constRefs(idx, pred) {
+				return true
+			}
+		}
+	case *constant.ExprBitCast:
+		return constRefs(x.From, pred)
+	case *constant.ExprIntToPtr:
+		return constRefs(x.From, pred)
+	case *constant.ExprPtrToInt:
+		return constRefs(x.From, pred)
+	case *constant.ExprTrunc:
+		return constRefs(x.From, pred)
+	case *constant.ExprZExt:
+		return constRefs(x.From, pred)
+	case *constant.ExprSExt:
+		return constRefs(x.From, pred)
+	case *constant.ExprAdd:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprSub:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprMul:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprAnd:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprOr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprXor:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprShl:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprLShr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprAShr:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprICmp:
+		return constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprSelect:
+		return constRefs(x.Cond, pred) || constRefs(x.X, pred) || constRefs(x.Y, pred)
+	case *constant.ExprExtractValue:
+		return constRefs(x.X, pred)
+	case *constant.ExprInsertValue:
+		return constRefs(x.X, pred) || constRefs(x.Elem, pred)
+	}
+	return false
+}
+
+func formatBinConst(op string, x, y constant.Constant) (expr, error) {
+	l, err := FormatValue(x)
+	if err != nil {
+		return expr{}, fmt.Errorf("error translating left (%v): %w", x, err)
+	}
+	r, err := FormatValue(y)
+	if err != nil {
+		return expr{}, fmt.Errorf("error translating right (%v): %w", y, err)
+	}
+	if bits, ok := wideBits(x.Type()); ok {
+		fn, ok := wideBinFunc(bits, op, false)
+		if !ok {
+			return expr{}, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
+		}
+		return val(fn.Call(l, r)), nil
+	}
+	return val(jen.Parens(bin(l, op, r))), nil
 }
 
 // formatTrunc is the expression form of trunc.
@@ -536,6 +955,44 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 	src, err := FormatValue(from)
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
+	}
+	if isI128(from.Type()) {
+		it, ok := to.(*types.IntType)
+		if !ok {
+			return conv(toSpec, src), nil
+		}
+		switch {
+		case it.BitSize == 1:
+			return Sym(libc.I128TruncI1).Call(src), nil
+		case it.BitSize <= 8:
+			return Sym(libc.I128TruncI8).Call(src), nil
+		case it.BitSize <= 16:
+			return Sym(libc.I128TruncI16).Call(src), nil
+		case it.BitSize <= 32:
+			return Sym(libc.I128TruncI32).Call(src), nil
+		default:
+			return Sym(libc.I128TruncI64).Call(src), nil
+		}
+	}
+	if isI256(from.Type()) {
+		it, ok := to.(*types.IntType)
+		if !ok {
+			return conv(toSpec, src), nil
+		}
+		switch {
+		case it.BitSize == 1:
+			return Sym(libc.I256TruncI1).Call(src), nil
+		case it.BitSize <= 8:
+			return Sym(libc.I256TruncI8).Call(src), nil
+		case it.BitSize <= 16:
+			return Sym(libc.I256TruncI16).Call(src), nil
+		case it.BitSize <= 32:
+			return Sym(libc.I256TruncI32).Call(src), nil
+		case it.BitSize == 128:
+			return Sym(libc.I256TruncI128).Call(src), nil
+		default:
+			return Sym(libc.I256TruncI64).Call(src), nil
+		}
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {
 		return jen.Parens(bin(src, "&", jen.Lit(1))).Op("!=").Lit(0), nil
@@ -575,6 +1032,9 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
+		if ci.Typ.BitSize == 128 || ci.Typ.BitSize == 256 {
+			return result, nil
+		}
 		if ci.Typ.BitSize > 64 {
 			return nil, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, ci.Typ.BitSize, ci.X)
 		}
@@ -628,11 +1088,14 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 
 	switch t := v.Type().(type) {
 	case *types.IntType:
+		if t.BitSize == 128 || t.BitSize == 256 {
+			return result, nil
+		}
 		if t.BitSize > 8 {
 			return conv(goUintType(t.BitSize), result), nil
 		}
 	case *types.PointerType:
-		return uintptrOfPtr(result), nil
+		return ptrToUint(result), nil
 	}
 
 	return result, nil

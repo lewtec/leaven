@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "AddPointer[byte]",
+        "libc.Ptr("
+      ],
+      "not_contains": [
+        "mismatched source and element types"
+      ]
+    }
+  ]
+}

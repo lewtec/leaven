@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.ClassTypeInfoVT",
+        "panic(\"unsatisfied: __cxa_pure_virtual\")"
+      ],
+      "not_contains": [
+        "undefined:",
+        "func printf"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

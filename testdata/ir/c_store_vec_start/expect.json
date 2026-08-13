@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "var AllVars struct",
+        "*libc.As[unsafe.Pointer](libc.Ptr(&AllVars))"
+      ],
+      "not_contains": [
+        "AllVars = p",
+        "AllVars = v0",
+        "cannot use"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

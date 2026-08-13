@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "StandinVptr",
+        "var _ZTTSt14basic_ifstreamIcSt11char_traitsIcEE"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZTT"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

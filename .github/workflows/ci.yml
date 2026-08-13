@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -31,3 +30,6 @@ jobs:
 
       - name: Csmith smoke (seed=1)
         run: mise run test:csmith
+
+      - name: Assimilate csmith + rhai
+        run: mise run test:assimilate

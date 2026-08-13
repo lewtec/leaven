@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.IstreamGetline"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZSt7getline",
+        "func _ZSt7getline"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

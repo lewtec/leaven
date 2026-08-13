@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.UMinU64",
+        "libc.SMinI64",
+        "libc.UMaxU32",
+        "libc.Abort",
+        "math.Ceil",
+        "libc.VecReduceAddV4I32",
+        "libc.LoadRelativeI64"
+      ],
+      "not_contains": [
+        "undefined: llvm_umin_i64",
+        "undefined: llvm_trap",
+        "func llvm_umin_i64",
+        "func llvm_trap"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

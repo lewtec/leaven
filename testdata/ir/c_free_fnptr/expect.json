@@ -6,10 +6,10 @@
       "contains": [
         "package p",
         "\"github.com/lewtec/leaven/libc\"",
-        "var current_free func(*byte) = libc.Free",
-        "func release(p *byte)",
-        "func set_free(fn func(*byte))",
-        "cond = libc.Free"
+        "var current_free unsafe.Pointer",
+        "libc.FuncCode(libc.Free)",
+        "func release(p unsafe.Pointer)",
+        "func set_free(fn unsafe.Pointer)"
       ],
       "not_contains": [
         "= free",

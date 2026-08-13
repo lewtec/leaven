@@ -5,12 +5,12 @@
       "package": "p",
       "contains": [
         "package p",
-        "import \"sync/atomic\"",
-        "func atomic_inc(p *int32) int32",
-        "func atomic_dec(p *int32) int32",
+        "\"sync/atomic\"",
+        "func atomic_inc(p unsafe.Pointer) int32",
+        "func atomic_dec(p unsafe.Pointer) int32",
         "atomic.AddInt32",
-        "atomic.AddInt32(v0, v1) - v1",
-        "atomic.AddInt32(v0, -(v1)) + v1"
+        "atomic.AddInt32(libc.As[int32](v0), v1) - v1",
+        "atomic.AddInt32(libc.As[int32](v0), -(v1)) + v1"
       ],
       "not_contains": [
         "atomicrmw"

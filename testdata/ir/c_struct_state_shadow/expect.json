@@ -6,8 +6,8 @@
       "contains": [
         "type state struct",
         "local_state",
-        "func state_new() *state",
-        "local_state = new(*state)"
+        "func state_new() unsafe.Pointer",
+        "local_state = libc.Ptr(&new(struct {"
       ],
       "not_contains": [
         "var state **state"

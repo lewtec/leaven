@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Srand48",
+        "libc.Lrand48"
+      ],
+      "not_contains": [
+        "unsatisfied: srand48",
+        "unsatisfied: lrand48",
+        "func srand48",
+        "func lrand48"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

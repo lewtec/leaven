@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.MaximumNumF64"
+      ],
+      "not_contains": [
+        "unsatisfied: llvm.maximumnum",
+        "unknown type"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

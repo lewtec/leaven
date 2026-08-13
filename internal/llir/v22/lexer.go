@@ -2,6 +2,7 @@ package v22
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -35,6 +36,7 @@ const (
 	kGt
 	kDots
 	kBang
+	kPipe
 )
 
 type token struct {
@@ -100,6 +102,8 @@ func (t token) String() string {
 		return "..."
 	case kBang:
 		return "!"
+	case kPipe:
+		return "|"
 	default:
 		return fmt.Sprintf("token(%d)", t.kind)
 	}
@@ -172,6 +176,9 @@ func (l *lexer) next() (token, error) {
 		case '>':
 			l.adv()
 			return token{kind: kGt, line: line, col: col}, nil
+		case '|':
+			l.adv()
+			return token{kind: kPipe, line: line, col: col}, nil
 		case '%':
 			l.adv()
 			s, err := l.ident()
@@ -188,11 +195,22 @@ func (l *lexer) next() (token, error) {
 			return token{kind: kGlobal, s: s, line: line, col: col}, nil
 		case '#':
 			l.adv()
-			n, err := l.uint()
-			if err != nil {
-				return token{}, l.err(err)
+			if l.i < len(l.src) && isDigit(l.src[l.i]) {
+				n, err := l.uint()
+				if err != nil {
+					return token{}, l.err(err)
+				}
+				return token{kind: kAttrID, i: n, line: line, col: col}, nil
 			}
-			return token{kind: kAttrID, i: n, line: line, col: col}, nil
+			// LLVM 19+ debug records: #dbg_declare(...), #dbg_value(...).
+			if l.i < len(l.src) && isIdentStart(l.src[l.i]) {
+				s, err := l.unquotedIdent()
+				if err != nil {
+					return token{}, l.err(err)
+				}
+				return token{kind: kIdent, s: s, line: line, col: col}, nil
+			}
+			return token{}, l.err(fmt.Errorf("expected attribute id or dbg record"))
 		case '!':
 			l.adv()
 			if l.i < len(l.src) && l.src[l.i] == '"' {
@@ -373,6 +391,30 @@ func (l *lexer) number(line, col int) (token, error) {
 	if l.src[l.i] == '-' {
 		l.adv()
 	}
+	// LLVM 0x… hex int, or 0x[KLMHR]… hex float. Keep the lexeme so
+	// parseConst can pick int vs IEEE bits from the expected type.
+	if l.i < len(l.src) && l.src[l.i] == '0' && l.i+1 < len(l.src) && (l.src[l.i+1] == 'x' || l.src[l.i+1] == 'X') {
+		l.adv()
+		l.adv()
+		if l.i < len(l.src) {
+			switch l.src[l.i] {
+			case 'K', 'L', 'M', 'H', 'R':
+				if l.i+1 < len(l.src) && isHex(l.src[l.i+1]) {
+					l.adv()
+					for l.i < len(l.src) && isHex(l.src[l.i]) {
+						l.adv()
+					}
+					return token{kind: kFloat, s: l.src[start:l.i], line: line, col: col}, nil
+				}
+			}
+		}
+		for l.i < len(l.src) && isHex(l.src[l.i]) {
+			l.adv()
+		}
+		s := l.src[start:l.i]
+		n, _ := parseHexInt64(s)
+		return token{kind: kInt, i: n, s: s, line: line, col: col}, nil
+	}
 	for l.i < len(l.src) && isDigit(l.src[l.i]) {
 		l.adv()
 	}
@@ -435,6 +477,14 @@ func (l *lexer) adv() {
 
 func (l *lexer) err(err error) error {
 	return fmt.Errorf("%d:%d: %w", l.line, l.col, err)
+}
+
+func parseHexInt64(s string) (int64, error) {
+	s = strings.TrimPrefix(s, "-")
+	s = strings.TrimPrefix(s, "0x")
+	s = strings.TrimPrefix(s, "0X")
+	u, err := strconv.ParseUint(s, 16, 64)
+	return int64(u), err
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }

@@ -1,17 +1,23 @@
 [tools]
 # Install: mise install
 # Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
-"conda:clang" = "14.0.6"
-"conda:clangxx" = "14.0.6"
+"conda:clang" = ["14.0.6", "22.1.8"]
+"conda:clangxx" = ["14.0.6", "22.1.8"]
+"conda:llvm-tools" = "22.1.8"
 "conda:rust" = "1.97.1"
+# Assimilate harness: cmake+ninja+m4 for csmith; cargo (via rust) for rhai.
+cmake = "4.4.1"
+ninja = "1.13.2"
+"conda:m4" = "1.4.20"
 # Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
 "github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
+"github:lucasew/workspaced" = "0.14.3"
 
 [tasks.test]
-description = "IR-only tests (committed input.<n>.ll; no clang)"
-run = "go test -v -count=1 -timeout 10m ./..."
+description = "IR fixtures (committed input.<n>.ll; skips TestAssimilate)"
+run = "go test -v -count=1 -timeout 10m -skip TestAssimilate ./..."
 
 [tasks."ir:gen"]
 description = "Regenerate testdata/ir/*/input.<n>.ll (clang 14 + clang 22 + rustc)"
@@ -27,8 +33,25 @@ run = "go run ./internal/genir -c conda:clang@22.1.8 -cxx conda:clangxx@22.1.8"
 
 [tasks."test:live"]
 description = "C vs leaven differential (needs clang); -v lists fixtures"
-run = "go test -tags=live -v -count=1 -timeout 10m ./..."
+run = "go test -tags=live -v -count=1 -timeout 10m -skip TestAssimilate ./..."
 
 [tasks."test:csmith"]
 description = "Csmith smoke: known-good seed=1"
 run = "go test -tags=csmith -count=1 -timeout 10m -run 'TestCsmithFixedSeeds/seed=1$'"
+
+[tasks."projects:lock"]
+description = "Refresh workspaced.lock.json for csmith + rhai"
+run = "workspaced mod lock"
+
+[tasks."projects:sync"]
+description = "Place csmith + rhai under testdata/projects/ via core:place (gitignored)"
+run = """
+workspaced codebase apply
+if git ls-files --error-unmatch workspaced.lock.json >/dev/null 2>&1; then
+  git checkout -- workspaced.lock.json
+fi
+"""
+
+[tasks."test:assimilate"]
+description = "Native cmake/cargo vs leaven (places testdata/projects if needed)"
+run = "go test -count=1 -timeout 30m -run TestAssimilate -v ."

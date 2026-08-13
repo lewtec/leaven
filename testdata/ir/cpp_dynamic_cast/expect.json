@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.DynamicCast",
+        "libc.ClassTypeInfoVT",
+        "libc.SIClassTypeInfoVT"
+      ],
+      "not_contains": [
+        "unsatisfied: __dynamic_cast"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": ["ok"],
+    "majors": ["22"]
+  }
+}

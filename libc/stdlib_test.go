@@ -7,6 +7,20 @@ import (
 	"unsafe"
 )
 
+func TestSrand48Lrand48(t *testing.T) {
+	Srand48(1)
+	if g := Lrand48(); g != 89400484 {
+		t.Fatalf("lrand48 after srand48(1) = %d", g)
+	}
+	if g := Lrand48(); g != 976015093 {
+		t.Fatalf("second lrand48 = %d", g)
+	}
+	Srand48(0)
+	if g := Lrand48(); g == 89400484 {
+		t.Fatal("srand48(0) produced the same first value as srand48(1)")
+	}
+}
+
 func TestReallocCopiesOldBytes(t *testing.T) {
 	p := Malloc[byte](4)
 	copy(unsafe.Slice(p, 4), []byte("abcd"))
@@ -36,6 +50,17 @@ func TestReallocZeroFrees(t *testing.T) {
 
 func TestFreeNil(t *testing.T) {
 	Free(nil)
+}
+
+func TestArc4randomBufFills(t *testing.T) {
+	var a, b [16]byte
+	Arc4randomBuf(&a[0], 16)
+	Arc4randomBuf(&b[0], 16)
+	if a == b {
+		t.Fatal("two fills were identical")
+	}
+	Arc4randomBuf(nil, 8)
+	Arc4randomBuf(&a[0], 0)
 }
 
 func TestMallocZeroReturnsUnique(t *testing.T) {
@@ -82,6 +107,7 @@ func TestReallocShrinkInPlace(t *testing.T) {
 }
 
 func TestRetainGoHeap(t *testing.T) {
+	// Retain is still for alloca→uintptr pins (Go new), not slab malloc.
 	p := new(byte)
 	*p = 9
 	if Retain(p) != p {
@@ -90,6 +116,42 @@ func TestRetainGoHeap(t *testing.T) {
 	if _, ok := allocs.Load(uintptr(unsafe.Pointer(p))); !ok {
 		t.Fatal("Retain did not pin Go heap object")
 	}
+}
+
+func TestRustAllocSlabFreeRoundTrip(t *testing.T) {
+	p := RustAlloc(64, 8)
+	if p == nil || uintptr(p) <= 1 {
+		t.Fatal("RustAlloc")
+	}
+	*(*byte)(p) = 7
+	// Free must accept the same pointer (align ≤ 16 path).
+	Free((*byte)(p))
+	q := RustAlloc(32, 1)
+	if q == nil {
+		t.Fatal("RustAlloc after free")
+	}
+	RustDealloc(q, 32, 1)
+}
+
+func TestRustAllocZeroSizeNonNil(t *testing.T) {
+	p := RustAlloc(0, 1)
+	if p == nil || uintptr(p) != 1 {
+		t.Fatalf("zero-size: %v", p)
+	}
+	RustDealloc(p, 0, 1)
+}
+
+func TestRustReallocCopies(t *testing.T) {
+	p := RustAlloc(4, 1)
+	copy(unsafe.Slice((*byte)(p), 4), []byte("abcd"))
+	q := RustRealloc(p, 4, 1, 8)
+	if q == nil {
+		t.Fatal("realloc nil")
+	}
+	if got := string(unsafe.Slice((*byte)(q), 4)); got != "abcd" {
+		t.Fatalf("got %q", got)
+	}
+	RustDealloc(q, 8, 1)
 }
 
 func TestConcurrentMalloc(t *testing.T) {

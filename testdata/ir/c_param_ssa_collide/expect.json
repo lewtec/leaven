@@ -5,12 +5,12 @@
       "package": "p",
       "contains": [
         "package p",
-        "func renumber(self *int32, arg_v1 int32, arg_v2 int32)",
-        "*v1_addr = arg_v1",
-        "*v2_addr = arg_v2"
+        "func renumber(self unsafe.Pointer, arg_v1 int32, arg_v2 int32)",
+        "*libc.As[int32](v1_addr) = arg_v1",
+        "*libc.As[int32](v2_addr) = arg_v2"
       ],
       "not_contains": [
-        "func renumber(self *int32, v1 int32, v2 int32)"
+        "func renumber(self unsafe.Pointer, v1 int32, v2 int32)"
       ]
     }
   ]

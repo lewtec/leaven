@@ -4,8 +4,7 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "tmp := destroy",
-        "*(*func(*byte))(unsafe.Pointer(&tmp))",
+        "libc.FuncCode(destroy)",
         "var h Hooks"
       ],
       "not_contains": [

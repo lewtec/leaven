@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/enum"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 )
 
@@ -33,6 +36,27 @@ func TestParseStrlen22(t *testing.T) {
 	}
 }
 
+func TestParseModuleAsmAndAlias(t *testing.T) {
+	src := `target triple = "x86_64-unknown-linux-gnu"
+module asm ".globl foo"
+@real = dso_local unnamed_addr alias void (ptr), ptr @impl
+define void @impl(ptr %p) {
+entry:
+  ret void
+}
+`
+	m, err := ParseString("alias.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.ModuleAsms) != 1 || m.ModuleAsms[0] != ".globl foo" {
+		t.Fatalf("module asm: %#v", m.ModuleAsms)
+	}
+	if len(m.Aliases) != 1 || m.Aliases[0].Name() != "real" {
+		t.Fatalf("aliases: %+v", m.Aliases)
+	}
+}
+
 func TestParseRustAdd22(t *testing.T) {
 	root := findRepoRoot(t)
 	b, err := os.ReadFile(filepath.Join(root, "testdata/ir/rust_add/input.22.ll"))
@@ -41,6 +65,635 @@ func TestParseRustAdd22(t *testing.T) {
 	}
 	if _, err := ParseString("input.22.ll", string(b)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestParseUseBeforeDef(t *testing.T) {
+	src := `define i64 @f() {
+entry:
+  br label %later
+early:
+  %inc = add i64 %i, 1
+  ret i64 %inc
+later:
+  %i = add i64 0, 0
+  br label %early
+}
+`
+	m, err := ParseString("uad.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := m.Funcs[0].Blocks[1].Insts[0].(*ir.InstAdd)
+	if _, ok := add.X.(*ir.InstAdd); !ok {
+		t.Fatalf("%%inc lhs %T, want defining add", add.X)
+	}
+}
+
+func TestParseRelocConstExpr(t *testing.T) {
+	src := `@s = constant [2 x i8] c"x\00"
+@tab = constant [1 x i32] [i32 trunc (i64 sub (i64 ptrtoint (ptr @s to i64), i64 ptrtoint (ptr @tab to i64)) to i32)]
+`
+	m, err := ParseString("reloc.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arr, ok := m.Globals[1].Init.(*constant.Array)
+	if !ok || len(arr.Elems) != 1 {
+		t.Fatalf("tab init %T", m.Globals[1].Init)
+	}
+	tr, ok := arr.Elems[0].(*constant.ExprTrunc)
+	if !ok {
+		t.Fatalf("elem %T, want trunc", arr.Elems[0])
+	}
+	if _, ok := tr.From.(*constant.ExprSub); !ok {
+		t.Fatalf("trunc from %T, want sub", tr.From)
+	}
+}
+
+func TestParseShuffleVector(t *testing.T) {
+	src := `define <4 x i32> @f(<4 x i32> %a) {
+entry:
+  %r = shufflevector <4 x i32> %a, <4 x i32> poison, <4 x i32> <i32 3, i32 2, i32 1, i32 0>
+  ret <4 x i32> %r
+}
+`
+	m, err := ParseString("shuf.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstShuffleVector); !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseFMul(t *testing.T) {
+	src := `define double @f(double %x) {
+entry:
+  %m = fmul double %x, 1.000000e+02
+  ret double %m
+}
+`
+	m, err := ParseString("fmul.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstFMul); !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseZextNneg(t *testing.T) {
+	src := `define i64 @f(i32 %x) {
+entry:
+  %z = zext nneg i32 %x to i64
+  ret i64 %z
+}
+`
+	if _, err := ParseString("nneg.ll", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseLoadAtomic(t *testing.T) {
+	// rustc once_cell: load atomic ptr, ptr @SEEDS acquire, align 8
+	src := `@seeds = internal global ptr null
+define ptr @f() {
+entry:
+  %p = load atomic ptr, ptr @seeds acquire, align 8
+  store atomic ptr %p, ptr @seeds release, align 8
+  ret ptr %p
+}
+`
+	m, err := ParseString("atomic.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ld, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstLoad)
+	if !ok || !ld.Atomic || ld.Ordering != enum.AtomicOrderingAcquire {
+		t.Fatalf("load %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	st, ok := m.Funcs[0].Blocks[0].Insts[1].(*ir.InstStore)
+	if !ok || !st.Atomic || st.Ordering != enum.AtomicOrderingRelease {
+		t.Fatalf("store %+v", m.Funcs[0].Blocks[0].Insts[1])
+	}
+}
+
+func TestParseUnlabeledEntry(t *testing.T) {
+	src := `define i32 @f(i32 %0, i32 %1) {
+  %3 = add i32 %0, %1
+  br label %4
+4:
+  ret i32 %3
+}
+`
+	m, err := ParseString("entry.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := m.Funcs[0]
+	if len(f.Blocks) != 2 {
+		t.Fatalf("blocks %d", len(f.Blocks))
+	}
+	if f.Blocks[0].ID() != 2 || !f.Blocks[0].IsUnnamed() {
+		t.Fatalf("entry %+v", f.Blocks[0].LocalIdent)
+	}
+	add, ok := f.Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", f.Blocks[0].Insts[0])
+	}
+	_ = add
+}
+
+func TestParseUnlabeledEntryOnly(t *testing.T) {
+	src := `define void @f() {
+  ret void
+}
+`
+	m, err := ParseString("only.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs[0].Blocks) != 1 {
+		t.Fatalf("blocks %d", len(m.Funcs[0].Blocks))
+	}
+}
+
+func TestParseExtractValueTypedDbg(t *testing.T) {
+	src := `define i1 @f({ i64, i1 } %x) {
+entry:
+  %ok = extractvalue { i64, i1 } %x, 1, !dbg !0
+  ret i1 %ok
+}
+!0 = !{}
+`
+	m, err := ParseString("extract.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstExtractValue)
+	if !ok || len(ev.Indices) != 1 || ev.Indices[0] != 1 {
+		t.Fatalf("extractvalue %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseInsertValueDbg(t *testing.T) {
+	src := `define { i64, i1 } @f({ i64, i1 } %x) {
+entry:
+  %y = insertvalue { i64, i1 } %x, i1 true, 1, !dbg !0
+  ret { i64, i1 } %y
+}
+!0 = !{}
+`
+	m, err := ParseString("insert.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iv, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstInsertValue)
+	if !ok || len(iv.Indices) != 1 || iv.Indices[0] != 1 {
+		t.Fatalf("insertvalue %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseCmpXchgPtr(t *testing.T) {
+	// rustc std::sys::exit EXITING_THREAD_ID: cmpxchg of a pointer.
+	src := `@g = global ptr null
+define { ptr, i1 } @f(ptr %p) {
+entry:
+  %r = cmpxchg ptr @g, ptr null, ptr %p acquire monotonic
+  ret { ptr, i1 } %r
+}
+`
+	m, err := ParseString("casptr.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cx, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCmpXchg)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	if _, ok := cx.Cmp.Type().(*types.PointerType); !ok {
+		t.Fatalf("cmp %v", cx.Cmp.Type())
+	}
+}
+
+func TestParseCmpXchgWeak(t *testing.T) {
+	src := `@c = global i64 0
+define void @f() {
+entry:
+  %x = cmpxchg weak ptr @c, i64 0, i64 1 monotonic monotonic
+  ret void
+}
+`
+	m, err := ParseString("cas.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cx, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCmpXchg)
+	if !ok || !cx.Weak {
+		t.Fatalf("cmpxchg %+v", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
+func TestParseExternWeak(t *testing.T) {
+	// rustc std FileAttr: declare extern_weak noundef i32 @statx(...)
+	src := `declare extern_weak noundef i32 @statx(i32 noundef, ptr noundef, i32 noundef, i32 noundef, ptr noundef) unnamed_addr
+`
+	m, err := ParseString("statx.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) != 1 || m.Funcs[0].Name() != "statx" {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+	if m.Funcs[0].Linkage != enum.LinkageExternWeak {
+		t.Fatalf("linkage %v", m.Funcs[0].Linkage)
+	}
+	if m.Funcs[0].Sig.RetType != types.I32 {
+		t.Fatalf("ret %v", m.Funcs[0].Sig.RetType)
+	}
+}
+
+func TestParseCallFastMathNSZ(t *testing.T) {
+	// rustc f64::max: tail call nsz double @llvm.maximumnum.f64
+	src := `declare double @llvm.maximumnum.f64(double, double)
+define double @f(double %a, double %b) {
+entry:
+  %r = tail call nsz double @llvm.maximumnum.f64(double %a, double %b)
+  ret double %r
+}
+`
+	m, err := ParseString("nsz.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := m.Funcs[1].Blocks[0].Insts[0].(*ir.InstCall)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[1].Blocks[0].Insts[0])
+	}
+	if len(call.FastMathFlags) != 1 || call.FastMathFlags[0] != enum.FastMathFlagNSZ {
+		t.Fatalf("flags %+v", call.FastMathFlags)
+	}
+	if call.Typ != types.Double {
+		t.Fatalf("typ %v", call.Typ)
+	}
+}
+
+func TestParseFenceAcquire(t *testing.T) {
+	// rustc Arc drop_slow: fence acquire then load the inner ptr.
+	src := `define void @f(ptr %p) {
+entry:
+  fence acquire
+  %x = load ptr, ptr %p, align 8
+  fence syncscope("singlethread") seq_cst, !dbg !0
+  ret void
+}
+!0 = !{}
+`
+	m, err := ParseString("fence.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insts := m.Funcs[0].Blocks[0].Insts
+	if len(insts) != 3 {
+		t.Fatalf("insts=%d", len(insts))
+	}
+	f0, ok := insts[0].(*ir.InstFence)
+	if !ok || f0.Ordering != enum.AtomicOrderingAcquire {
+		t.Fatalf("fence0 %+v", insts[0])
+	}
+	f1, ok := insts[2].(*ir.InstFence)
+	if !ok || f1.Ordering != enum.AtomicOrderingSeqCst {
+		t.Fatalf("fence1 %+v", insts[2])
+	}
+}
+
+func TestParseHexDouble(t *testing.T) {
+	src := `define i1 @f(double %x) {
+entry:
+  %c = fcmp ogt double %x, 0x42A2309CE0000000
+  ret i1 %c
+}
+`
+	if _, err := ParseString("hexf.ll", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseCallAsm(t *testing.T) {
+	src := `define void @f() {
+start:
+  tail call void asm sideeffect "", "~{memory}"()
+  ret void
+}
+`
+	m, err := ParseString("asm.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCall)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	ia, ok := call.Callee.(*ir.InlineAsm)
+	if !ok || !ia.SideEffect || ia.Constraint != "~{memory}" || ia.Asm != "" {
+		t.Fatalf("asm %+v", call.Callee)
+	}
+}
+
+func TestParseSplat(t *testing.T) {
+	src := `define i1 @f(<16 x i8> %v) {
+entry:
+  %c = icmp eq <16 x i8> %v, splat (i8 -1)
+  ret i1 %c
+}
+`
+	m, err := ParseString("splat.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	icmp, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstICmp)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	vec, ok := icmp.Y.(*constant.Vector)
+	if !ok || len(vec.Elems) != 16 {
+		t.Fatalf("splat %T %#v", icmp.Y, icmp.Y)
+	}
+}
+
+func TestParseDbgDeclare(t *testing.T) {
+	src := `define void @f(ptr %p) {
+  %p.addr = alloca ptr
+  store ptr %p, ptr %p.addr
+    #dbg_declare(ptr %p.addr, !0, !DIExpression(), !1)
+    #dbg_value(ptr %p, !0, !DIExpression(), !1)
+  ret void
+}
+!0 = !{}
+!1 = !{}
+`
+	m, err := ParseString("dbg.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(m.Funcs[0].Blocks[0].Insts); n != 2 {
+		t.Fatalf("insts %d, want alloca+store", n)
+	}
+}
+
+func TestParseDeadOnReturn(t *testing.T) {
+	src := `define void @f(ptr dead_on_return noalias noundef %0) {
+  ret void
+}
+`
+	m, err := ParseString("dor.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) == 0 || len(m.Funcs[0].Params) != 1 {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+}
+
+func TestParseDefineDbg(t *testing.T) {
+	src := `define internal fastcc void @f(i64 %0) unnamed_addr #0 !dbg !0 {
+  ret void
+}
+attributes #0 = { nounwind }
+!0 = !{}
+`
+	m, err := ParseString("fndbg.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) == 0 || len(m.Funcs[0].Blocks) == 0 {
+		t.Fatalf("funcs %+v", m.Funcs)
+	}
+}
+
+func TestParseUnreachableDbg(t *testing.T) {
+	src := `define void @f() {
+entry:
+  unreachable, !dbg !0
+}
+!0 = !{}
+`
+	if _, err := ParseString("unreach.ll", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseGEPInrange(t *testing.T) {
+	src := `@vt = external global [4 x ptr]
+define ptr @f(ptr %p) {
+entry:
+  store ptr getelementptr inbounds nuw inrange(-16, 16) (i8, ptr @vt, i64 16), ptr %p
+  ret ptr %p
+}
+`
+	m, err := ParseString("gep.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstStore)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	if _, ok := st.Src.(*constant.ExprGetElementPtr); !ok {
+		t.Fatalf("store src %T, want getelementptr", st.Src)
+	}
+}
+
+func TestParseInvokeLandingPad(t *testing.T) {
+	src := `define void @f(ptr %p) personality ptr @eh {
+entry:
+  invoke void @g(ptr %p)
+          to label %ok unwind label %bad
+ok:
+  ret void
+bad:
+  %lp = landingpad { ptr, i32 }
+          cleanup
+  resume { ptr, i32 } %lp
+}
+declare void @g(ptr)
+declare i32 @eh(...)
+`
+	m, err := ParseString("eh.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := m.Funcs[0]
+	if _, ok := f.Blocks[0].Term.(*ir.TermInvoke); !ok {
+		t.Fatalf("entry term %T, want invoke", f.Blocks[0].Term)
+	}
+	if _, ok := f.Blocks[1].Term.(*ir.TermRet); !ok {
+		t.Fatalf("ok term %T, want ret", f.Blocks[1].Term)
+	}
+	if _, ok := f.Blocks[2].Insts[0].(*ir.InstLandingPad); !ok {
+		t.Fatalf("bad inst %T, want landingpad", f.Blocks[2].Insts[0])
+	}
+	if _, ok := f.Blocks[2].Term.(*ir.TermResume); !ok {
+		t.Fatalf("bad term %T, want resume", f.Blocks[2].Term)
+	}
+}
+
+func TestParseThreadLocal(t *testing.T) {
+	// rustc: @x = internal thread_local unnamed_addr global ...
+	src := `@tls = internal thread_local unnamed_addr global i32 0
+@ie = thread_local(initialexec) global i32 1
+`
+	m, err := ParseString("tls.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Globals) != 2 {
+		t.Fatalf("globals=%d", len(m.Globals))
+	}
+	if m.Globals[0].TLSModel != enum.TLSModelGeneric {
+		t.Fatalf("tls model=%v, want generic", m.Globals[0].TLSModel)
+	}
+	if m.Globals[1].TLSModel != enum.TLSModelInitialExec {
+		t.Fatalf("ie model=%v, want initialexec", m.Globals[1].TLSModel)
+	}
+}
+
+func TestParseExternalThenGlobal(t *testing.T) {
+	src := `@ext = external global [0 x ptr]
+@real = private constant i32 1
+`
+	m, err := ParseString("ext.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Globals) != 2 {
+		t.Fatalf("globals=%d", len(m.Globals))
+	}
+}
+
+func TestParseBitcastI1Vec(t *testing.T) {
+	// rustc SIMD icmp produces <16 x i1> and bitcasts the mask to i16.
+	src := `define i16 @f(<16 x i1> %v) {
+entry:
+  %b = bitcast <16 x i1> %v to i16
+  ret i16 %b
+}
+`
+	m, err := ParseString("i1vec.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstBitCast)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	vt, ok := bc.From.Type().(*types.VectorType)
+	if !ok || vt.Len != 16 {
+		t.Fatalf("from %v", bc.From.Type())
+	}
+	elem, ok := vt.ElemType.(*types.IntType)
+	if !ok || elem.BitSize != 1 {
+		t.Fatalf("elem %v", vt.ElemType)
+	}
+	to, ok := bc.To.(*types.IntType)
+	if !ok || to.BitSize != 16 {
+		t.Fatalf("to %v", bc.To)
+	}
+}
+
+func TestParseI128Const(t *testing.T) {
+	// rustc TypeId / i128 math uses values that do not fit in int64.
+	src := `define i128 @f() {
+entry:
+  %a = add i128 170141183460469231731687303715884105727, 1
+  %b = add i128 %a, -170141183460469231731687303715884105728
+  ret i128 %b
+}
+`
+	m, err := ParseString("i128.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	it, ok := add.Typ.(*types.IntType)
+	if !ok || it.BitSize != 128 {
+		t.Fatalf("type %v", add.Typ)
+	}
+	ci, ok := add.X.(*constant.Int)
+	if !ok || ci.X.String() != "170141183460469231731687303715884105727" {
+		t.Fatalf("max i128 %v", add.X)
+	}
+	one, ok := add.Y.(*constant.Int)
+	if !ok || one.X.Int64() != 1 {
+		t.Fatalf("add 1 %v", add.Y)
+	}
+}
+
+func TestParseI256Const(t *testing.T) {
+	// rustc core::fmt::num::__fmt_inner uses i256 literals beyond i128.
+	src := `define i256 @f() {
+entry:
+  %a = add i256 1, 10000000000000000000
+  %b = zext i128 1 to i256
+  ret i256 %a
+}
+`
+	m, err := ParseString("i256.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstAdd)
+	if !ok {
+		t.Fatalf("inst %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+	it, ok := add.Typ.(*types.IntType)
+	if !ok || it.BitSize != 256 {
+		t.Fatalf("type %v", add.Typ)
+	}
+	ci, ok := add.Y.(*constant.Int)
+	if !ok || ci.X.String() != "10000000000000000000" {
+		t.Fatalf("i256 const %v", add.Y)
+	}
+	zext, ok := m.Funcs[0].Blocks[0].Insts[1].(*ir.InstZExt)
+	if !ok {
+		t.Fatalf("zext %T", m.Funcs[0].Blocks[0].Insts[1])
+	}
+	to, ok := zext.To.(*types.IntType)
+	if !ok || to.BitSize != 256 {
+		t.Fatalf("zext to %v", zext.To)
+	}
+}
+
+func TestParseForwardGlobal(t *testing.T) {
+	// C++ vtables mention @_ZTI* before that global is defined.
+	// Typeinfo inits use constant getelementptr.
+	src := `@_ZTV = constant { [2 x ptr] } { [2 x ptr] [ptr null, ptr @_ZTI] }
+@_ZTI = constant { ptr, ptr } { ptr getelementptr inbounds (ptr, ptr @_ZTV, i64 2), ptr @_ZTS }
+@_ZTS = constant [4 x i8] c"Foo\00"
+@small = constant i8 trunc (i32 300 to i8)
+declare void @__cxa_pure_virtual()
+`
+	m, err := ParseString("fwd.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Globals) < 3 {
+		t.Fatalf("globals=%d", len(m.Globals))
+	}
+	zti := m.Globals[1]
+	st, ok := zti.Init.(*constant.Struct)
+	if !ok || len(st.Fields) < 1 {
+		t.Fatalf("ZTI init %T", zti.Init)
+	}
+	if _, ok := st.Fields[0].(*constant.ExprGetElementPtr); !ok {
+		t.Fatalf("ZTI field0 %T, want getelementptr", st.Fields[0])
+	}
+	if _, ok := m.Globals[3].Init.(*constant.ExprTrunc); !ok {
+		t.Fatalf("trunc init %T", m.Globals[3].Init)
 	}
 }
 

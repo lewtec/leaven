@@ -1,7 +1,5 @@
 package libc
 
-import "unsafe"
-
 // The functions in this file are transpiled from
 // the Public Domain C Library (PDCLib).
 
@@ -42,8 +40,8 @@ if_then:
 	goto cleanup
 
 if_end:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p1_015)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-	incdec_ptr5 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p2_016)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(p1_015, 1)
+	incdec_ptr5 = AddPointer(p2_016, 1)
 	tobool = dec17 == 0
 	if tobool {
 		retval_0 = 0
@@ -82,7 +80,7 @@ do_body:
 	}
 
 do_cond:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s_addr_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s_addr_0, 1)
 	tobool = v0 == 0
 	if tobool {
 		retval_0 = nil
@@ -125,8 +123,8 @@ land_rhs:
 	}
 
 while_body:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_012)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-	incdec_ptr4 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s2_addr_013)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s1_addr_012, 1)
+	incdec_ptr4 = AddPointer(s2_addr_013, 1)
 	v3 = *incdec_ptr
 	tobool = v3 == 0
 	if tobool {
@@ -156,9 +154,9 @@ func Strcpy(s1 *byte, s2 *byte) *byte {
 	goto while_cond
 
 while_cond:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s2_addr_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s2_addr_0, 1)
 	v0 = *s2_addr_0
-	incdec_ptr1 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr1 = AddPointer(s1_addr_0, 1)
 	*s1_addr_0 = v0
 	tobool = v0 == 0
 	if tobool {
@@ -204,7 +202,7 @@ while_cond1:
 	}
 
 while_body3:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(p_0, 1)
 	cmp = v1 == v2
 	if cmp {
 		len_019 = len_021
@@ -216,7 +214,7 @@ while_body3:
 
 while_end:
 	inc = len_021 + 1
-	arrayidx = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1)) + uintptr(int64(inc))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx = AddPointer(s1, int(inc))
 	v3 = *arrayidx
 	tobool = v3 == 0
 	if tobool {
@@ -243,7 +241,7 @@ func Strlen(s *byte) int64 {
 	goto while_cond
 
 while_cond:
-	arrayidx = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s)) + uintptr(int64(rc_0))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx = AddPointer(s, int(rc_0))
 	v0 = *arrayidx
 	tobool = v0 == 0
 	inc = rc_0 + 1
@@ -272,7 +270,7 @@ func Strncat(s1 *byte, s2 *byte, n int64) *byte {
 while_cond:
 	v0 = *s1_addr_0
 	tobool = v0 == 0
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s1_addr_0, 1)
 	if tobool {
 		goto while_cond1_preheader
 	} else {
@@ -301,8 +299,8 @@ land_end:
 	}
 
 while_body6:
-	incdec_ptr4 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_121)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-	incdec_ptr3 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s2_addr_019)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr4 = AddPointer(s1_addr_121, 1)
+	incdec_ptr3 = AddPointer(s2_addr_019, 1)
 	dec = n_addr_020 - 1
 	tobool2 = dec == 0
 	if tobool2 {
@@ -352,8 +350,8 @@ land_lhs_true:
 	}
 
 while_body:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_020)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-	incdec_ptr5 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s2_addr_021)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s1_addr_020, 1)
+	incdec_ptr5 = AddPointer(s2_addr_021, 1)
 	dec = n_addr_022 - 1
 	cond = dec == 0
 	if cond {
@@ -393,7 +391,7 @@ func Strncpy(s1 *byte, s2 *byte, n int64) *byte {
 
 land_rhs:
 	v0 = *s2_addr_018
-	incdec_ptr1 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_020)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr1 = AddPointer(s1_addr_020, 1)
 	*s1_addr_020 = v0
 	tobool2 = v0 == 0
 	if tobool2 {
@@ -403,7 +401,7 @@ land_rhs:
 	}
 
 while_body:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s2_addr_018)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(s2_addr_018, 1)
 	dec = n_addr_019 - 1
 	tobool = dec == 0
 	if tobool {
@@ -461,7 +459,7 @@ while_cond1:
 	}
 
 while_body3:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p2_0)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(p2_0, 1)
 	cmp = v1 == v2
 	if cmp {
 		retval_0 = p1_017
@@ -472,7 +470,7 @@ while_body3:
 	}
 
 while_end:
-	incdec_ptr6 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p1_017)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr6 = AddPointer(p1_017, 1)
 	v3 = *incdec_ptr6
 	tobool = v3 == 0
 	if tobool {
@@ -501,7 +499,7 @@ func Strrchr(s *byte, c int32) *byte {
 
 while_cond:
 	inc = i_0 + 1
-	arrayidx = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s)) + uintptr(int64(i_0))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx = AddPointer(s, int(i_0))
 	v0 = *arrayidx
 	tobool = v0 == 0
 	if tobool {
@@ -519,7 +517,7 @@ do_body_preheader:
 
 do_body:
 	dec = i_1 - 1
-	arrayidx1 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s)) + uintptr(int64(dec))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx1 = AddPointer(s, int(dec))
 	v1 = *arrayidx1
 	conv = int32(int8(v1))
 	cmp = conv3 == conv
@@ -540,7 +538,7 @@ do_cond:
 	}
 
 cleanup_split_loop_exit15:
-	arrayidx1_le = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s)) + uintptr(int64(dec))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx1_le = AddPointer(s, int(dec))
 	retval_0 = arrayidx1_le
 	goto cleanup
 
@@ -593,7 +591,7 @@ while_cond1:
 
 while_body3:
 	cmp = v2 == v4
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p_025)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(p_025, 1)
 	if cmp {
 		goto if_end9
 	} else {
@@ -602,7 +600,7 @@ while_body3:
 
 if_end9:
 	inc = len_028 + 1
-	arrayidx = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1)) + uintptr(int64(inc))*unsafe.Sizeof(*(*byte)(nil))))
+	arrayidx = AddPointer(s1, int(inc))
 	v5 = *arrayidx
 	tobool = v5 == 0
 	if tobool {
@@ -657,8 +655,8 @@ land_rhs_preheader:
 	}
 
 while_body6:
-	incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p1_12437)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-	incdec_ptr7 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p2_02536)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr = AddPointer(p1_12437, 1)
+	incdec_ptr7 = AddPointer(p2_02536, 1)
 	v3 = *incdec_ptr7
 	tobool2 = v3 == 0
 	if tobool2 {
@@ -679,7 +677,7 @@ while_body6_land_rhs_crit_edge:
 	}
 
 if_end:
-	incdec_ptr9 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(s1_addr_028)) + 1*unsafe.Sizeof(*(*byte)(nil))))
+	incdec_ptr9 = AddPointer(s1_addr_028, 1)
 	v4 = *incdec_ptr9
 	tobool = v4 == 0
 	if tobool {

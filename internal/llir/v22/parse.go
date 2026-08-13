@@ -28,12 +28,14 @@ func ParseString(path, content string) (*ir.Module, error) {
 		types:   make(map[string]types.Type),
 		globals: make(map[string]*ir.Global),
 		funcs:   make(map[string]*ir.Func),
+		aliases: make(map[string]*ir.Alias),
 		ptr:     types.NewOpaquePointer(),
 	}
 	if len(toks) > 0 {
 		p.tok = toks[0]
 	}
 	p.predeclareFuncs()
+	p.predeclareGlobals()
 	if err := p.parseModule(); err != nil {
 		return nil, err
 	}
@@ -48,14 +50,16 @@ type parser struct {
 	types   map[string]types.Type
 	globals map[string]*ir.Global
 	funcs   map[string]*ir.Func
+	aliases map[string]*ir.Alias
 	ptr     *types.PointerType
 	tok     token
 
 	// per-function
-	fn     *ir.Func
-	locals map[string]value.Value
-	blocks map[string]*ir.Block
-	phis   []pendingPhi
+	fn        *ir.Func
+	locals    map[string]value.Value
+	blocks    map[string]*ir.Block
+	phis      []pendingPhi
+	nextLocal int64
 }
 
 type pendingPhi struct {
@@ -90,6 +94,45 @@ func (p *parser) predeclareFuncs() {
 				break
 			}
 		}
+	}
+}
+
+func (p *parser) predeclareGlobals() {
+	for i := 0; i < len(p.toks); i++ {
+		if p.toks[i].kind != kGlobal {
+			continue
+		}
+		if i+1 >= len(p.toks) || p.toks[i+1].kind != kEq {
+			continue
+		}
+		name := p.toks[i].s
+		kind := ""
+		for j := i + 2; j < len(p.toks) && j < i+24; j++ {
+			if p.toks[j].kind != kIdent {
+				break
+			}
+			switch p.toks[j].s {
+			case "global", "constant":
+				kind = "global"
+			case "alias", "ifunc":
+				kind = "alias"
+			}
+			if kind != "" {
+				break
+			}
+		}
+		if kind != "global" {
+			continue
+		}
+		if _, ok := p.globals[name]; ok {
+			continue
+		}
+		if _, ok := p.funcs[name]; ok {
+			continue
+		}
+		g := ir.NewGlobal(name, types.I8)
+		p.globals[name] = g
+		p.m.Globals = append(p.m.Globals, g)
 	}
 }
 
@@ -143,6 +186,17 @@ func (p *parser) parseTop() error {
 			return nil
 		case "define", "declare":
 			return p.parseFunc(t.s == "define")
+		case "module":
+			p.next()
+			if err := p.wantIdent("asm"); err != nil {
+				return err
+			}
+			s, err := p.stringLit()
+			if err != nil {
+				return err
+			}
+			p.m.ModuleAsms = append(p.m.ModuleAsms, s)
+			return nil
 		case "attributes":
 			return p.parseAttrGroup()
 		default:
@@ -231,70 +285,111 @@ func (p *parser) parseGlobal() error {
 	if err := p.expect(kEq); err != nil {
 		return err
 	}
-	g := ir.NewGlobal(name, types.I8)
-	p.globals[name] = g
-	p.m.Globals = append(p.m.Globals, g)
-
+	var (
+		link    enum.Linkage
+		pre     enum.Preemption
+		vis     enum.Visibility
+		unnamed enum.UnnamedAddr
+		tls     enum.TLSModel
+	)
 	for p.tok.kind == kIdent {
 		switch p.tok.s {
 		case "private":
-			g.Linkage = enum.LinkagePrivate
+			link = enum.LinkagePrivate
 			p.next()
 		case "internal":
-			g.Linkage = enum.LinkageInternal
+			link = enum.LinkageInternal
 			p.next()
 		case "external":
-			g.Linkage = enum.LinkageExternal
+			link = enum.LinkageExternal
+			p.next()
+		case "extern_weak":
+			link = enum.LinkageExternWeak
 			p.next()
 		case "common":
-			g.Linkage = enum.LinkageCommon
+			link = enum.LinkageCommon
 			p.next()
 		case "appending":
-			g.Linkage = enum.LinkageAppending
+			link = enum.LinkageAppending
 			p.next()
 		case "linkonce_odr":
-			g.Linkage = enum.LinkageLinkOnceODR
+			link = enum.LinkageLinkOnceODR
 			p.next()
 		case "weak_odr":
-			g.Linkage = enum.LinkageWeakODR
+			link = enum.LinkageWeakODR
 			p.next()
 		case "weak":
-			g.Linkage = enum.LinkageWeak
+			link = enum.LinkageWeak
 			p.next()
 		case "dso_local":
-			g.Preemption = enum.PreemptionDSOLocal
+			pre = enum.PreemptionDSOLocal
 			p.next()
 		case "dso_preemptable":
-			g.Preemption = enum.PreemptionDSOPreemptable
+			pre = enum.PreemptionDSOPreemptable
+			p.next()
+		case "hidden":
+			vis = enum.VisibilityHidden
+			p.next()
+		case "protected":
+			vis = enum.VisibilityProtected
 			p.next()
 		case "unnamed_addr":
-			g.UnnamedAddr = enum.UnnamedAddrUnnamedAddr
+			unnamed = enum.UnnamedAddrUnnamedAddr
 			p.next()
 		case "local_unnamed_addr":
-			g.UnnamedAddr = enum.UnnamedAddrLocalUnnamedAddr
+			unnamed = enum.UnnamedAddrLocalUnnamedAddr
 			p.next()
-		case "constant":
-			g.Immutable = true
+		case "thread_local":
+			model, err := p.parseThreadLocal()
+			if err != nil {
+				return err
+			}
+			tls = model
+		case "constant", "global":
+			g := p.ensureGlobal(name)
+			g.Linkage = link
+			g.Preemption = pre
+			g.Visibility = vis
+			g.UnnamedAddr = unnamed
+			g.TLSModel = tls
+			g.Immutable = p.tok.s == "constant"
 			p.next()
-			goto typ
-		case "global":
-			g.Immutable = false
+			return p.parseGlobalInit(g)
+		case "alias":
 			p.next()
-			goto typ
+			return p.parseAlias(name, link, pre, vis, unnamed, tls)
+		case "ifunc":
+			p.next()
+			return p.parseIFunc(name, link, pre, vis, unnamed, tls)
 		default:
 			return p.errorf("unexpected global prefix %q", p.tok.s)
 		}
 	}
-	if p.isIdent("constant") {
-		g.Immutable = true
+	if p.isIdent("constant") || p.isIdent("global") {
+		g := p.ensureGlobal(name)
+		g.Linkage = link
+		g.Preemption = pre
+		g.Visibility = vis
+		g.UnnamedAddr = unnamed
+		g.TLSModel = tls
+		g.Immutable = p.tok.s == "constant"
 		p.next()
-	} else if p.isIdent("global") {
-		g.Immutable = false
-		p.next()
-	} else {
-		return p.errorf("expected global or constant")
+		return p.parseGlobalInit(g)
 	}
-typ:
+	return p.errorf("expected global, constant, or alias")
+}
+
+func (p *parser) ensureGlobal(name string) *ir.Global {
+	if g, ok := p.globals[name]; ok {
+		return g
+	}
+	g := ir.NewGlobal(name, types.I8)
+	p.globals[name] = g
+	p.m.Globals = append(p.m.Globals, g)
+	return g
+}
+
+func (p *parser) parseGlobalInit(g *ir.Global) error {
 	ct, err := p.parseType()
 	if err != nil {
 		return err
@@ -314,21 +409,131 @@ typ:
 	}
 	for p.tok.kind == kComma {
 		p.next()
-		if err := p.skipGlobalSuffix(); err != nil {
+		if err := p.skipGlobalSuffix(g); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p *parser) skipGlobalSuffix() error {
+func (p *parser) parseThreadLocal() (enum.TLSModel, error) {
+	p.next() // thread_local
+	if p.tok.kind != kLParen {
+		return enum.TLSModelGeneric, nil
+	}
+	p.next()
+	if p.tok.kind != kIdent {
+		return enum.TLSModelNone, p.errorf("expected TLS model")
+	}
+	var m enum.TLSModel
+	switch p.tok.s {
+	case "localdynamic":
+		m = enum.TLSModelLocalDynamic
+	case "initialexec":
+		m = enum.TLSModelInitialExec
+	case "localexec":
+		m = enum.TLSModelLocalExec
+	default:
+		return enum.TLSModelNone, p.errorf("unknown TLS model %q", p.tok.s)
+	}
+	p.next()
+	if err := p.expect(kRParen); err != nil {
+		return enum.TLSModelNone, err
+	}
+	return m, nil
+}
+
+func (p *parser) parseAlias(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr, tls enum.TLSModel) error {
+	if _, err := p.parseType(); err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	at, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	if p.tok.kind == kGlobal {
+		if _, ok := p.funcs[p.tok.s]; !ok {
+			if _, ok := p.globals[p.tok.s]; !ok {
+				f := ir.NewFunc(p.tok.s, types.Void)
+				p.funcs[p.tok.s] = f
+				p.m.Funcs = append(p.m.Funcs, f)
+			}
+		}
+	}
+	val, err := p.parseValue(at)
+	if err != nil {
+		return err
+	}
+	c, ok := val.(constant.Constant)
+	if !ok {
+		return p.errorf("aliasee is not a constant")
+	}
+	a := ir.NewAlias(name, c)
+	a.Linkage = link
+	a.Preemption = pre
+	a.Visibility = vis
+	a.UnnamedAddr = unnamed
+	a.TLSModel = tls
+	p.m.Aliases = append(p.m.Aliases, a)
+	p.aliases[name] = a
+	switch t := val.(type) {
+	case *ir.Func:
+		p.funcs[name] = t
+	case *ir.Global:
+		p.globals[name] = t
+	}
+	for p.tok.kind == kComma {
+		p.next()
+		if err := p.skipGlobalSuffix(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *parser) parseIFunc(name string, link enum.Linkage, pre enum.Preemption, vis enum.Visibility, unnamed enum.UnnamedAddr, tls enum.TLSModel) error {
+	if _, err := p.parseType(); err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	at, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	resolver, err := p.asConst(p.parseValue(at))
+	if err != nil {
+		return err
+	}
+	fn := ir.NewIFunc(name, resolver)
+	fn.Linkage = link
+	fn.Preemption = pre
+	fn.Visibility = vis
+	fn.UnnamedAddr = unnamed
+	fn.TLSModel = tls
+	p.m.IFuncs = append(p.m.IFuncs, fn)
+	for p.tok.kind == kComma {
+		p.next()
+		if err := p.skipGlobalSuffix(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *parser) skipGlobalSuffix(g *ir.Global) error {
 	if p.isIdent("align") {
 		p.next()
 		if p.tok.kind != kInt {
 			return p.errorf("expected align integer")
 		}
-		g := p.m.Globals[len(p.m.Globals)-1]
-		g.Align = ir.Align(p.tok.i)
+		if g != nil {
+			g.Align = ir.Align(p.tok.i)
+		}
 		p.next()
 		return nil
 	}
@@ -369,6 +574,9 @@ func (p *parser) parseFunc(def bool) error {
 		case "external":
 			link = enum.LinkageExternal
 			p.next()
+		case "extern_weak":
+			link = enum.LinkageExternWeak
+			p.next()
 		case "linkonce_odr":
 			link = enum.LinkageLinkOnceODR
 			p.next()
@@ -383,6 +591,8 @@ func (p *parser) parseFunc(def bool) error {
 			p.next()
 		case "dso_preemptable":
 			pre = enum.PreemptionDSOPreemptable
+			p.next()
+		case "hidden", "protected":
 			p.next()
 		case "fastcc", "ccc", "coldcc", "tailcc", "webkit_jscc", "anyregcc",
 			"preserve_mostcc", "preserve_allcc", "swiftcc", "cxx_fast_tlscc":
@@ -493,6 +703,12 @@ ret:
 			}
 			continue
 		}
+		if p.tok.kind == kMetaID || p.tok.kind == kMetaName || p.tok.kind == kBang {
+			if err := p.skipMDNode(); err != nil {
+				return err
+			}
+			continue
+		}
 		break
 	}
 	f.UnnamedAddr = unnamed
@@ -510,6 +726,7 @@ ret:
 }
 
 func (p *parser) parseParams() ([]*ir.Param, bool, error) {
+	p.nextLocal = 0
 	var params []*ir.Param
 	variadic := false
 	if p.tok.kind == kRParen {
@@ -534,7 +751,16 @@ func (p *parser) parseParams() ([]*ir.Param, bool, error) {
 			name = p.tok.s
 			p.next()
 		}
-		params = append(params, newParam(name, t))
+		param := newParam(name, t)
+		if name == "" {
+			param.SetID(p.nextLocal)
+			p.nextLocal++
+		} else if id, err := strconv.ParseInt(name, 10, 64); err == nil {
+			if id >= p.nextLocal {
+				p.nextLocal = id + 1
+			}
+		}
+		params = append(params, param)
 		if p.tok.kind != kComma {
 			break
 		}
@@ -558,17 +784,28 @@ func (p *parser) parseBody(f *ir.Func) error {
 	if err := p.collectBlocks(f); err != nil {
 		return err
 	}
+	first := true
 	for !p.done() && p.tok.kind != kRBrace {
 		name, ok := p.parseLabel()
 		if !ok {
-			return p.errorf("expected basic block label")
+			if !first {
+				return p.errorf("expected basic block label")
+			}
+			name = p.implicitEntryName()
 		}
+		first = false
 		block := p.blocks[name]
+		if block == nil {
+			return p.errorf("unknown block %%%s", name)
+		}
 		for !p.done() && p.tok.kind != kRBrace && !p.atLabel() {
 			if err := p.parseInst(block); err != nil {
 				return err
 			}
 		}
+	}
+	if err := p.resolveFwds(); err != nil {
+		return err
 	}
 	for _, phi := range p.phis {
 		for _, inc := range phi.incs {
@@ -594,8 +831,10 @@ func (p *parser) parseBody(f *ir.Func) error {
 
 func (p *parser) collectBlocks(f *ir.Func) error {
 	saveI, saveTok := p.i, p.tok
+	if !p.atLabel() {
+		p.addImplicitEntry(f)
+	}
 	depth := 0
-	sawLabel := false
 	for !p.done() {
 		if depth == 0 && p.tok.kind == kRBrace {
 			break
@@ -608,7 +847,6 @@ func (p *parser) collectBlocks(f *ir.Func) error {
 			if _, exists := p.blocks[name]; !exists {
 				p.blocks[name] = f.NewBlock(name)
 			}
-			sawLabel = true
 		}
 		switch p.tok.kind {
 		case kLParen, kLBrace, kLBrack, kLt:
@@ -618,13 +856,24 @@ func (p *parser) collectBlocks(f *ir.Func) error {
 		}
 		p.next()
 	}
-	if !sawLabel {
-		if _, exists := p.blocks["entry"]; !exists {
-			p.blocks["entry"] = f.NewBlock("entry")
-		}
-	}
 	p.i, p.tok = saveI, saveTok
 	return nil
+}
+
+// implicitEntryName is the LLVM unnamed-value id of a first block with no
+// label. Params %0,%1 then the block is %2 (first inst often %3).
+func (p *parser) implicitEntryName() string {
+	return strconv.FormatInt(p.nextLocal, 10)
+}
+
+func (p *parser) addImplicitEntry(f *ir.Func) {
+	name := p.implicitEntryName()
+	if _, exists := p.blocks[name]; exists {
+		return
+	}
+	b := f.NewBlock("")
+	b.SetID(p.nextLocal)
+	p.blocks[name] = b
 }
 
 func (p *parser) atLabel() bool {
@@ -672,6 +921,9 @@ func (p *parser) parseInst(block *ir.Block) error {
 	}
 	op := p.tok.s
 	p.next()
+	if strings.HasPrefix(op, "dbg_") {
+		return p.skipDbgRecord()
+	}
 	switch op {
 	case "alloca":
 		return p.parseAlloca(block, ident, name)
@@ -683,20 +935,37 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseGEP(block, ident, name)
 	case "atomicrmw":
 		return p.parseAtomicRMW(block, ident, name)
+	case "cmpxchg":
+		return p.parseCmpXchg(block, ident, name)
+	case "fence":
+		return p.parseFence(block)
 	case "call":
 		return p.parseCall(block, ident, name)
+	case "invoke":
+		return p.parseInvoke(block, ident, name)
+	case "landingpad":
+		return p.parseLandingPad(block, ident, name)
+	case "resume":
+		return p.parseResume(block)
+	case "freeze":
+		return p.parseFreeze(block, ident, name)
 	case "ret":
 		return p.parseRet(block)
 	case "br":
 		return p.parseBr(block)
 	case "unreachable":
 		block.Term = ir.NewUnreachable()
-		return nil
+		return p.skipInstMD()
 	case "icmp":
 		return p.parseICmp(block, ident, name)
 	case "add", "sub", "mul", "udiv", "sdiv", "urem", "srem", "and", "or", "xor",
-		"shl", "lshr", "ashr":
+		"shl", "lshr", "ashr",
+		"fadd", "fsub", "fmul", "fdiv", "frem":
 		return p.parseBin(block, ident, name, op)
+	case "fcmp":
+		return p.parseFCmp(block, ident, name)
+	case "fneg":
+		return p.parseFNeg(block, ident, name)
 	case "zext", "sext", "trunc", "ptrtoint", "inttoptr", "bitcast", "addrspacecast",
 		"fptoui", "fptosi", "uitofp", "sitofp", "fpext", "fptrunc":
 		return p.parseCast(block, ident, name, op)
@@ -710,9 +979,72 @@ func (p *parser) parseInst(block *ir.Block) error {
 		return p.parseExtractValue(block, ident, name)
 	case "insertvalue":
 		return p.parseInsertValue(block, ident, name)
+	case "extractelement":
+		return p.parseExtractElement(block, ident, name)
+	case "insertelement":
+		return p.parseInsertElement(block, ident, name)
+	case "shufflevector":
+		return p.parseShuffleVector(block, ident, name)
 	default:
 		return p.errorf("unsupported instruction %q", op)
 	}
+}
+
+// fwdRef is a use of a local before its defining instruction is parsed.
+type fwdRef struct {
+	name string
+	typ  types.Type
+}
+
+func (f *fwdRef) String() string {
+	if f.typ != nil {
+		return fmt.Sprintf("%s %%%s", f.typ, f.name)
+	}
+	return "%" + f.name
+}
+
+func (f *fwdRef) Ident() string { return "%" + f.name }
+
+func (f *fwdRef) Type() types.Type {
+	if f.typ != nil {
+		return f.typ
+	}
+	return types.I8
+}
+
+func (p *parser) resolveFwds() error {
+	rewrite := func(op *value.Value) error {
+		f, ok := (*op).(*fwdRef)
+		if !ok {
+			return nil
+		}
+		v, ok := p.locals[f.name]
+		if !ok {
+			return p.errorf("undefined local %%%s", f.name)
+		}
+		if _, still := v.(*fwdRef); still {
+			return p.errorf("undefined local %%%s", f.name)
+		}
+		*op = v
+		return nil
+	}
+	for _, b := range p.fn.Blocks {
+		for _, inst := range b.Insts {
+			for _, op := range inst.Operands() {
+				if err := rewrite(op); err != nil {
+					return err
+				}
+			}
+		}
+		if b.Term != nil {
+			for _, op := range b.Term.Operands() {
+				if err := rewrite(op); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (p *parser) bind(name string, v value.Value) {
@@ -788,12 +1120,13 @@ func (p *parser) parseLoad(block *ir.Block, ident ir.LocalIdent, name string) er
 	inst := ir.NewLoad(elem, src)
 	inst.LocalIdent = ident
 	inst.Atomic = atomic
-	if err := p.parseAlignAndMD(&inst.Align); err != nil {
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
 		return err
 	}
-	if atomic {
-		// ordering already consumed? LLVM: load atomic ty, ptr syncscope? ordering, align
-		// our fixtures don't use atomic load.
+	inst.Ordering = ord
+	if err := p.parseAlignAndMD(&inst.Align); err != nil {
+		return err
 	}
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
@@ -801,11 +1134,13 @@ func (p *parser) parseLoad(block *ir.Block, ident ir.LocalIdent, name string) er
 }
 
 func (p *parser) parseStore(block *ir.Block) error {
-	if p.isIdent("atomic") || p.isIdent("volatile") {
+	atomic := false
+	if p.isIdent("atomic") {
+		atomic = true
 		p.next()
-		if p.isIdent("volatile") {
-			p.next()
-		}
+	}
+	if p.isIdent("volatile") {
+		p.next()
 	}
 	src, err := p.parseTypedValue()
 	if err != nil {
@@ -819,6 +1154,12 @@ func (p *parser) parseStore(block *ir.Block) error {
 		return err
 	}
 	inst := ir.NewStore(src, dst)
+	inst.Atomic = atomic
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	inst.Ordering = ord
 	if err := p.parseAlignAndMD(&inst.Align); err != nil {
 		return err
 	}
@@ -826,17 +1167,52 @@ func (p *parser) parseStore(block *ir.Block) error {
 	return nil
 }
 
-func (p *parser) parseGEP(block *ir.Block, ident ir.LocalIdent, name string) error {
-	inbounds := false
-	if p.isIdent("inbounds") {
-		inbounds = true
+// parseSyncScopeAndOrdering consumes optional syncscope("...") and an
+// atomic ordering. LangRef: load/store atomic … [syncscope] <ordering>, align.
+func (p *parser) parseSyncScopeAndOrdering() (enum.AtomicOrdering, error) {
+	if p.isIdent("syncscope") {
 		p.next()
-	}
-	if p.isIdent("nuw") || p.isIdent("nsw") {
-		p.next()
-		if p.isIdent("nuw") || p.isIdent("nsw") {
-			p.next()
+		if p.tok.kind == kLParen {
+			if err := p.skipBalanced(kLParen, kRParen); err != nil {
+				return enum.AtomicOrderingNone, err
+			}
 		}
+	}
+	if p.tok.kind == kIdent {
+		if o, ok := atomicOrdering(p.tok.s); ok {
+			p.next()
+			return o, nil
+		}
+	}
+	return enum.AtomicOrderingNone, nil
+}
+
+func (p *parser) skipGEPFlags() (inbounds bool, err error) {
+	for p.tok.kind == kIdent {
+		switch p.tok.s {
+		case "inbounds":
+			inbounds = true
+			p.next()
+		case "nuw", "nsw":
+			p.next()
+		case "inrange":
+			p.next()
+			if p.tok.kind == kLParen {
+				if err := p.skipBalanced(kLParen, kRParen); err != nil {
+					return false, err
+				}
+			}
+		default:
+			return inbounds, nil
+		}
+	}
+	return inbounds, nil
+}
+
+func (p *parser) parseGEP(block *ir.Block, ident ir.LocalIdent, name string) error {
+	inbounds, err := p.skipGEPFlags()
+	if err != nil {
+		return err
 	}
 	elem, err := p.parseType()
 	if err != nil {
@@ -858,6 +1234,11 @@ func (p *parser) parseGEP(block *ir.Block, ident ir.LocalIdent, name string) err
 		}
 		if p.isIdent("inrange") {
 			p.next()
+			if p.tok.kind == kLParen {
+				if err := p.skipBalanced(kLParen, kRParen); err != nil {
+					return err
+				}
+			}
 		}
 		idx, err := p.parseTypedValue()
 		if err != nil {
@@ -914,40 +1295,110 @@ func (p *parser) parseAtomicRMW(block *ir.Block, ident ir.LocalIdent, name strin
 	return nil
 }
 
-func (p *parser) parseCall(block *ir.Block, ident ir.LocalIdent, name string) error {
-	// call [cconv] [retattrs] [ty | fnty] callee(args) [fnattrs]
+func (p *parser) parseCmpXchg(block *ir.Block, ident ir.LocalIdent, name string) error {
+	weak := false
+	if p.isIdent("weak") {
+		weak = true
+		p.next()
+	}
+	if p.isIdent("volatile") {
+		p.next()
+	}
+	ptr, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	cmp, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	neu, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	succ, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	fail := enum.AtomicOrderingMonotonic
+	if p.tok.kind == kIdent {
+		if o, ok := atomicOrdering(p.tok.s); ok {
+			fail = o
+			p.next()
+		}
+	}
+	if succ == enum.AtomicOrderingNone {
+		succ = enum.AtomicOrderingSeqCst
+	}
+	inst := ir.NewCmpXchg(ptr, cmp, neu, succ, fail)
+	inst.LocalIdent = ident
+	inst.Weak = weak
+	if err := p.parseAlignAndMD(nil); err != nil {
+		return err
+	}
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+// parseFence is LangRef `fence [syncscope("…")] <ordering>`. rustc emits
+// `fence acquire` before Arc::drop_slow. No SSA result.
+func (p *parser) parseFence(block *ir.Block) error {
+	ord, err := p.parseSyncScopeAndOrdering()
+	if err != nil {
+		return err
+	}
+	if ord == enum.AtomicOrderingNone {
+		return p.errorf("expected fence ordering")
+	}
+	inst := ir.NewFence(ord)
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	block.Insts = append(block.Insts, inst)
+	return nil
+}
+
+type callSite struct {
+	callee value.Value
+	args   []value.Value
+	ret    types.Type
+	fast   []enum.FastMathFlag
+}
+
+func (p *parser) parseCallSite() (callSite, error) {
+	var cs callSite
+	// LangRef: call FastMathFlag* CallingConvopt ... Typ
+	// rustc emits `call nsz double @llvm.maximumnum.f64`.
+	cs.fast = p.parseFastMath()
 	p.skipCallingConv()
 	for p.skipRetAttr() {
 	}
 	typ, err := p.parseType()
 	if err != nil {
-		return err
+		return cs, err
 	}
 	var fnty *types.FuncType
-	if p.tok.kind == kLParen {
-		// explicit function type: i32 (ptr, ...)
-		p.next()
-		params, variadic, err := p.parseParams()
-		if err != nil {
-			return err
-		}
-		pt := make([]types.Type, len(params))
-		for i, a := range params {
-			pt[i] = a.Typ
-		}
-		fnty = types.NewFunc(typ, pt...)
-		fnty.Variadic = variadic
+	if ft, ok := typ.(*types.FuncType); ok {
+		fnty = ft
+		typ = ft.RetType
 	}
-	callee, err := p.parseCallee()
+	callee, err := p.parseCallee(typ)
 	if err != nil {
-		return err
+		return cs, err
 	}
 	if err := p.expect(kLParen); err != nil {
-		return err
+		return cs, err
 	}
 	args, err := p.parseArgs()
 	if err != nil {
-		return err
+		return cs, err
 	}
 	for p.tok.kind == kAttrID || (p.tok.kind == kIdent && isFuncAttr(p.tok.s)) {
 		if p.tok.kind == kAttrID {
@@ -955,45 +1406,209 @@ func (p *parser) parseCall(block *ir.Block, ident ir.LocalIdent, name string) er
 			continue
 		}
 		if err := p.skipFuncAttr(); err != nil {
-			return err
+			return cs, err
+		}
+	}
+	cs.callee = callee
+	cs.args = args
+	cs.ret = typ
+	if fnty != nil {
+		cs.ret = fnty.RetType
+	}
+	return cs, nil
+}
+
+func (p *parser) parseCall(block *ir.Block, ident ir.LocalIdent, name string) error {
+	cs, err := p.parseCallSite()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := &ir.InstCall{
+		LocalIdent:    ident,
+		Callee:        cs.callee,
+		Args:          cs.args,
+		Typ:           cs.ret,
+		FastMathFlags: cs.fast,
+	}
+	block.Insts = append(block.Insts, inst)
+	if !types.IsVoid(cs.ret) {
+		p.bind(name, inst)
+	}
+	return nil
+}
+
+func (p *parser) parseInvoke(block *ir.Block, ident ir.LocalIdent, name string) error {
+	cs, err := p.parseCallSite()
+	if err != nil {
+		return err
+	}
+	if err := p.wantIdent("to"); err != nil {
+		return err
+	}
+	if err := p.wantIdent("label"); err != nil {
+		return err
+	}
+	normal, err := p.blockRef()
+	if err != nil {
+		return err
+	}
+	if err := p.wantIdent("unwind"); err != nil {
+		return err
+	}
+	if err := p.wantIdent("label"); err != nil {
+		return err
+	}
+	unwind, err := p.blockRef()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	term := &ir.TermInvoke{
+		LocalIdent:         ident,
+		Invokee:            cs.callee,
+		Args:               cs.args,
+		NormalRetTarget:    normal,
+		ExceptionRetTarget: unwind,
+		Typ:                cs.ret,
+	}
+	block.Term = term
+	if !types.IsVoid(cs.ret) {
+		p.bind(name, term)
+	}
+	return nil
+}
+
+func (p *parser) parseLandingPad(block *ir.Block, ident ir.LocalIdent, name string) error {
+	typ, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	cleanup := false
+	var clauses []*ir.Clause
+	for p.isIdent("cleanup") || p.isIdent("catch") || p.isIdent("filter") {
+		which := p.tok.s
+		p.next()
+		switch which {
+		case "cleanup":
+			cleanup = true
+		case "catch", "filter":
+			x, err := p.parseTypedValue()
+			if err != nil {
+				return err
+			}
+			kind := enum.ClauseTypeCatch
+			if which == "filter" {
+				kind = enum.ClauseTypeFilter
+			}
+			clauses = append(clauses, ir.NewClause(kind, x))
 		}
 	}
 	if err := p.skipInstMD(); err != nil {
 		return err
 	}
-	ret := typ
-	if fnty != nil {
-		ret = fnty.RetType
-	}
-	inst := &ir.InstCall{
-		LocalIdent: ident,
-		Callee:     callee,
-		Args:       args,
-		Typ:        ret,
-	}
-	if !types.IsVoid(ret) {
-		block.Insts = append(block.Insts, inst)
-		p.bind(name, inst)
-	} else {
-		block.Insts = append(block.Insts, inst)
-	}
+	inst := ir.NewLandingPad(typ, clauses...)
+	inst.Cleanup = cleanup
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
 	return nil
 }
 
-func (p *parser) parseCallee() (value.Value, error) {
+func (p *parser) parseResume(block *ir.Block) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	block.Term = ir.NewResume(x)
+	return nil
+}
+
+func (p *parser) parseFreeze(block *ir.Block, ident ir.LocalIdent, name string) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewInstFreeze(x)
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) blockRef() (*ir.Block, error) {
+	if p.tok.kind != kLocal {
+		return nil, p.errorf("expected block label")
+	}
+	name := p.tok.s
+	p.next()
+	b := p.blocks[name]
+	if b == nil {
+		return nil, p.errorf("unknown block %%%s", name)
+	}
+	return b, nil
+}
+
+func (p *parser) parseCallee(ret types.Type) (value.Value, error) {
 	switch p.tok.kind {
 	case kGlobal:
 		return p.refAt(p.tok.s)
 	case kLocal:
 		name := p.tok.s
 		p.next()
-		if v, ok := p.locals[name]; ok {
-			return v, nil
+		return p.lookupLocal(name, p.ptr), nil
+	case kIdent:
+		if p.tok.s == "asm" {
+			return p.parseInlineAsm(ret)
 		}
-		return nil, p.errorf("unknown local %%%s", name)
-	default:
-		return nil, p.errorf("expected callee, got %s", p.tok)
 	}
+	return nil, p.errorf("expected callee, got %s", p.tok)
+}
+
+func (p *parser) parseInlineAsm(ret types.Type) (*ir.InlineAsm, error) {
+	p.next() // asm
+	a := ir.NewInlineAsm(types.NewPointer(types.NewFunc(ret)), "", "")
+	for p.tok.kind == kIdent {
+		switch p.tok.s {
+		case "sideeffect":
+			a.SideEffect = true
+			p.next()
+		case "alignstack":
+			a.AlignStack = true
+			p.next()
+		case "inteldialect":
+			a.IntelDialect = true
+			p.next()
+		case "unwind":
+			p.next()
+		default:
+			return nil, p.errorf("unexpected asm flag %q", p.tok.s)
+		}
+	}
+	if p.tok.kind != kString {
+		return nil, p.errorf("expected asm string")
+	}
+	a.Asm = p.tok.s
+	p.next()
+	if err := p.expect(kComma); err != nil {
+		return nil, err
+	}
+	if p.tok.kind != kString {
+		return nil, p.errorf("expected asm constraint")
+	}
+	a.Constraint = p.tok.s
+	p.next()
+	return a, nil
 }
 
 func (p *parser) parseArgs() ([]value.Value, error) {
@@ -1185,7 +1800,89 @@ func (p *parser) parseICmp(block *ir.Block, ident ir.LocalIdent, name string) er
 	return nil
 }
 
+func (p *parser) parseFastMath() []enum.FastMathFlag {
+	var flags []enum.FastMathFlag
+	for p.tok.kind == kIdent {
+		var f enum.FastMathFlag
+		switch p.tok.s {
+		case "nnan":
+			f = enum.FastMathFlagNNaN
+		case "ninf":
+			f = enum.FastMathFlagNInf
+		case "nsz":
+			f = enum.FastMathFlagNSZ
+		case "arcp":
+			f = enum.FastMathFlagARcp
+		case "contract":
+			f = enum.FastMathFlagContract
+		case "afn":
+			f = enum.FastMathFlagAFn
+		case "reassoc":
+			f = enum.FastMathFlagReassoc
+		case "fast":
+			f = enum.FastMathFlagFast
+		default:
+			return flags
+		}
+		flags = append(flags, f)
+		p.next()
+	}
+	return flags
+}
+
+func (p *parser) skipFastMath() {
+	_ = p.parseFastMath()
+}
+
+func (p *parser) parseFNeg(block *ir.Block, ident ir.LocalIdent, name string) error {
+	p.skipFastMath()
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewFNeg(x)
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) parseFCmp(block *ir.Block, ident ir.LocalIdent, name string) error {
+	p.skipFastMath()
+	if p.tok.kind != kIdent {
+		return p.errorf("expected fcmp predicate")
+	}
+	pred, ok := fpred(p.tok.s)
+	if !ok {
+		return p.errorf("unknown fcmp pred %q", p.tok.s)
+	}
+	p.next()
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	y, err := p.parseValue(x.Type())
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewFCmp(pred, x, y)
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
 func (p *parser) parseBin(block *ir.Block, ident ir.LocalIdent, name, op string) error {
+	p.skipFastMath()
 	var flags []enum.OverflowFlag
 	for p.isIdent("nsw") || p.isIdent("nuw") {
 		if p.tok.s == "nsw" {
@@ -1195,7 +1892,7 @@ func (p *parser) parseBin(block *ir.Block, ident ir.LocalIdent, name, op string)
 		}
 		p.next()
 	}
-	if p.isIdent("exact") {
+	if p.isIdent("exact") || p.isIdent("nneg") || p.isIdent("disjoint") {
 		p.next()
 	}
 	x, err := p.parseTypedValue()
@@ -1280,6 +1977,31 @@ func (p *parser) parseBin(block *ir.Block, ident ir.LocalIdent, name, op string)
 		n.LocalIdent = ident
 		inst = n
 		p.bind(name, n)
+	case "fadd":
+		n := ir.NewFAdd(x, y)
+		n.LocalIdent = ident
+		inst = n
+		p.bind(name, n)
+	case "fsub":
+		n := ir.NewFSub(x, y)
+		n.LocalIdent = ident
+		inst = n
+		p.bind(name, n)
+	case "fmul":
+		n := ir.NewFMul(x, y)
+		n.LocalIdent = ident
+		inst = n
+		p.bind(name, n)
+	case "fdiv":
+		n := ir.NewFDiv(x, y)
+		n.LocalIdent = ident
+		inst = n
+		p.bind(name, n)
+	case "frem":
+		n := ir.NewFRem(x, y)
+		n.LocalIdent = ident
+		inst = n
+		p.bind(name, n)
 	}
 	if err := p.skipInstMD(); err != nil {
 		return err
@@ -1289,7 +2011,7 @@ func (p *parser) parseBin(block *ir.Block, ident ir.LocalIdent, name, op string)
 }
 
 func (p *parser) parseCast(block *ir.Block, ident ir.LocalIdent, name, op string) error {
-	for p.isIdent("nsw") || p.isIdent("nuw") {
+	for p.isIdent("nsw") || p.isIdent("nuw") || p.isIdent("nneg") || p.isIdent("exact") {
 		p.next()
 	}
 	from, err := p.parseTypedValue()
@@ -1475,14 +2197,9 @@ func (p *parser) parseExtractValue(block *ir.Block, ident ir.LocalIdent, name st
 	if err != nil {
 		return err
 	}
-	var idxs []uint64
-	for p.tok.kind == kComma {
-		p.next()
-		if p.tok.kind != kInt {
-			return p.errorf("expected extractvalue index")
-		}
-		idxs = append(idxs, uint64(p.tok.i))
-		p.next()
+	idxs, err := p.parseAggregateIndices()
+	if err != nil {
+		return err
 	}
 	inst := ir.NewExtractValue(x, idxs...)
 	inst.LocalIdent = ident
@@ -1503,16 +2220,112 @@ func (p *parser) parseInsertValue(block *ir.Block, ident ir.LocalIdent, name str
 	if err != nil {
 		return err
 	}
+	idxs, err := p.parseAggregateIndices()
+	if err != nil {
+		return err
+	}
+	inst := &ir.InstInsertValue{LocalIdent: ident, X: x, Elem: elem, Indices: idxs, Typ: x.Type()}
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+// parseAggregateIndices reads ', 0, 1' then ', !dbg !N'. A comma that is
+// not followed by an integer is metadata; skipInstMD consumes the rest.
+func (p *parser) parseAggregateIndices() ([]uint64, error) {
 	var idxs []uint64
 	for p.tok.kind == kComma {
 		p.next()
 		if p.tok.kind != kInt {
-			return p.errorf("expected insertvalue index")
+			if err := p.skipMDNode(); err != nil {
+				return nil, err
+			}
+			break
 		}
 		idxs = append(idxs, uint64(p.tok.i))
 		p.next()
 	}
-	inst := &ir.InstInsertValue{LocalIdent: ident, X: x, Elem: elem, Indices: idxs, Typ: x.Type()}
+	if err := p.skipInstMD(); err != nil {
+		return nil, err
+	}
+	return idxs, nil
+}
+
+func (p *parser) parseExtractElement(block *ir.Block, ident ir.LocalIdent, name string) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	idx, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewExtractElement(x, idx)
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) parseInsertElement(block *ir.Block, ident ir.LocalIdent, name string) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	elem, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	idx, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewInsertElement(x, elem, idx)
+	inst.LocalIdent = ident
+	block.Insts = append(block.Insts, inst)
+	p.bind(name, inst)
+	return nil
+}
+
+func (p *parser) parseShuffleVector(block *ir.Block, ident ir.LocalIdent, name string) error {
+	x, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	y, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.expect(kComma); err != nil {
+		return err
+	}
+	mask, err := p.parseTypedValue()
+	if err != nil {
+		return err
+	}
+	if err := p.skipInstMD(); err != nil {
+		return err
+	}
+	inst := ir.NewShuffleVector(x, y, mask)
+	inst.LocalIdent = ident
 	block.Insts = append(block.Insts, inst)
 	p.bind(name, inst)
 	return nil
@@ -1548,6 +2361,13 @@ func (p *parser) parseAlignAndMD(align *ir.Align) error {
 	return nil
 }
 
+func (p *parser) skipDbgRecord() error {
+	if p.tok.kind != kLParen {
+		return p.errorf("expected dbg record (")
+	}
+	return p.skipBalanced(kLParen, kRParen)
+}
+
 func (p *parser) skipInstMD() error {
 	for p.tok.kind == kComma {
 		p.next()
@@ -1569,7 +2389,47 @@ func (p *parser) parseType() (types.Type, error) {
 		p.next()
 		t = types.NewPointer(t)
 	}
+	if p.tok.kind == kLParen {
+		t, err = p.finishFuncType(t)
+		if err != nil {
+			return nil, err
+		}
+		for p.tok.kind == kStar {
+			p.next()
+			t = types.NewPointer(t)
+		}
+	}
 	return t, nil
+}
+
+func (p *parser) finishFuncType(ret types.Type) (*types.FuncType, error) {
+	p.next() // (
+	var params []types.Type
+	variadic := false
+	if p.tok.kind != kRParen {
+		for {
+			if p.tok.kind == kDots {
+				variadic = true
+				p.next()
+				break
+			}
+			pt, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, pt)
+			if p.tok.kind != kComma {
+				break
+			}
+			p.next()
+		}
+	}
+	if err := p.expect(kRParen); err != nil {
+		return nil, err
+	}
+	ft := types.NewFunc(ret, params...)
+	ft.Variadic = variadic
+	return ft, nil
 }
 
 func (p *parser) parseTypePrimary() (types.Type, error) {
@@ -1754,15 +2614,21 @@ func (p *parser) parseTypedValue() (value.Value, error) {
 	return p.parseValue(typ)
 }
 
+func (p *parser) lookupLocal(name string, typ types.Type) value.Value {
+	if v, ok := p.locals[name]; ok {
+		return v
+	}
+	f := &fwdRef{name: name, typ: typ}
+	p.locals[name] = f
+	return f
+}
+
 func (p *parser) parseValue(typ types.Type) (value.Value, error) {
 	switch p.tok.kind {
 	case kLocal:
 		name := p.tok.s
 		p.next()
-		if v, ok := p.locals[name]; ok {
-			return v, nil
-		}
-		return nil, p.errorf("unknown local %%%s", name)
+		return p.lookupLocal(name, typ), nil
 	case kGlobal:
 		return p.refAt(p.tok.s)
 	case kMetaID, kMetaName, kBang:
@@ -1781,264 +2647,16 @@ func (p *parser) refAt(name string) (value.Value, error) {
 	if f, ok := p.funcs[name]; ok {
 		return f, nil
 	}
+	// Prefer aliases over dummy globals so post-definition refs are correct.
+	// (Forward refs before the alias line still hit ensureGlobal; emit maps
+	// those stubs via moduleFuncAliases.)
+	if a, ok := p.aliases[name]; ok {
+		return a, nil
+	}
 	if g, ok := p.globals[name]; ok {
 		return g, nil
 	}
-	return nil, p.errorf("unknown global @%s", name)
-}
-
-func (p *parser) startsConst() bool {
-	return p.startsValue()
-}
-
-func (p *parser) startsValue() bool {
-	switch p.tok.kind {
-	case kInt, kFloat, kCString, kString, kLBrace, kLBrack, kLt, kGlobal, kLocal:
-		return true
-	case kIdent:
-		switch p.tok.s {
-		case "true", "false", "null", "undef", "poison", "zeroinitializer",
-			"inttoptr", "ptrtoint", "bitcast", "getelementptr", "addrspacecast":
-			return true
-		}
-	}
-	return false
-}
-
-func (p *parser) isConstExpr() bool {
-	return p.tok.kind == kIdent && (p.tok.s == "inttoptr" || p.tok.s == "ptrtoint" ||
-		p.tok.s == "bitcast" || p.tok.s == "getelementptr" || p.tok.s == "addrspacecast")
-}
-
-func (p *parser) parseConstExpr(typ types.Type) (constant.Constant, error) {
-	op := p.tok.s
-	p.next()
-	inbounds := false
-	if op == "getelementptr" && p.isIdent("inbounds") {
-		inbounds = true
-		p.next()
-	}
-	_ = inbounds
-	if err := p.expect(kLParen); err != nil {
-		return nil, err
-	}
-	// inttoptr (i64 1 to ptr)  / bitcast (ty val to ty)
-	if op == "inttoptr" || op == "ptrtoint" || op == "bitcast" || op == "addrspacecast" {
-		from, err := p.parseTypedValue()
-		if err != nil {
-			return nil, err
-		}
-		if err := p.wantIdent("to"); err != nil {
-			return nil, err
-		}
-		to, err := p.parseType()
-		if err != nil {
-			return nil, err
-		}
-		if err := p.expect(kRParen); err != nil {
-			return nil, err
-		}
-		c, ok := from.(constant.Constant)
-		if !ok {
-			return nil, p.errorf("constexpr operand is not constant")
-		}
-		switch op {
-		case "inttoptr":
-			return constant.NewIntToPtr(c, to), nil
-		case "ptrtoint":
-			return constant.NewPtrToInt(c, to), nil
-		case "addrspacecast":
-			return constant.NewAddrSpaceCast(c, to), nil
-		default:
-			return constant.NewBitCast(c, to), nil
-		}
-	}
-	// getelementptr (ty, ty val, ...)
-	if _, err := p.parseType(); err != nil {
-		return nil, err
-	}
-	for p.tok.kind == kComma {
-		p.next()
-		if _, err := p.parseTypedValue(); err != nil {
-			return nil, err
-		}
-	}
-	if err := p.expect(kRParen); err != nil {
-		return nil, err
-	}
-	// Enough for call args: use null/zero of result type.
-	if pt, ok := typ.(*types.PointerType); ok {
-		return constant.NewNull(pt), nil
-	}
-	return constant.NewZeroInitializer(typ), nil
-}
-
-func (p *parser) parseConst(typ types.Type) (constant.Constant, error) {
-	switch p.tok.kind {
-	case kInt:
-		it, ok := typ.(*types.IntType)
-		if !ok {
-			return nil, p.errorf("integer constant for non-int type %s", typ)
-		}
-		c := constant.NewInt(it, p.tok.i)
-		p.next()
-		return c, nil
-	case kIdent:
-		switch p.tok.s {
-		case "true":
-			p.next()
-			return constant.True, nil
-		case "false":
-			p.next()
-			return constant.False, nil
-		case "null":
-			p.next()
-			pt, ok := typ.(*types.PointerType)
-			if !ok {
-				pt = p.ptr
-			}
-			return constant.NewNull(pt), nil
-		case "undef":
-			p.next()
-			return constant.NewUndef(typ), nil
-		case "poison":
-			p.next()
-			return constant.NewPoison(typ), nil
-		case "zeroinitializer":
-			p.next()
-			return constant.NewZeroInitializer(typ), nil
-		default:
-			return nil, p.errorf("unexpected constant %q", p.tok.s)
-		}
-	case kCString:
-		b := p.tok.b
-		p.next()
-		return constant.NewCharArray(b), nil
-	case kLBrace:
-		return p.parseStructConst(typ, false)
-	case kLt:
-		if p.peekKind() == kLBrace {
-			p.next()
-			return p.parseStructConst(typ, true)
-		}
-		return p.parseVectorConst(typ)
-	case kLBrack:
-		return p.parseArrayConst(typ)
-	case kGlobal:
-		v, err := p.refAt(p.tok.s)
-		if err != nil {
-			return nil, err
-		}
-		c, ok := v.(constant.Constant)
-		if !ok {
-			return nil, p.errorf("value @%s is not a constant", v.Ident())
-		}
-		return c, nil
-	default:
-		return nil, p.errorf("expected constant, got %s", p.tok)
-	}
-}
-
-func (p *parser) parseStructConst(typ types.Type, packed bool) (constant.Constant, error) {
-	if err := p.expect(kLBrace); err != nil {
-		return nil, err
-	}
-	var fields []constant.Constant
-	if p.tok.kind != kRBrace {
-		for {
-			ft, err := p.parseType()
-			if err != nil {
-				return nil, err
-			}
-			if err := p.skipParamAttrs(); err != nil {
-				return nil, err
-			}
-			f, err := p.parseConst(ft)
-			if err != nil {
-				return nil, err
-			}
-			fields = append(fields, f)
-			if p.tok.kind != kComma {
-				break
-			}
-			p.next()
-		}
-	}
-	if err := p.expect(kRBrace); err != nil {
-		return nil, err
-	}
-	if packed {
-		if err := p.expect(kGt); err != nil {
-			return nil, err
-		}
-	}
-	st, _ := typ.(*types.StructType)
-	if st == nil {
-		st = types.NewStruct()
-		st.Packed = packed
-		for _, f := range fields {
-			st.Fields = append(st.Fields, f.Type())
-		}
-	}
-	return constant.NewStruct(st, fields...), nil
-}
-
-func (p *parser) parseArrayConst(typ types.Type) (constant.Constant, error) {
-	if err := p.expect(kLBrack); err != nil {
-		return nil, err
-	}
-	var elems []constant.Constant
-	if p.tok.kind != kRBrack {
-		for {
-			et, err := p.parseType()
-			if err != nil {
-				return nil, err
-			}
-			e, err := p.parseConst(et)
-			if err != nil {
-				return nil, err
-			}
-			elems = append(elems, e)
-			if p.tok.kind != kComma {
-				break
-			}
-			p.next()
-		}
-	}
-	if err := p.expect(kRBrack); err != nil {
-		return nil, err
-	}
-	at, _ := typ.(*types.ArrayType)
-	return constant.NewArray(at, elems...), nil
-}
-
-func (p *parser) parseVectorConst(typ types.Type) (constant.Constant, error) {
-	if err := p.expect(kLt); err != nil {
-		return nil, err
-	}
-	var elems []constant.Constant
-	if p.tok.kind != kGt {
-		for {
-			et, err := p.parseType()
-			if err != nil {
-				return nil, err
-			}
-			e, err := p.parseConst(et)
-			if err != nil {
-				return nil, err
-			}
-			elems = append(elems, e)
-			if p.tok.kind != kComma {
-				break
-			}
-			p.next()
-		}
-	}
-	if err := p.expect(kGt); err != nil {
-		return nil, err
-	}
-	vt, _ := typ.(*types.VectorType)
-	return constant.NewVector(vt, elems...), nil
+	return p.ensureGlobal(name), nil
 }
 
 // --- attributes / metadata ---------------------------------------------------
@@ -2160,6 +2778,7 @@ func (p *parser) skipParamAttrs() error {
 		}
 		if p.isIdent("noalias") || p.isIdent("readonly") || p.isIdent("writeonly") ||
 			p.isIdent("readnone") || p.isIdent("writable") || p.isIdent("dead_on_unwind") ||
+			p.isIdent("dead_on_return") ||
 			p.isIdent("allocptr") || p.isIdent("allocalign") || p.isIdent("nocapture") ||
 			p.isIdent("nofree") || p.isIdent("nonnull") {
 			p.next()
@@ -2393,6 +3012,8 @@ func intType(n uint64) *types.IntType {
 		return types.I64
 	case 128:
 		return types.I128
+	case 256:
+		return types.I256
 	default:
 		return types.NewInt(n)
 	}
@@ -2412,7 +3033,8 @@ func isParamAttr(s string) bool {
 	case "zeroext", "signext", "inreg", "byval", "sret", "noalias", "nocapture",
 		"nofree", "noundef", "nonnull", "readonly", "readnone", "writeonly",
 		"immarg", "returned", "swiftself", "swifterror", "nest", "nomerge",
-		"inalloca", "preallocated", "byref", "elementtype", "no_cfi":
+		"inalloca", "preallocated", "byref", "elementtype", "no_cfi",
+		"dead_on_return", "dead_on_unwind":
 		return true
 	}
 	return false
@@ -2435,6 +3057,44 @@ func isFuncAttr(s string) bool {
 		return true
 	}
 	return false
+}
+
+func fpred(s string) (enum.FPred, bool) {
+	switch s {
+	case "false":
+		return enum.FPredFalse, true
+	case "oeq":
+		return enum.FPredOEQ, true
+	case "ogt":
+		return enum.FPredOGT, true
+	case "oge":
+		return enum.FPredOGE, true
+	case "olt":
+		return enum.FPredOLT, true
+	case "ole":
+		return enum.FPredOLE, true
+	case "one":
+		return enum.FPredONE, true
+	case "ord":
+		return enum.FPredORD, true
+	case "ueq":
+		return enum.FPredUEQ, true
+	case "ugt":
+		return enum.FPredUGT, true
+	case "uge":
+		return enum.FPredUGE, true
+	case "ult":
+		return enum.FPredULT, true
+	case "ule":
+		return enum.FPredULE, true
+	case "une":
+		return enum.FPredUNE, true
+	case "uno":
+		return enum.FPredUNO, true
+	case "true":
+		return enum.FPredTrue, true
+	}
+	return 0, false
 }
 
 func ipred(s string) (enum.IPred, bool) {

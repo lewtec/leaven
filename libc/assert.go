@@ -1,9 +1,6 @@
 package libc
 
-import (
-	"fmt"
-	"unsafe"
-)
+import "fmt"
 
 // AssertFail is glibc/clang __assert_fail(expr, file, line, function).
 // Noreturn in C; panic in Go so control-flow after it typechecks.
@@ -16,5 +13,5 @@ func cStr(p *byte) string {
 	if p == nil {
 		return "<nil>"
 	}
-	return string(unsafe.Slice(p, Strlen(p)))
+	return GoString(p)
 }
