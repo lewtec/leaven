@@ -9,35 +9,86 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// RustAlloc is __rust_alloc(size, align).
+// RustAlloc is __rust_alloc(size, align) and C++ operator new.
+// Uses the same modernc slab as Malloc/Free (no Go-heap make+pin).
+// size==0 returns a non-null dangling pointer (rustc / C++ convention).
 func RustAlloc(size, align int64) unsafe.Pointer {
 	if size <= 0 {
 		return unsafe.Pointer(uintptr(1))
 	}
-	b := make([]byte, int(size))
-	out := unsafe.Pointer(&b[0])
-	allocs.Store(uintptr(out), &allocRec{p: b})
-	return out
+	if align < 1 {
+		align = 1
+	}
+	// Round size up so the block is large enough for the alignment demand.
+	// modernc returns page/chunk-aligned pointers; for larger aligns we
+	// over-allocate and store the raw pointer just before the aligned one.
+	if align <= 16 {
+		p := xmalloc(size)
+		if p == 0 {
+			return nil
+		}
+		return unsafe.Pointer(p)
+	}
+	raw := xmalloc(size + align + 8)
+	if raw == 0 {
+		return nil
+	}
+	// [raw ... raw+8) stores original; payload starts at aligned address.
+	base := raw + 8
+	aligned := (base + uintptr(align-1)) &^ (uintptr(align) - 1)
+	*(*uintptr)(unsafe.Pointer(aligned - 8)) = raw
+	return unsafe.Pointer(aligned)
 }
 
-// RustDealloc is __rust_dealloc(ptr, size, align).
-func RustDealloc(p unsafe.Pointer, size, align int64) {
-	if p != nil {
-		allocs.Delete(uintptr(p))
+// RustAllocZeroed is __rust_alloc_zeroed: slab alloc then clear.
+func RustAllocZeroed(size, align int64) unsafe.Pointer {
+	p := RustAlloc(size, align)
+	if p != nil && uintptr(p) > 1 && size > 0 {
+		clear(unsafe.Slice((*byte)(p), int(size)))
 	}
+	return p
+}
+
+// RustDealloc is __rust_dealloc / operator delete. Same slab as Free.
+func RustDealloc(p unsafe.Pointer, size, align int64) {
+	if p == nil || uintptr(p) <= 1 {
+		return
+	}
+	u := uintptr(p)
+	if align > 16 {
+		// Over-aligned: raw block pointer is stored 8 bytes before payload.
+		u = *(*uintptr)(unsafe.Pointer(u - 8))
+	}
+	slabFree(u)
 }
 
 // RustRealloc is __rust_realloc(ptr, oldSize, align, newSize).
 func RustRealloc(p unsafe.Pointer, oldSize, align, newSize int64) unsafe.Pointer {
-	n := RustAlloc(newSize, align)
-	if p != nil && n != nil && oldSize > 0 && newSize > 0 {
-		m := oldSize
-		if newSize < m {
-			m = newSize
-		}
-		copy(unsafe.Slice((*byte)(n), int(newSize)), unsafe.Slice((*byte)(p), int(m)))
+	if newSize <= 0 {
+		RustDealloc(p, oldSize, align)
+		return unsafe.Pointer(uintptr(1))
 	}
-	return n
+	if p == nil || uintptr(p) <= 1 {
+		return RustAlloc(newSize, align)
+	}
+	// Over-aligned blocks always copy; common path uses slab realloc.
+	if align > 16 {
+		n := RustAlloc(newSize, align)
+		if n != nil && oldSize > 0 {
+			m := oldSize
+			if newSize < m {
+				m = newSize
+			}
+			copy(unsafe.Slice((*byte)(n), int(newSize)), unsafe.Slice((*byte)(p), int(m)))
+		}
+		RustDealloc(p, oldSize, align)
+		return n
+	}
+	q := Realloc((*byte)(p), newSize)
+	if q == nil {
+		return nil
+	}
+	return unsafe.Pointer(q)
 }
 
 // Fence is LLVM `fence <ordering>`. rustc emits `fence acquire` before

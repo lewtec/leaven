@@ -473,7 +473,7 @@ func IstreamGetline(is, str *byte) *byte {
 }
 
 // cxxStringAssign writes data into a libstdc++ __cxx11::basic_string.
-// SSO for n<=15; otherwise RustAlloc so the inlined dtor's delete matches.
+// SSO for n<=15; otherwise slab alloc so the inlined dtor's delete matches.
 func cxxStringAssign(s *byte, data []byte) {
 	if s == nil {
 		return

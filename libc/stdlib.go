@@ -16,15 +16,19 @@ var (
 )
 
 // allocRec pins a Go-heap object whose only live handle may be a uintptr
-// (tagged alloca). Slab blocks are not stored here; the mmap is the pin.
+// (tagged alloca via Retain). Not used for slab malloc.
 type allocRec struct {
 	p any
 }
 
 var allocs sync.Map
 
+// slabLive tracks modernc blocks we still own. Double free is a no-op so
+// mismatched C++/Rust drop paths do not corrupt the freelist.
+var slabLive sync.Map // uintptr → struct{}
+
 // Retain keeps p reachable until the process exits or the caller drops it.
-// Only for Go-heap objects (alloca). Slab mallocs do not need it.
+// Only for Go-heap objects (alloca→uintptr). Slab mallocs need no pin.
 func Retain[T any](p *T) *T {
 	if p != nil {
 		allocs.LoadOrStore(uintptr(unsafe.Pointer(p)), &allocRec{p: p})
@@ -52,10 +56,13 @@ func Calloc[T any](count, size int64) *T {
 	}
 	allocatorMu.Lock()
 	p, err := allocator.UintptrCalloc(int(n))
-	allocatorMu.Unlock()
 	if err != nil || p == 0 {
+		allocatorMu.Unlock()
 		return nil
 	}
+	// slabLive under the same lock as freelist so reuse cannot race map updates.
+	slabLive.Store(p, struct{}{})
+	allocatorMu.Unlock()
 	return (*T)(unsafe.Pointer(p))
 }
 
@@ -64,16 +71,32 @@ func Realloc(p *byte, n int64) *byte {
 	if n < 0 {
 		return nil
 	}
+	if n == 0 {
+		Free(p)
+		return nil
+	}
 	var u uintptr
 	if p != nil {
 		u = uintptr(unsafe.Pointer(p))
 	}
 	allocatorMu.Lock()
+	if u > 1 {
+		if _, ok := slabLive.Load(u); !ok {
+			// Unknown pointer: allocate fresh (do not touch freelist).
+			allocatorMu.Unlock()
+			return Malloc[byte](n)
+		}
+	}
 	q, err := allocator.UintptrRealloc(u, int(n))
-	allocatorMu.Unlock()
 	if err != nil || q == 0 {
+		allocatorMu.Unlock()
 		return nil
 	}
+	if u != 0 && u != q {
+		slabLive.Delete(u)
+	}
+	slabLive.Store(q, struct{}{})
+	allocatorMu.Unlock()
 	return (*byte)(unsafe.Pointer(q))
 }
 
@@ -87,23 +110,13 @@ func Arc4randomBuf(buf *byte, n int64) {
 	}
 }
 
-// Free is C free(p). Also accepts RustAlloc / operator new blocks (Go heap
-// pinned in allocs); those must not go to the modernc slab free.
+// Free is C free(p). All heap traffic (malloc, RustAlloc, operator new with
+// align≤16) shares the modernc slab.
 func Free(p *byte) {
 	if p == nil {
 		return
 	}
-	u := uintptr(unsafe.Pointer(p))
-	if _, ok := allocs.Load(u); ok {
-		RustDealloc(unsafe.Pointer(p), 0, 1)
-		return
-	}
-	allocatorMu.Lock()
-	err := allocator.UintptrFree(u)
-	allocatorMu.Unlock()
-	if err != nil {
-		return
-	}
+	slabFree(uintptr(unsafe.Pointer(p)))
 }
 
 func xmalloc(n int64) uintptr {
@@ -115,11 +128,26 @@ func xmalloc(n int64) uintptr {
 	}
 	allocatorMu.Lock()
 	p, err := allocator.UintptrMalloc(int(n))
-	allocatorMu.Unlock()
-	if err != nil {
+	if err != nil || p == 0 {
+		allocatorMu.Unlock()
 		return 0
 	}
+	slabLive.Store(p, struct{}{})
+	allocatorMu.Unlock()
 	return p
+}
+
+func slabFree(u uintptr) {
+	if u <= 1 {
+		return
+	}
+	allocatorMu.Lock()
+	if _, ok := slabLive.LoadAndDelete(u); !ok {
+		allocatorMu.Unlock()
+		return
+	}
+	_ = allocator.UintptrFree(u)
+	allocatorMu.Unlock()
 }
 
 func mulSize(a, b int64) (int64, bool) {

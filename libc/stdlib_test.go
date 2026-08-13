@@ -107,6 +107,7 @@ func TestReallocShrinkInPlace(t *testing.T) {
 }
 
 func TestRetainGoHeap(t *testing.T) {
+	// Retain is still for alloca→uintptr pins (Go new), not slab malloc.
 	p := new(byte)
 	*p = 9
 	if Retain(p) != p {
@@ -115,6 +116,42 @@ func TestRetainGoHeap(t *testing.T) {
 	if _, ok := allocs.Load(uintptr(unsafe.Pointer(p))); !ok {
 		t.Fatal("Retain did not pin Go heap object")
 	}
+}
+
+func TestRustAllocSlabFreeRoundTrip(t *testing.T) {
+	p := RustAlloc(64, 8)
+	if p == nil || uintptr(p) <= 1 {
+		t.Fatal("RustAlloc")
+	}
+	*(*byte)(p) = 7
+	// Free must accept the same pointer (align ≤ 16 path).
+	Free((*byte)(p))
+	q := RustAlloc(32, 1)
+	if q == nil {
+		t.Fatal("RustAlloc after free")
+	}
+	RustDealloc(q, 32, 1)
+}
+
+func TestRustAllocZeroSizeNonNil(t *testing.T) {
+	p := RustAlloc(0, 1)
+	if p == nil || uintptr(p) != 1 {
+		t.Fatalf("zero-size: %v", p)
+	}
+	RustDealloc(p, 0, 1)
+}
+
+func TestRustReallocCopies(t *testing.T) {
+	p := RustAlloc(4, 1)
+	copy(unsafe.Slice((*byte)(p), 4), []byte("abcd"))
+	q := RustRealloc(p, 4, 1, 8)
+	if q == nil {
+		t.Fatal("realloc nil")
+	}
+	if got := string(unsafe.Slice((*byte)(q), 4)); got != "abcd" {
+		t.Fatalf("got %q", got)
+	}
+	RustDealloc(q, 8, 1)
 }
 
 func TestConcurrentMalloc(t *testing.T) {

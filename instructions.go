@@ -1757,7 +1757,11 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
 		} else if isRustAlloc(llvmName) {
-			return one(assign(VariableName(inst), libc("RustAlloc").Call(args...))), nil
+			fn := "RustAlloc"
+			if strings.Contains(llvmName, "zeroed") {
+				fn = "RustAllocZeroed"
+			}
+			return one(assign(VariableName(inst), libc(fn).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_dealloc") {
 			return one(libc("RustDealloc").Call(args...)), nil
 		} else if strings.Contains(llvmName, "__rust_realloc") {
