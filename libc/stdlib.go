@@ -67,6 +67,8 @@ func Calloc[T any](count, size int64) *T {
 }
 
 // Realloc is C realloc. n==0 frees p and returns nil.
+// Grows via malloc+copy+free so the old block goes through freeQuarantine
+// (modernc UintptrRealloc freelist-scribbles the old block immediately).
 func Realloc(p *byte, n int64) *byte {
 	if n < 0 {
 		return nil
@@ -75,29 +77,30 @@ func Realloc(p *byte, n int64) *byte {
 		Free(p)
 		return nil
 	}
-	var u uintptr
-	if p != nil {
-		u = uintptr(unsafe.Pointer(p))
+	if p == nil {
+		return Malloc[byte](n)
+	}
+	u := uintptr(unsafe.Pointer(p))
+	if u <= 1 {
+		return Malloc[byte](n)
 	}
 	allocatorMu.Lock()
-	if u > 1 {
-		if _, ok := slabLive.Load(u); !ok {
-			// Unknown pointer: allocate fresh (do not touch freelist).
-			allocatorMu.Unlock()
-			return Malloc[byte](n)
-		}
-	}
-	q, err := allocator.UintptrRealloc(u, int(n))
-	if err != nil || q == 0 {
+	if _, ok := slabLive.Load(u); !ok {
 		allocatorMu.Unlock()
+		return Malloc[byte](n)
+	}
+	oldCap := memory.UintptrUsableSize(u)
+	allocatorMu.Unlock()
+	if oldCap >= int(n) {
+		return p
+	}
+	q := Malloc[byte](n)
+	if q == nil {
 		return nil
 	}
-	if u != 0 && u != q {
-		slabLive.Delete(u)
-	}
-	slabLive.Store(q, struct{}{})
-	allocatorMu.Unlock()
-	return (*byte)(unsafe.Pointer(q))
+	copy(unsafe.Slice(q, int(n)), unsafe.Slice(p, oldCap))
+	Free(p)
+	return q
 }
 
 // Arc4randomBuf is BSD arc4random_buf(buf, n): fill n bytes from the CSPRNG.
@@ -137,6 +140,19 @@ func xmalloc(n int64) uintptr {
 	return p
 }
 
+// freeQuarantine delays return of blocks to modernc's freelist.
+// modernc writes freelist prev/next into the first 16 bytes of a freed
+// block; a use-after-free then reads that as user data (csmith seed
+// 99999: expand_struct_union_vars saw a nil Variable* from prev=0).
+// Depth 1 already fixes that seed; keep a modest ring for margin.
+const freeQuarantineCap = 64
+
+var (
+	freeQuarantine [freeQuarantineCap]uintptr
+	freeQHead      int
+	freeQCount     int
+)
+
 func slabFree(u uintptr) {
 	if u <= 1 {
 		return
@@ -146,7 +162,15 @@ func slabFree(u uintptr) {
 		allocatorMu.Unlock()
 		return
 	}
-	_ = allocator.UintptrFree(u)
+	if freeQCount == freeQuarantineCap {
+		old := freeQuarantine[freeQHead]
+		_ = allocator.UintptrFree(old)
+		freeQuarantine[freeQHead] = u
+		freeQHead = (freeQHead + 1) % freeQuarantineCap
+	} else {
+		freeQuarantine[(freeQHead+freeQCount)%freeQuarantineCap] = u
+		freeQCount++
+	}
 	allocatorMu.Unlock()
 }
 
