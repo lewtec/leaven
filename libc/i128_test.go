@@ -49,4 +49,10 @@ func TestI128ShiftDiv(t *testing.T) {
 	if I128SDiv(I128FromI64(-100), I128FromI64(7)) != I128FromI64(-14) {
 		t.Fatal("sdiv")
 	}
+	if I128URem(I128FromU64(100), I128FromU64(7)) != I128FromU64(2) {
+		t.Fatal("urem")
+	}
+	if I128SRem(I128FromI64(-100), I128FromI64(7)) != I128FromI64(-2) {
+		t.Fatal("srem")
+	}
 }

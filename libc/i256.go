@@ -53,9 +53,7 @@ func I256Sub(a, b I256) I256 {
 	return I256{Lo: I128{Lo: l0, Hi: l1}, Hi: I128{Lo: l2, Hi: l3}}
 }
 
-func I256Mul(a, b I256) I256 {
-	return i256FromBig(new(big.Int).Mul(i256U(a), i256U(b)))
-}
+func I256Mul(a, b I256) I256 { return i256Big.mul(a, b) }
 
 func I256And(a, b I256) I256 { return I256{Lo: I128And(a.Lo, b.Lo), Hi: I128And(a.Hi, b.Hi)} }
 func I256Or(a, b I256) I256  { return I256{Lo: I128Or(a.Lo, b.Lo), Hi: I128Or(a.Hi, b.Hi)} }
@@ -113,11 +111,7 @@ func i256U(a I256) *big.Int {
 }
 
 func i256S(a I256) *big.Int {
-	u := i256U(a)
-	if a.Hi.Hi>>63 == 1 {
-		u.Sub(u, new(big.Int).Lsh(big.NewInt(1), 256))
-	}
-	return u
+	return bigAsSigned(i256U(a), 256, a.Hi.Hi>>63 == 1)
 }
 
 func i256FromBig(x *big.Int) I256 {
@@ -128,31 +122,12 @@ func i256FromBig(x *big.Int) I256 {
 	return I256{Lo: i128FromBig(lo), Hi: i128FromBig(hi)}
 }
 
-func i256ZeroB(b I256, what string) {
-	if b.Lo == (I128{}) && b.Hi == (I128{}) {
-		panic("i256 " + what + " by zero")
-	}
-}
+var i256Big = wideBig[I256]{name: "i256", toU: i256U, toS: i256S, from: i256FromBig}
 
-func I256UDiv(a, b I256) I256 {
-	i256ZeroB(b, "udiv")
-	return i256FromBig(new(big.Int).Div(i256U(a), i256U(b)))
-}
-
-func I256SDiv(a, b I256) I256 {
-	i256ZeroB(b, "sdiv")
-	return i256FromBig(new(big.Int).Quo(i256S(a), i256S(b)))
-}
-
-func I256URem(a, b I256) I256 {
-	i256ZeroB(b, "urem")
-	return i256FromBig(new(big.Int).Rem(i256U(a), i256U(b)))
-}
-
-func I256SRem(a, b I256) I256 {
-	i256ZeroB(b, "srem")
-	return i256FromBig(new(big.Int).Rem(i256S(a), i256S(b)))
-}
+func I256UDiv(a, b I256) I256 { return i256Big.bin(a, b, false, (*big.Int).Div, "udiv") }
+func I256SDiv(a, b I256) I256 { return i256Big.bin(a, b, true, (*big.Int).Quo, "sdiv") }
+func I256URem(a, b I256) I256 { return i256Big.bin(a, b, false, (*big.Int).Rem, "urem") }
+func I256SRem(a, b I256) I256 { return i256Big.bin(a, b, true, (*big.Int).Rem, "srem") }
 
 func I256Eq(a, b I256) bool { return a == b }
 func I256Ne(a, b I256) bool { return a != b }

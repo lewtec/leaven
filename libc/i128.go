@@ -89,11 +89,7 @@ func i128U(a I128) *big.Int {
 }
 
 func i128S(a I128) *big.Int {
-	u := i128U(a)
-	if a.Hi>>63 == 1 {
-		u.Sub(u, new(big.Int).Lsh(big.NewInt(1), 128))
-	}
-	return u
+	return bigAsSigned(i128U(a), 128, a.Hi>>63 == 1)
 }
 
 func i128FromBig(x *big.Int) I128 {
@@ -104,31 +100,12 @@ func i128FromBig(x *big.Int) I128 {
 	return I128{Lo: lo, Hi: hi}
 }
 
-func i128ZeroB(b I128, what string) {
-	if b.Lo == 0 && b.Hi == 0 {
-		panic("i128 " + what + " by zero")
-	}
-}
+var i128Big = wideBig[I128]{name: "i128", toU: i128U, toS: i128S, from: i128FromBig}
 
-func I128UDiv(a, b I128) I128 {
-	i128ZeroB(b, "udiv")
-	return i128FromBig(new(big.Int).Div(i128U(a), i128U(b)))
-}
-
-func I128SDiv(a, b I128) I128 {
-	i128ZeroB(b, "sdiv")
-	return i128FromBig(new(big.Int).Quo(i128S(a), i128S(b)))
-}
-
-func I128URem(a, b I128) I128 {
-	i128ZeroB(b, "urem")
-	return i128FromBig(new(big.Int).Rem(i128U(a), i128U(b)))
-}
-
-func I128SRem(a, b I128) I128 {
-	i128ZeroB(b, "srem")
-	return i128FromBig(new(big.Int).Rem(i128S(a), i128S(b)))
-}
+func I128UDiv(a, b I128) I128 { return i128Big.bin(a, b, false, (*big.Int).Div, "udiv") }
+func I128SDiv(a, b I128) I128 { return i128Big.bin(a, b, true, (*big.Int).Quo, "sdiv") }
+func I128URem(a, b I128) I128 { return i128Big.bin(a, b, false, (*big.Int).Rem, "urem") }
+func I128SRem(a, b I128) I128 { return i128Big.bin(a, b, true, (*big.Int).Rem, "srem") }
 
 func I128Eq(a, b I128) bool { return a == b }
 func I128Ne(a, b I128) bool { return a != b }
