@@ -91,10 +91,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		oldName := name + "_old"
 		// Strong CAS. LLVM weak may spuriously fail; strong is still correct
 		// for the usual retry loop and does not hide a failed compare.
-		// Temps use := — they are not SSA names in writeFuncBody.
+		// Temps are predeclared in writeFuncBody (no := — goto would jump over).
 		return []jen.Code{
-			jen.Id(okName).Op(":=").Add(casFn.Call(p, cmp, neu)),
-			jen.Id(oldName).Op(":=").Add(conv(elem, cmp)),
+			jen.Id(okName).Op("=").Add(casFn.Call(p, cmp, neu)),
+			jen.Id(oldName).Op("=").Add(conv(elem, cmp)),
 			jen.If(jen.Op("!").Id(okName)).Block(
 				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
 			),

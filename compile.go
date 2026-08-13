@@ -313,6 +313,25 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 			if err := addNamed(n); err != nil {
 				return err
 			}
+			// cmpxchg temps (name_ok, name_old) must be function-scoped;
+			// mid-function := is illegal when other blocks goto past them.
+			if cx, ok := inst.(*ir.InstCmpXchg); ok {
+				elem, err := TypeSpec(cx.Cmp.Type())
+				if err != nil {
+					return err
+				}
+				base := VariableName(cx)
+				addExtra := func(name string, t *jen.Statement) {
+					key := "extra:" + name
+					if groups[key] == nil {
+						groups[key] = &varGroup{typ: t}
+					}
+					groups[key].names = append(groups[key].names, name)
+					allVars = append(allVars, name)
+				}
+				addExtra(base+"_ok", jen.Bool())
+				addExtra(base+"_old", elem)
+			}
 		}
 		// invoke's result is the terminator, not an inst.
 		if n, ok := b.Term.(value.Named); ok {
@@ -348,10 +367,13 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 		writeCMainArgs(g, fn)
 	}
 
-	gotoTargets := blockGotoTargets(fn)
+	reachable := reachableBlocks(fn)
+	gotoTargets := blockGotoTargetsFrom(fn, reachable)
 
 	for i, b := range fn.Blocks {
-		if i != 0 && !gotoTargets[b] {
+		// Skip unreachable blocks so their successors are not left with
+		// unused labels (Go rejects "label defined and not used").
+		if i != 0 && !reachable[b] {
 			continue
 		}
 		if gotoTargets[b] {
@@ -514,6 +536,48 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 // blockGotoTargets returns the set of blocks that are targets of an explicit
 // branch/switch in f (i.e. need a Go label).
 func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
+	return blockGotoTargetsFrom(f, reachableBlocks(f))
+}
+
+// reachableBlocks is the set of blocks reachable from the entry via
+// terminators. Unreachable blocks are not emitted.
+func reachableBlocks(f *ir.Func) map[*ir.Block]bool {
+	if len(f.Blocks) == 0 {
+		return nil
+	}
+	reach := make(map[*ir.Block]bool)
+	queue := []*ir.Block{f.Blocks[0]}
+	reach[f.Blocks[0]] = true
+	for len(queue) > 0 {
+		b := queue[0]
+		queue = queue[1:]
+		var succ []value.Value
+		switch term := b.Term.(type) {
+		case *ir.TermBr:
+			succ = []value.Value{term.Target}
+		case *ir.TermCondBr:
+			succ = []value.Value{term.TargetTrue, term.TargetFalse}
+		case *ir.TermSwitch:
+			succ = []value.Value{term.TargetDefault}
+			for _, c := range term.Cases {
+				succ = append(succ, c.Target)
+			}
+		case *ir.TermInvoke:
+			succ = []value.Value{term.NormalRetTarget, term.ExceptionRetTarget}
+		}
+		for _, v := range succ {
+			nb, ok := v.(*ir.Block)
+			if !ok || reach[nb] {
+				continue
+			}
+			reach[nb] = true
+			queue = append(queue, nb)
+		}
+	}
+	return reach
+}
+
+func blockGotoTargetsFrom(f *ir.Func, from map[*ir.Block]bool) map[*ir.Block]bool {
 	targets := make(map[*ir.Block]bool)
 	add := func(v value.Value) {
 		if b, ok := v.(*ir.Block); ok {
@@ -521,6 +585,9 @@ func blockGotoTargets(f *ir.Func) map[*ir.Block]bool {
 		}
 	}
 	for _, b := range f.Blocks {
+		if from != nil && !from[b] {
+			continue
+		}
 		switch term := b.Term.(type) {
 		case *ir.TermBr:
 			add(term.Target)
