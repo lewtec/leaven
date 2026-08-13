@@ -56,16 +56,7 @@ func (i *Index) ReplaceValue(oldVal, newVal value.Value) {
 	delete(i.users, oldVal)
 }
 
-func deleteInstruction(s []ir.Instruction, v ir.Instruction) []ir.Instruction {
-	for i, e := range s {
-		if e == v {
-			return slices.Delete(s, i, i+1)
-		}
-	}
-	return s
-}
-
-func deleteUser(s []value.User, v value.User) []value.User {
+func deleteEq[T comparable](s []T, v T) []T {
 	for i, e := range s {
 		if e == v {
 			return slices.Delete(s, i, i+1)
@@ -80,9 +71,9 @@ func (i *Index) DeleteInstruction(inst ir.Instruction) {
 	if b == nil {
 		return
 	}
-	b.Insts = deleteInstruction(b.Insts, inst)
+	b.Insts = deleteEq(b.Insts, inst)
 	for _, op := range inst.Operands() {
 		v := *op
-		i.users[v] = deleteUser(i.users[v], inst)
+		i.users[v] = deleteEq(i.users[v], value.User(inst))
 	}
 }

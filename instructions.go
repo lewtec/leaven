@@ -1849,29 +1849,17 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 }
 
 func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
-	if _, ok := t.(*types.PointerType); ok {
-		return jen.Qual("sync/atomic", "SwapPointer"), true
-	}
-	it, ok := t.(*types.IntType)
-	if !ok {
-		return nil, false
-	}
-	switch goIntBits(it.BitSize) {
-	case 8:
-		// Go has no SwapInt8; libc CAS-loop on the holding word.
-		return libc("AtomicSwapI8"), true
-	case 32:
-		return jen.Qual("sync/atomic", "SwapInt32"), true
-	case 64:
-		return jen.Qual("sync/atomic", "SwapInt64"), true
-	default:
-		return nil, false
-	}
+	// Go has no SwapInt8; libc CAS-loop on the holding word.
+	return atomicWordFunc(t, "SwapPointer", "AtomicSwapI8", "SwapInt32", "SwapInt64")
 }
 
 func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
+	return atomicWordFunc(t, "CompareAndSwapPointer", "AtomicCASI8", "CompareAndSwapInt32", "CompareAndSwapInt64")
+}
+
+func atomicWordFunc(t types.Type, ptr, i8, i32, i64 string) (*jen.Statement, bool) {
 	if _, ok := t.(*types.PointerType); ok {
-		return jen.Qual("sync/atomic", "CompareAndSwapPointer"), true
+		return jen.Qual("sync/atomic", ptr), true
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
@@ -1879,11 +1867,11 @@ func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return libc("AtomicCASI8"), true
+		return libc(i8), true
 	case 32:
-		return jen.Qual("sync/atomic", "CompareAndSwapInt32"), true
+		return jen.Qual("sync/atomic", i32), true
 	case 64:
-		return jen.Qual("sync/atomic", "CompareAndSwapInt64"), true
+		return jen.Qual("sync/atomic", i64), true
 	default:
 		return nil, false
 	}

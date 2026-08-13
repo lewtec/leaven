@@ -73,52 +73,47 @@ func ptrCast(typ, expr jen.Code) *jen.Statement {
 	return jen.Parens(typ).Call(unsafePtr(expr))
 }
 
-func goIntType(bits uint64) *jen.Statement {
+func goIntType(bits uint64) *jen.Statement  { return goBitsType(bits, false) }
+func goUintType(bits uint64) *jen.Statement { return goBitsType(bits, true) }
+
+func goBitsType(bits uint64, unsigned bool) *jen.Statement {
 	switch goIntBits(bits) {
 	case 8:
 		return jen.Byte()
 	case 16:
+		if unsigned {
+			return jen.Uint16()
+		}
 		return jen.Int16()
 	case 32:
+		if unsigned {
+			return jen.Uint32()
+		}
 		return jen.Int32()
 	case 64:
+		if unsigned {
+			return jen.Uint64()
+		}
 		return jen.Int64()
 	case 128:
 		return libc("I128")
 	case 256:
 		return libc("I256")
 	default:
-		return jen.Id(fmt.Sprintf("int%d", bits))
+		kind := "int"
+		if unsigned {
+			kind = "uint"
+		}
+		return jen.Id(fmt.Sprintf("%s%d", kind, bits))
 	}
 }
 
-func goUintType(bits uint64) *jen.Statement {
-	switch goIntBits(bits) {
-	case 8:
-		return jen.Byte()
-	case 16:
-		return jen.Uint16()
-	case 32:
-		return jen.Uint32()
-	case 64:
-		return jen.Uint64()
-	case 128:
-		return libc("I128")
-	case 256:
-		return libc("I256")
-	default:
-		return jen.Id(fmt.Sprintf("uint%d", bits))
-	}
-}
+func isI128(t types.Type) bool { return isIntBits(t, 128) }
+func isI256(t types.Type) bool { return isIntBits(t, 256) }
 
-func isI128(t types.Type) bool {
+func isIntBits(t types.Type, n uint64) bool {
 	it, ok := t.(*types.IntType)
-	return ok && it.BitSize == 128
-}
-
-func isI256(t types.Type) bool {
-	it, ok := t.(*types.IntType)
-	return ok && it.BitSize == 256
+	return ok && it.BitSize == n
 }
 
 // wideBits is 128 or 256 when t is a limb integer we lower via libc.
