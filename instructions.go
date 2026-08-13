@@ -1317,9 +1317,15 @@ func libcReturnsTypedPtr(name string) bool {
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
-		"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE":
+		"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE",
+		"_ZNSirsEPFRSt8ios_baseS0_E",
+		"_ZNSirsERi":
 		return true
 	default:
+		// stringstream extract/manip also return the stream pointer.
+		if isIstreamExtractI32(name) || isIstreamIosManip(name) {
+			return true
+		}
 		return false
 	}
 }
@@ -1458,6 +1464,9 @@ const (
 	cxxIOCtypeInit
 	cxxIOIosBase
 	cxxIOGetline
+	cxxIOStringstreamCtor
+	cxxIOManip
+	cxxIOExtractI32
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -1638,6 +1647,37 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			str = asBytePtr(args[1])
 		}
 		return fn, []jen.Code{is, str}, true, true
+	case cxxIOStringstreamCtor:
+		this, str, mode := jen.Nil(), jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			this = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			str = asBytePtr(args[1])
+		}
+		if len(args) > 2 {
+			mode = jen.Add(args[2])
+		}
+		return fn, []jen.Code{this, str, mode}, false, true
+	case cxxIOManip:
+		is, manip := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			is = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			// Function pointer: opaque *byte; shim ignores the target.
+			manip = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{is, manip}, true, true
+	case cxxIOExtractI32:
+		is, out := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			is = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			out = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{is, out}, true, true
 	default:
 		return nil, nil, false, false
 	}
@@ -1695,12 +1735,33 @@ func isGetline(name string) bool {
 	return strings.Contains(name, "St7getline") || strings.HasPrefix(name, "_ZSt7getline")
 }
 
+func isStringstream(name string) bool {
+	return strings.Contains(name, "18basic_stringstream")
+}
+
+func isIstreamExtractI32(name string) bool {
+	// basic_istream::operator>>(int&) — short mangling Si = basic_istream<char>.
+	return name == "_ZNSirsERi" || strings.HasSuffix(name, "rsERi")
+}
+
+func isIstreamIosManip(name string) bool {
+	// operator>>(ios_base&(*)(ios_base&)) — used for std::hex in str2int.
+	return name == "_ZNSirsEPFRSt8ios_baseS0_E" ||
+		strings.Contains(name, "rsEPFRSt8ios_baseS0_E")
+}
+
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	if strings.Contains(name, "__ostream_insert") {
 		return libc("OstreamInsert"), cxxIOInsert, true
 	}
 	if isGetline(name) {
 		return libc("IstreamGetline"), cxxIOGetline, true
+	}
+	if isIstreamIosManip(name) {
+		return libc("IstreamApplyIosManip"), cxxIOManip, true
+	}
+	if isIstreamExtractI32(name) {
+		return libc("IstreamExtractI32"), cxxIOExtractI32, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
@@ -1710,6 +1771,16 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if isLocaleCtor(name) {
 		return libc("LocaleCtor"), cxxIOIosBase, true
+	}
+	if isStringstream(name) {
+		switch {
+		case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"):
+			return libc("StringstreamCtor"), cxxIOStringstreamCtor, true
+		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
+			return libc("StringstreamClose"), cxxIOClose, true
+		default:
+			return nil, 0, false
+		}
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false
@@ -1742,6 +1813,7 @@ var libraryFunctions = map[string]goRef{
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEEcvbEv":                                                               {libcPath, "IosBool"},
 	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            {libcPath, "OstreamInsert"},
 	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": {libcPath, "IstreamGetline"},
+	// stringstream / istream >> are matched by cxxIOKind (arg reshaping).
 	"__assert_fail":       {libcPath, "AssertFail"},
 	"fabs":                {"math", "Abs"},
 	"fmod":                {"math", "Mod"},

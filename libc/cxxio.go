@@ -375,3 +375,155 @@ func cxxStringAssign(s *byte, data []byte) {
 	*(*int64)(unsafe.Add(base, cxxStringLenOff)) = int64(n)
 	*(*uint64)(unsafe.Add(base, cxxStringLocalOff)) = uint64(n)
 }
+
+// cxxStringBytes reads a libstdc++ __cxx11::basic_string into a Go slice.
+func cxxStringBytes(s *byte) []byte {
+	if s == nil {
+		return nil
+	}
+	base := unsafe.Pointer(s)
+	p := *(**byte)(base)
+	n := *(*int64)(unsafe.Add(base, cxxStringLenOff))
+	if p == nil || n <= 0 {
+		return nil
+	}
+	return unsafe.Slice(p, int(n))
+}
+
+// stringStream is one C++ stringstream. Keyed by object address; content
+// is a copy of the ctor string so >> does not need streambuf layout.
+type stringStream struct {
+	buf  []byte
+	pos  int
+	base int // 10 or 16 (std::hex)
+	fail bool
+	eof  bool
+}
+
+var stringStreams sync.Map // uintptr → *stringStream
+
+func stringStreamOf(this *byte) *stringStream {
+	if this == nil {
+		return nil
+	}
+	if v, ok := stringStreams.Load(uintptr(unsafe.Pointer(this))); ok {
+		return v.(*stringStream)
+	}
+	return nil
+}
+
+// StringstreamCtor is basic_stringstream(string const&, ios_openmode).
+// csmith StringUtils::str2int builds one to parse an int (dec or hex).
+// Object is ~128 bytes; do not write ostream ctype at +240.
+func StringstreamCtor(this *byte, str *byte, mode int32) {
+	_ = mode
+	if this == nil {
+		return
+	}
+	data := append([]byte(nil), cxxStringBytes(str)...)
+	st := &stringStream{buf: data, base: 10}
+	stringStreams.Store(uintptr(unsafe.Pointer(this)), st)
+	// Stand-in vptr + clear iostate (fail/eof slots at +32 fit in 128).
+	setIfstreamABI(this, false, false)
+}
+
+// StringstreamClose is stringstream::~stringstream / D1.
+func StringstreamClose(this *byte) {
+	if this == nil {
+		return
+	}
+	stringStreams.Delete(uintptr(unsafe.Pointer(this)))
+	setIfstreamABI(this, true, false)
+}
+
+// IstreamApplyIosManip is istream::operator>>(ios_base&(*)(ios_base&)).
+// str2int only feeds std::hex; set base 16. The function pointer is ignored.
+func IstreamApplyIosManip(is *byte, _ *byte) *byte {
+	if st := stringStreamOf(is); st != nil {
+		st.base = 16
+	}
+	return is
+}
+
+// IstreamExtractI32 is istream::operator>>(int&). Parses the next
+// integer from the stringstream side table with the current base.
+// out is the address of an i32 (opaque ptr in IR → *byte here).
+func IstreamExtractI32(is *byte, out *byte) *byte {
+	if out == nil {
+		return is
+	}
+	dst := (*int32)(unsafe.Pointer(out))
+	*dst = -1
+	st := stringStreamOf(is)
+	if st == nil {
+		return is
+	}
+	// Skip leading whitespace.
+	for st.pos < len(st.buf) {
+		c := st.buf[st.pos]
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			break
+		}
+		st.pos++
+	}
+	if st.pos >= len(st.buf) {
+		st.fail = true
+		st.eof = true
+		setIfstreamABI(is, true, true)
+		return is
+	}
+	base := st.base
+	if base != 16 {
+		base = 10
+	}
+	// Optional sign.
+	neg := false
+	if st.buf[st.pos] == '-' {
+		neg = true
+		st.pos++
+	} else if st.buf[st.pos] == '+' {
+		st.pos++
+	}
+	// libstdc++ >> hex accepts a leading 0x / 0X prefix.
+	if base == 16 && st.pos+1 < len(st.buf) && st.buf[st.pos] == '0' &&
+		(st.buf[st.pos+1] == 'x' || st.buf[st.pos+1] == 'X') {
+		st.pos += 2
+	}
+	start := st.pos
+	for st.pos < len(st.buf) {
+		c := st.buf[st.pos]
+		ok := false
+		if c >= '0' && c <= '9' {
+			ok = true
+		} else if base == 16 {
+			if (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+				ok = true
+			}
+		}
+		if !ok {
+			break
+		}
+		st.pos++
+	}
+	if st.pos == start {
+		st.fail = true
+		setIfstreamABI(is, true, st.eof)
+		return is
+	}
+	s := string(st.buf[start:st.pos])
+	n, err := strconv.ParseInt(s, base, 32)
+	if err != nil {
+		st.fail = true
+		setIfstreamABI(is, true, st.eof)
+		return is
+	}
+	if neg {
+		n = -n
+	}
+	*dst = int32(n)
+	if st.pos >= len(st.buf) {
+		st.eof = true
+	}
+	setIfstreamABI(is, st.fail, st.eof)
+	return is
+}

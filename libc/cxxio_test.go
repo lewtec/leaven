@@ -188,6 +188,32 @@ func TestIstreamGetlineReadsLine(t *testing.T) {
 	IfstreamClose(&obj[0])
 }
 
+func TestStringstreamStr2intDecAndHex(t *testing.T) {
+	// StringUtils::str2int: stringstream(s); [ss>>hex;] ss>>i
+	s := emptyCxxString()
+	cxxStringAssign(&s[0], []byte("42"))
+	var ss [128]byte
+	StringstreamCtor(&ss[0], &s[0], 24)
+	var out int32 = -1
+	IstreamExtractI32(&ss[0], (*byte)(unsafe.Pointer(&out)))
+	if out != 42 {
+		t.Fatalf("dec got %d", out)
+	}
+	StringstreamClose(&ss[0])
+
+	s2 := emptyCxxString()
+	cxxStringAssign(&s2[0], []byte("0x2a"))
+	var ss2 [128]byte
+	StringstreamCtor(&ss2[0], &s2[0], 24)
+	IstreamApplyIosManip(&ss2[0], nil)
+	out = -1
+	IstreamExtractI32(&ss2[0], (*byte)(unsafe.Pointer(&out)))
+	if out != 0x2a {
+		t.Fatalf("hex got %d want %d", out, 0x2a)
+	}
+	StringstreamClose(&ss2[0])
+}
+
 func TestOstreamInsertWrites(t *testing.T) {
 	old := os.Stdout
 	r, w, err := os.Pipe()

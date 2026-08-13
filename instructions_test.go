@@ -102,6 +102,29 @@ func TestCxxIOCallIosBaseCtor(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallStringstream(t *testing.T) {
+	ctor := "_ZNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEEC1ERKNS_12basic_stringIcS2_S3_EESt13_Ios_Openmode"
+	fn, args, retPtr, ok := cxxIOCall(ctor, nil)
+	if !ok || fn == nil || retPtr || len(args) != 3 {
+		t.Fatalf("ctor %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(ctor); !ok {
+		t.Fatal("named ctor")
+	}
+	dtor := "_ZNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEED1Ev"
+	if _, a, ret, ok := cxxIOCall(dtor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("dtor %v %d", ret, len(a))
+	}
+	manip := "_ZNSirsEPFRSt8ios_baseS0_E"
+	if _, a, ret, ok := cxxIOCall(manip, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("manip ret=%v n=%d", ret, len(a))
+	}
+	extract := "_ZNSirsERi"
+	if _, a, ret, ok := cxxIOCall(extract, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("extract ret=%v n=%d", ret, len(a))
+	}
+}
+
 func TestCxxNoopDtor(t *testing.T) {
 	if !cxxNoopDtor("_ZNSt6localeD1Ev") {
 		t.Fatal("locale")
