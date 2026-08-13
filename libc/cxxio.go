@@ -355,6 +355,23 @@ func OstreamInsertU64(out *byte, n uint64) *byte {
 	return out
 }
 
+// OstreamInsertPtr is operator<<(ostream&, void const*).
+// libstdc++ prints the address as hex with a 0x prefix.
+func OstreamInsertPtr(out *byte, p unsafe.Pointer) *byte {
+	writeOstream(out, strconv.AppendUint([]byte("0x"), uint64(uintptr(p)), 16))
+	return out
+}
+
+// OstreamInsertBool is operator<<(ostream&, bool) without boolalpha.
+func OstreamInsertBool(out *byte, v bool) *byte {
+	if v {
+		writeOstream(out, []byte{'1'})
+	} else {
+		writeOstream(out, []byte{'0'})
+	}
+	return out
+}
+
 // ostreamPrecision reads ios_base::_M_precision. With StandinVptr, vbase
 // offset is 0 so ios is at the ostream address; field 1 is i64 @+8.
 // Default precision is 6 (libstdc++). Bookkeeper sets 3 before stats.

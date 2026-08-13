@@ -1962,7 +1962,12 @@ const (
 	cxxIOLsCStr
 	cxxIOInsertI64
 	cxxIOInsertU64
+	cxxIOInsertU8
+	cxxIOInsertU16
+	cxxIOInsertU32
 	cxxIOInsertF64
+	cxxIOInsertPtr
+	cxxIOInsertBool
 	cxxIOPut
 	cxxIOFlush
 	cxxIOCtypeInit
@@ -2003,6 +2008,15 @@ func cxxTreeCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool
 			}
 		}
 		return fn, out, false, true
+	case cxxTreeErase:
+		z, h := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			z = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			h = asBytePtr(args[1])
+		}
+		return fn, []jen.Code{z, h}, true, true
 	default:
 		this := jen.Nil()
 		if len(args) > 0 {
@@ -2016,6 +2030,7 @@ const (
 	cxxTreeWalk = iota + 1
 	cxxTreeInsert
 	cxxTreeInit
+	cxxTreeErase
 )
 
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
@@ -2026,6 +2041,8 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 		return libc("RbTreeIncrement"), cxxTreeWalk, true
 	case strings.Contains(name, "_Rb_tree_insert_and_rebalance"):
 		return libc("RbTreeInsertAndRebalance"), cxxTreeInsert, true
+	case strings.Contains(name, "_Rb_tree_rebalance_for_erase"):
+		return libc("RbTreeRebalanceForErase"), cxxTreeErase, true
 	case isRbTreeDefaultCtor(name):
 		return libc("RbTreeInit"), cxxTreeInit, true
 	default:
@@ -2123,6 +2140,33 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			n = jen.Uint64().Call(args[1])
 		}
 		return fn, []jen.Code{os, n}, true, true
+	case cxxIOInsertU8:
+		os, n := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			n = jen.Uint64().Call(jen.Uint8().Call(args[1]))
+		}
+		return fn, []jen.Code{os, n}, true, true
+	case cxxIOInsertU16:
+		os, n := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			n = jen.Uint64().Call(jen.Uint16().Call(args[1]))
+		}
+		return fn, []jen.Code{os, n}, true, true
+	case cxxIOInsertU32:
+		os, n := jen.Nil(), jen.Lit(0)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			n = jen.Uint64().Call(jen.Uint32().Call(args[1]))
+		}
+		return fn, []jen.Code{os, n}, true, true
 	case cxxIOInsertF64:
 		os, x := jen.Nil(), jen.Lit(0.0)
 		if len(args) > 0 {
@@ -2132,6 +2176,24 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			x = jen.Float64().Call(args[1])
 		}
 		return fn, []jen.Code{os, x}, true, true
+	case cxxIOInsertPtr:
+		os, p := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			p = unsafePtr(args[1])
+		}
+		return fn, []jen.Code{os, p}, true, true
+	case cxxIOInsertBool:
+		os, b := jen.Nil(), jen.Lit(false)
+		if len(args) > 0 {
+			os = asBytePtr(args[0])
+		}
+		if len(args) > 1 {
+			b = jen.Bool().Call(args[1])
+		}
+		return fn, []jen.Code{os, b}, true, true
 	case cxxIOPut:
 		os, c := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
@@ -2245,12 +2307,27 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		switch {
 		case strings.HasSuffix(name, "PKc"):
 			return libc("OstreamLsCStr"), cxxIOLsCStr, true
-		case strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"), strings.HasSuffix(name, "Ex"):
+		case strings.HasSuffix(name, "PKv"):
+			// operator<<(void const*)
+			return libc("OstreamInsertPtr"), cxxIOInsertPtr, true
+		// signed: char(a)/short(s)/int(i)/long(l)/long long(x)
+		case strings.HasSuffix(name, "Ea"), strings.HasSuffix(name, "Es"),
+			strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
+			strings.HasSuffix(name, "Ex"):
 			return libc("OstreamInsertI64"), cxxIOInsertI64, true
-		case strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
+		// unsigned: zero-extend to u64 (Go uint64(intN(-1)) sign-extends).
+		case strings.HasSuffix(name, "Eh"): // unsigned char
+			return libc("OstreamInsertU64"), cxxIOInsertU8, true
+		case strings.HasSuffix(name, "Et"): // unsigned short
+			return libc("OstreamInsertU64"), cxxIOInsertU16, true
+		case strings.HasSuffix(name, "Ej"): // unsigned int
+			return libc("OstreamInsertU64"), cxxIOInsertU32, true
+		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
 			return libc("OstreamInsertU64"), cxxIOInsertU64, true
 		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"):
 			return libc("OstreamInsertF64"), cxxIOInsertF64, true
+		case strings.HasSuffix(name, "Eb"):
+			return libc("OstreamInsertBool"), cxxIOInsertBool, true
 		case strings.HasSuffix(name, "Ec"):
 			return libc("OstreamPut"), cxxIOPut, true
 		}
@@ -2389,6 +2466,7 @@ var libraryFunctions = map[string]goRef{
 	"__assert_fail":       {libcPath, "AssertFail"},
 	"fabs":                {"math", "Abs"},
 	"fmod":                {"math", "Mod"},
+	"pow":                 {"math", "Pow"},
 	"__ctype_b_loc":       {libcPath, "CtypeBLoc"},
 	"dup":                 {libcPath, "Dup"},
 	"fclose":              {libcPath, "Fclose"},

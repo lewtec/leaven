@@ -220,3 +220,179 @@ func rbRotateRight(x, header *rbNode) {
 	y.right = unsafe.Pointer(x)
 	x.parent = unsafe.Pointer(y)
 }
+
+// RbTreeRebalanceForErase is std::_Rb_tree_rebalance_for_erase
+// (gcc libstdc++-v3/src/c++98/tree.cc). Returns the node to free (z).
+// header is _M_header of the tree.
+func RbTreeRebalanceForErase(z, header *byte) *byte {
+	if z == nil || header == nil {
+		return z
+	}
+	zn, h := rb(z), rb(header)
+	var y *rbNode = zn
+	var x unsafe.Pointer
+	var xParent unsafe.Pointer
+
+	if zn.left == nil {
+		x = zn.right
+	} else if zn.right == nil {
+		x = zn.left
+	} else {
+		y = rbPtr(zn.right)
+		for y.left != nil {
+			y = rbPtr(y.left)
+		}
+		x = y.right
+	}
+
+	if y != zn {
+		// y is successor; splice y in place of z
+		rbPtr(zn.left).parent = unsafe.Pointer(y)
+		y.left = zn.left
+		if y != rbPtr(zn.right) {
+			xParent = y.parent
+			if x != nil {
+				rbPtr(x).parent = y.parent
+			}
+			rbPtr(y.parent).left = x
+			y.right = zn.right
+			rbPtr(zn.right).parent = unsafe.Pointer(y)
+		} else {
+			xParent = unsafe.Pointer(y)
+		}
+		if h.parent == unsafe.Pointer(z) {
+			h.parent = unsafe.Pointer(y)
+		} else if rbPtr(zn.parent).left == unsafe.Pointer(z) {
+			rbPtr(zn.parent).left = unsafe.Pointer(y)
+		} else {
+			rbPtr(zn.parent).right = unsafe.Pointer(y)
+		}
+		y.parent = zn.parent
+		y.color, zn.color = zn.color, y.color
+		y = zn
+	} else {
+		xParent = y.parent
+		if x != nil {
+			rbPtr(x).parent = y.parent
+		}
+		if h.parent == unsafe.Pointer(z) {
+			h.parent = x
+		} else if rbPtr(y.parent).left == unsafe.Pointer(z) {
+			rbPtr(y.parent).left = x
+		} else {
+			rbPtr(y.parent).right = x
+		}
+		if h.left == unsafe.Pointer(z) {
+			if zn.right == nil {
+				h.left = zn.parent
+			} else {
+				h.left = unsafe.Pointer(rbMinimum(rbPtr(x)))
+			}
+		}
+		if h.right == unsafe.Pointer(z) {
+			if zn.left == nil {
+				h.right = zn.parent
+			} else {
+				h.right = unsafe.Pointer(rbMaximum(rbPtr(x)))
+			}
+		}
+	}
+
+	if y.color != rbRed {
+		for x != h.parent && (x == nil || rbPtr(x).color == rbBlack) {
+			if x == rbPtr(xParent).left {
+				w := rbPtr(rbPtr(xParent).right)
+				if w != nil && w.color == rbRed {
+					w.color = rbBlack
+					rbPtr(xParent).color = rbRed
+					rbRotateLeft(rbPtr(xParent), h)
+					w = rbPtr(rbPtr(xParent).right)
+				}
+				if w == nil {
+					x = xParent
+					xParent = rbPtr(x).parent
+					continue
+				}
+				if (w.left == nil || rbPtr(w.left).color == rbBlack) &&
+					(w.right == nil || rbPtr(w.right).color == rbBlack) {
+					w.color = rbRed
+					x = xParent
+					xParent = rbPtr(x).parent
+				} else {
+					if w.right == nil || rbPtr(w.right).color == rbBlack {
+						if w.left != nil {
+							rbPtr(w.left).color = rbBlack
+						}
+						w.color = rbRed
+						rbRotateRight(w, h)
+						w = rbPtr(rbPtr(xParent).right)
+					}
+					if w != nil {
+						w.color = rbPtr(xParent).color
+					}
+					rbPtr(xParent).color = rbBlack
+					if w != nil && w.right != nil {
+						rbPtr(w.right).color = rbBlack
+					}
+					rbRotateLeft(rbPtr(xParent), h)
+					break
+				}
+			} else {
+				w := rbPtr(rbPtr(xParent).left)
+				if w != nil && w.color == rbRed {
+					w.color = rbBlack
+					rbPtr(xParent).color = rbRed
+					rbRotateRight(rbPtr(xParent), h)
+					w = rbPtr(rbPtr(xParent).left)
+				}
+				if w == nil {
+					x = xParent
+					xParent = rbPtr(x).parent
+					continue
+				}
+				if (w.right == nil || rbPtr(w.right).color == rbBlack) &&
+					(w.left == nil || rbPtr(w.left).color == rbBlack) {
+					w.color = rbRed
+					x = xParent
+					xParent = rbPtr(x).parent
+				} else {
+					if w.left == nil || rbPtr(w.left).color == rbBlack {
+						if w.right != nil {
+							rbPtr(w.right).color = rbBlack
+						}
+						w.color = rbRed
+						rbRotateLeft(w, h)
+						w = rbPtr(rbPtr(xParent).left)
+					}
+					if w != nil {
+						w.color = rbPtr(xParent).color
+					}
+					rbPtr(xParent).color = rbBlack
+					if w != nil && w.left != nil {
+						rbPtr(w.left).color = rbBlack
+					}
+					rbRotateRight(rbPtr(xParent), h)
+					break
+				}
+			}
+		}
+		if x != nil {
+			rbPtr(x).color = rbBlack
+		}
+	}
+	return (*byte)(unsafe.Pointer(y))
+}
+
+func rbMinimum(n *rbNode) *rbNode {
+	for n != nil && n.left != nil {
+		n = rbPtr(n.left)
+	}
+	return n
+}
+
+func rbMaximum(n *rbNode) *rbNode {
+	for n != nil && n.right != nil {
+		n = rbPtr(n.right)
+	}
+	return n
+}
