@@ -16,21 +16,31 @@ import (
 
 // moduleFuncNames / moduleTypeNames are filled by collectModuleNames so locals
 // can be renamed when they would shadow a function or type in Go.
+// moduleFuncAliases maps C++ alias names (D1→D2, C1→C2) to the real function:
+// vtables forward-ref aliases before the alias line is parsed, so the parser
+// plants i8 @D1 globals; emit must still produce a real function pointer.
 var (
-	moduleFuncNames map[string]bool
-	moduleTypeNames map[string]bool
+	moduleFuncNames    map[string]bool
+	moduleTypeNames    map[string]bool
+	moduleFuncAliases  map[string]*ir.Func
 )
 
 // collectModuleNames records function and type identifiers used in the module.
 func collectModuleNames(m *ir.Module) {
 	moduleFuncNames = make(map[string]bool)
 	moduleTypeNames = make(map[string]bool)
+	moduleFuncAliases = make(map[string]*ir.Func)
 	for _, f := range m.Funcs {
 		moduleFuncNames[rawIdentName(f)] = true
 	}
 	for _, t := range m.TypeDefs {
 		if n := TypeName(t); n != "" {
 			moduleTypeNames[n] = true
+		}
+	}
+	for _, a := range m.Aliases {
+		if f, ok := a.Aliasee.(*ir.Func); ok {
+			moduleFuncAliases[a.Name()] = f
 		}
 	}
 }
@@ -248,6 +258,10 @@ func formatExpr(v value.Value) (expr, error) {
 		return formatExpr(v.Aliasee)
 
 	case *ir.Global:
+		// Forward-ref stub for a function alias (see moduleFuncAliases).
+		if f := moduleFuncAliases[v.Name()]; f != nil {
+			return formatExpr(f)
+		}
 		name := VariableName(v)
 		if types.IsFunc(v.ContentType) {
 			fn := jen.Id(name)

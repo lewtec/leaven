@@ -48,6 +48,11 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		if isLLVMSpecialGlobal(g.Name()) {
 			continue
 		}
+		// Skip i8 stubs created for function aliases (D1/C1); vtables use
+		// moduleFuncAliases to emit the real function pointer instead.
+		if _, ok := moduleFuncAliases[g.Name()]; ok {
+			continue
+		}
 		name := VariableName(g)
 		if g.Init == nil && hasRuntimeDef(name) {
 			continue

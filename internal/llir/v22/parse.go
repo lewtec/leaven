@@ -2647,11 +2647,14 @@ func (p *parser) refAt(name string) (value.Value, error) {
 	if f, ok := p.funcs[name]; ok {
 		return f, nil
 	}
-	if g, ok := p.globals[name]; ok {
-		return g, nil
-	}
+	// Prefer aliases over dummy globals so post-definition refs are correct.
+	// (Forward refs before the alias line still hit ensureGlobal; emit maps
+	// those stubs via moduleFuncAliases.)
 	if a, ok := p.aliases[name]; ok {
 		return a, nil
+	}
+	if g, ok := p.globals[name]; ok {
+		return g, nil
 	}
 	return p.ensureGlobal(name), nil
 }
