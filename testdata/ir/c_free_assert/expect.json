@@ -7,7 +7,7 @@
         "package p",
         "\"github.com/lewtec/leaven/libc\"",
         "func release(p unsafe.Pointer)",
-        "libc.Free((*byte)(v0))",
+        "libc.Free(libc.As[byte](v0))",
         "func need(x int32) int32",
         "libc.AssertFail("
       ],

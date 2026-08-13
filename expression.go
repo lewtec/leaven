@@ -74,13 +74,13 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if err != nil {
 				return expr{}, err
 			}
-			base = ptrCast(ptrTyp(telem), base)
+			base = emitAs(telem, emitUP(base))
 		} else if len(indices) > 1 {
 			// Field GEPs need a typed *T for .F0 chains.
-			base = ptrCast(ptrTyp(et), base)
+			base = emitAs(et, base)
 		} else {
 			// Pure element GEP: byte stride with LLVM size.
-			base = ptrCast(jen.Op("*").Byte(), base)
+			base = emitAs(Qual[byte](), base)
 		}
 		if zeroFirst {
 			result = base
@@ -90,11 +90,10 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 				return expr{}, fmt.Errorf("error translating first index (%v): %w", firstIndex, err)
 			}
 			if len(indices) > 1 {
-				result = libc("AddPointer").Types(et).Call(base, jen.Int().Call(idx))
+				result = emitAddPtr(et, base, jen.Int().Call(idx))
 			} else {
-				// (*byte)(p) + idx*elemSize
 				off := jen.Int().Call(idx).Op("*").Lit(int(elemSize))
-				result = libc("AddPointer").Types(jen.Byte()).Call(base, off)
+				result = emitAddPtr(Qual[byte](), base, off)
 			}
 		}
 	}
@@ -133,11 +132,11 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 				}
 				var base *jen.Statement
 				if takeAddress {
-					base = ptrCast(jen.Op("*").Byte(), unsafePtr(addrOf(result)))
+					base = emitAs(Qual[byte](), emitPtr(addrOf(result)))
 				} else {
-					base = ptrCast(jen.Op("*").Byte(), unsafePtr(result))
+					base = emitAs(Qual[byte](), emitPtr(result))
 				}
-				result = libc("AddPointer").Types(jen.Byte()).Call(base, jen.Lit(int(off)))
+				result = emitAddPtr(Qual[byte](), base, jen.Lit(int(off)))
 				takeAddress = false
 			} else {
 				result = jen.Add(result).Dot(fieldNameU(ci.X.Uint64()))
@@ -152,7 +151,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if takeAddress {
 		return addrExpr(result), nil
 	}
-	return val(unsafePtr(result)), nil
+	return val(emitPtr(result)), nil
 }
 
 // scalarPtrVectorIndexGEP is getelementptr T, ptr %p, <N x iK> %idx.
@@ -179,10 +178,9 @@ func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []val
 	n := int64(ivt.Len)
 	elems := make([]jen.Code, n)
 	for i := int64(0); i < n; i++ {
-		// Fresh base each lane — jennifer Statements are mutable builders.
-		base := jen.Parens(jen.Op("*").Byte()).Call(jen.Add(srcExpr))
+		// Fresh src each lane — jennifer Statements are mutable builders.
 		off := jen.Int().Call(jen.Add(idxExpr).Index(litUntyped(i))).Op("*").Lit(int(elemSize))
-		elems[i] = unsafePtr(libc("AddPointer").Types(jen.Byte()).Call(base, off))
+		elems[i] = emitOff(jen.Add(srcExpr), off)
 	}
 	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
@@ -219,10 +217,7 @@ func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *
 			off = jen.Add(idxExpr).Index(litUntyped(i))
 		}
 		byteOff := jen.Int().Call(off).Op("*").Lit(int(elemSize))
-		elems[i] = unsafePtr(libc("AddPointer").Types(jen.Byte()).Call(
-			jen.Parens(jen.Op("*").Byte()).Call(lane),
-			byteOff,
-		))
+		elems[i] = emitOff(lane, byteOff)
 	}
 	if len(indices) > 1 {
 		return expr{}, fmt.Errorf("%w: vector gep extra indices", errUnsupportedIndexType)
@@ -241,13 +236,15 @@ func wholeVarAccess(v value.Value, elem types.Type) bool {
 	return types.Equal(g.ContentType, elem)
 }
 
-func overlayMem(addr *jen.Statement, elem types.Type) (*jen.Statement, error) {
+func overlayMem(addr *jen.Statement, addrTy, elem types.Type) (*jen.Statement, error) {
 	t, err := TypeSpec(elem)
 	if err != nil {
 		return nil, err
 	}
-	// addr is already an LLVM pointer value (unsafe.Pointer).
-	return deref(jen.Parens(ptrTyp(t)).Call(addr)), nil
+	if isTaggedPointerType(addrTy) {
+		addr = emitUP(addr)
+	}
+	return deref(emitAs(t, addr)), nil
 }
 
 func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, error) {
@@ -255,19 +252,24 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	// not the object as a Go slice or as a pointer value.
 	if g, ok := srcVal.(*ir.Global); ok && isStdStream(VariableName(g)) {
 		if _, ok := elem.(*types.PointerType); ok {
-			return overlayMem(src.code, elem)
+			return overlayMem(src.code, srcVal.Type(), elem)
 		}
 	}
 	if src.base != nil && wholeVarAccess(srcVal, elem) {
 		loaded := src.load()
 		// Library FILE* globals are *os.File; LLVM pointer values are
-		// unsafe.Pointer. unsafe.Pointer(unsafe.Pointer) is a no-op convert.
+		// already unsafe.Pointer.
 		if pt, ok := elem.(*types.PointerType); ok && !isTaggedPointerType(pt) {
-			return unsafePtr(loaded), nil
+			if g, ok := srcVal.(*ir.Global); ok {
+				if ref, ok := libraryGlobals[VariableName(g)]; ok && ref.pkg == "os" {
+					return emitPtr(loaded), nil
+				}
+			}
+			return loaded, nil
 		}
 		return loaded, nil
 	}
-	slot, err := overlayMem(src.code, elem)
+	slot, err := overlayMem(src.code, srcVal.Type(), elem)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +280,7 @@ func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*j
 	if dst.base != nil && wholeVarAccess(dstVal, elem) {
 		return dst.store(src), nil
 	}
-	slot, err := overlayMem(dst.code, elem)
+	slot, err := overlayMem(dst.code, dstVal.Type(), elem)
 	if err != nil {
 		return nil, err
 	}

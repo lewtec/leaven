@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "var AllVars struct",
-        "*(*unsafe.Pointer)(unsafe.Pointer(&AllVars))"
+        "*libc.As[unsafe.Pointer](libc.Ptr(&AllVars))"
       ],
       "not_contains": [
         "AllVars = p",

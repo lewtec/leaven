@@ -12,7 +12,7 @@
         "libc.Snprintf",
         "libc.Fdopen",
         "libc.Fclose",
-        "unsafe.Pointer(&varargs)"
+        "libc.Ptr(&varargs)"
       ],
       "not_contains": [
         "llvm_va_start",

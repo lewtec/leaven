@@ -6,7 +6,7 @@
       "contains": [
         "package p",
         "AddPointer[byte]",
-        "unsafe.Pointer("
+        "libc.Ptr("
       ],
       "not_contains": [
         "mismatched source and element types"

@@ -7,7 +7,7 @@
         "package p",
         "\"github.com/lewtec/leaven/libc\"",
         "var current_free unsafe.Pointer",
-        "tmp := libc.Free",
+        "libc.FuncCode(libc.Free)",
         "func release(p unsafe.Pointer)",
         "func set_free(fn unsafe.Pointer)"
       ],

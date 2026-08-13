@@ -2,7 +2,9 @@ package leaven
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"unsafe"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir"
@@ -85,7 +87,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		p := ptrCast(ptrTyp(elem), ptr)
+		if isTaggedPointerType(inst.Ptr.Type()) {
+			ptr = emitUP(ptr)
+		}
+		p := emitAs(elem, ptr)
 		name := VariableName(inst)
 		okName := name + "_ok"
 		oldName := name + "_old"
@@ -115,7 +120,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		dst = ptrCast(ptrTyp(elem), dst)
+		if isTaggedPointerType(inst.Dst.Type()) {
+			dst = emitUP(dst)
+		}
+		dst = emitAs(elem, dst)
 		switch inst.Op {
 		case enum.AtomicOpAdd:
 			addFn, ok := atomicAddFunc(inst.Type())
@@ -149,7 +157,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		// Force align ≥8 so pointers never have LSB set (Rust niches / tagged
 		// ptrs). new([0]byte) and new(struct{}) can be 1-byte aligned.
 		allocAlign8 := func(elem *jen.Statement) *jen.Statement {
-			return unsafePtr(addrOf(jen.New(jen.Struct(
+			return emitPtr(addrOf(jen.New(jen.Struct(
 				jen.Id("_").Index(jen.Lit(0)).Uint64(),
 				jen.Id("v").Add(elem),
 				jen.Id("b").Byte(),
@@ -159,7 +167,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return one(assign(name, uintptrOfPtr(libc("Retain").Call(jen.New(t))))), nil
+				return one(assign(name, emitAddr(libc("Retain").Call(jen.New(t))))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
@@ -172,7 +180,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		// Dynamic array: pad length and pin first element (already slice-aligned).
-		return one(assign(name, unsafePtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
+		return one(assign(name, emitPtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")
@@ -247,14 +255,14 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if isTaggedPointerType(inst.To) {
-			return one(assign(name, uintptrOfPtr(from))), nil
+			return one(assign(name, ptrToUint(from))), nil
 		}
 		if isTaggedPointerType(inst.From.Type()) {
 			to, err := translateType(inst.To, "type")
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(name, ptrCast(to, from))), nil
+			return one(assign(name, jen.Parens(to).Call(emitUP(from)))), nil
 		}
 		return one(assign(name, from)), nil
 
@@ -467,7 +475,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), jen.Parens(to).Call(unsafePtr(jen.Uintptr().Call(from))))), nil
+		return one(assign(VariableName(inst), jen.Parens(to).Call(emitUP(jen.Uintptr().Call(from))))), nil
 
 	case *ir.InstLoad:
 		src, err := formatExpr(inst.Src)
@@ -537,7 +545,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), conv(to, uintptrOfPtr(from)))), nil
+		return one(assign(VariableName(inst), conv(to, ptrToUint(from)))), nil
 
 	case *ir.InstSDiv:
 		return translateSignedDivRem(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
@@ -1151,11 +1159,11 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 }
 
 func asBytePtr(x jen.Code) *jen.Statement {
-	return jen.Parens(ptrTyp(jen.Byte())).Call(x)
+	return emitAs(Qual[byte](), x)
 }
 
 func asFilePtr(x jen.Code) *jen.Statement {
-	return jen.Parens(ptrTyp(jen.Qual("os", "File"))).Call(x)
+	return emitAs(Qual[os.File](), x)
 }
 
 func libcCallArg(name string, i int, a value.Value, got jen.Code) *jen.Statement {
@@ -1164,6 +1172,9 @@ func libcCallArg(name string, i int, a value.Value, got jen.Code) *jen.Statement
 			return s
 		}
 		return jen.Add(got)
+	}
+	if isTaggedPointerType(a.Type()) {
+		got = emitUP(got)
 	}
 	switch name {
 	case "fprintf":
@@ -1526,13 +1537,11 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		typedPtr = true
 	case "leaven_va_start":
 		if len(args) == 1 {
-			return one(deref(args[0]).Op("=").Add(ptrCast(ptrTyp(jen.Byte()), addrOf(jen.Id("varargs"))))), nil
+			return one(deref(args[0]).Op("=").Add(emitAs(Qual[byte](), emitPtr(addrOf(jen.Id("varargs")))))), nil
 		}
 	case "llvm_va_start":
 		if len(args) == 1 {
-			return one(deref(jen.Parens(ptrTyp(jen.Qual("unsafe", "Pointer")))).Call(
-				jen.Qual("unsafe", "Add").Call(unsafePtr(args[0]), jen.Lit(8)),
-			).Op("=").Add(unsafePtr(addrOf(jen.Id("varargs"))))), nil
+			return one(emitStore(Qual[unsafe.Pointer](), args[0], jen.Lit(8), emitPtr(addrOf(jen.Id("varargs"))))), nil
 		}
 	case "llvm_va_end", "llvm_lifetime_start", "llvm_lifetime_end", "llvm_stackrestore":
 		return nil, nil
@@ -1540,7 +1549,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if len(args) == 4 {
 			return one(assign(VariableName(inst), libc("Vsnprintf").Call(
 				asBytePtr(args[0]), args[1], asBytePtr(args[2]),
-				ptrCast(ptrTyp(jen.Byte()), args[3]),
+				emitAs(Qual[byte](), args[3]),
 			))), nil
 		}
 	case "ldexp":
@@ -1786,7 +1795,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error translating callee (%v): %w", inst.Callee, err)
 			}
-			callee = fnPtrBitcast(ft, fn)
+			callee = libcT("FuncFromCode", ft, fn)
 		}
 	}
 
@@ -1803,10 +1812,13 @@ func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]je
 		return one(callExpr), nil
 	}
 	if isTaggedPointerType(dest) {
-		return one(assign(VariableName(inst), uintptrOfPtr(callExpr))), nil
+		if typedPtr {
+			return one(assign(VariableName(inst), emitAddr(callExpr))), nil
+		}
+		return one(assign(VariableName(inst), ptrToUint(callExpr))), nil
 	}
 	if _, ok := dest.(*types.PointerType); ok && typedPtr {
-		callExpr = unsafePtr(callExpr)
+		callExpr = emitPtr(callExpr)
 	}
 	return one(assign(VariableName(inst), callExpr)), nil
 }
@@ -2174,7 +2186,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			os = asBytePtr(args[0])
 		}
 		if len(args) > 1 {
-			p = unsafePtr(args[1])
+			p = emitUP(args[1])
 		}
 		return fn, []jen.Code{os, p}, true, true
 	case cxxIOInsertBool:
@@ -2455,46 +2467,46 @@ var libraryFunctions = map[string]goRef{
 	"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l":                            {libcPath, "OstreamInsert"},
 	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": {libcPath, "IstreamGetline"},
 	// stringstream / istream >> are matched by cxxIOKind (arg reshaping).
-	"__assert_fail":       {libcPath, "AssertFail"},
-	"fabs":                {"math", "Abs"},
-	"fmod":                {"math", "Mod"},
-	"pow":                 {"math", "Pow"},
-	"__ctype_b_loc":       {libcPath, "CtypeBLoc"},
-	"dup":                 {libcPath, "Dup"},
-	"fclose":              {libcPath, "Fclose"},
-	"fdopen":              {libcPath, "Fdopen"},
-	"fprintf":             {libcPath, "Fprintf"},
-	"fputc":               {libcPath, "Fputc"},
-	"fputs":               {libcPath, "Fputs"},
-	"free":                {libcPath, "Free"},
-	"getchar":             {libcPath, "Getchar"},
-	"exit":                {libcPath, "Exit"},
-	"iswalnum":            {libcPath, "Iswalnum"},
-	"iswalpha":            {libcPath, "Iswalpha"},
-	"iswblank":            {libcPath, "Iswblank"},
-	"iswcntrl":            {libcPath, "Iswcntrl"},
-	"iswdigit":            {libcPath, "Iswdigit"},
-	"iswlower":            {libcPath, "Iswlower"},
-	"iswspace":            {libcPath, "Iswspace"},
-	"iswupper":            {libcPath, "Iswupper"},
-	"iswxdigit":           {libcPath, "Iswxdigit"},
-	"leaven_va_arg":       {libcPath, "VAArg"},
-	"towlower":            {libcPath, "Towlower"},
-	"towupper":            {libcPath, "Towupper"},
-	"llvm_fabs_f64":       {"math", "Abs"},
-	"llvm_fabs_f80":       {"math", "Abs"},
-	"llvm_maximumnum_f64": {libcPath, "MaximumNumF64"},
-	"llvm_pow_f64":        {"math", "Pow"},
-	"memchr":              {libcPath, "Memchr"},
-	"memcmp":              {libcPath, "Memcmp"},
-	"bcmp":                {libcPath, "Memcmp"},
-	"__memcpy_chk":        {libcPath, "MemcpyChk"},
-	"memmove":             {libcPath, "Memmove"},
-	"memset_pattern16":    {libcPath, "MemsetPattern16"},
-	"__memset_chk":        {libcPath, "MemsetChk"},
-	"printf":              {libcPath, "Printf"},
-	"putc":                {libcPath, "Putc"},
-	"putchar":             {libcPath, "Putchar"},
+	"__assert_fail":         {libcPath, "AssertFail"},
+	"fabs":                  {"math", "Abs"},
+	"fmod":                  {"math", "Mod"},
+	"pow":                   {"math", "Pow"},
+	"__ctype_b_loc":         {libcPath, "CtypeBLoc"},
+	"dup":                   {libcPath, "Dup"},
+	"fclose":                {libcPath, "Fclose"},
+	"fdopen":                {libcPath, "Fdopen"},
+	"fprintf":               {libcPath, "Fprintf"},
+	"fputc":                 {libcPath, "Fputc"},
+	"fputs":                 {libcPath, "Fputs"},
+	"free":                  {libcPath, "Free"},
+	"getchar":               {libcPath, "Getchar"},
+	"exit":                  {libcPath, "Exit"},
+	"iswalnum":              {libcPath, "Iswalnum"},
+	"iswalpha":              {libcPath, "Iswalpha"},
+	"iswblank":              {libcPath, "Iswblank"},
+	"iswcntrl":              {libcPath, "Iswcntrl"},
+	"iswdigit":              {libcPath, "Iswdigit"},
+	"iswlower":              {libcPath, "Iswlower"},
+	"iswspace":              {libcPath, "Iswspace"},
+	"iswupper":              {libcPath, "Iswupper"},
+	"iswxdigit":             {libcPath, "Iswxdigit"},
+	"leaven_va_arg":         {libcPath, "VAArg"},
+	"towlower":              {libcPath, "Towlower"},
+	"towupper":              {libcPath, "Towupper"},
+	"llvm_fabs_f64":         {"math", "Abs"},
+	"llvm_fabs_f80":         {"math", "Abs"},
+	"llvm_maximumnum_f64":   {libcPath, "MaximumNumF64"},
+	"llvm_pow_f64":          {"math", "Pow"},
+	"memchr":                {libcPath, "Memchr"},
+	"memcmp":                {libcPath, "Memcmp"},
+	"bcmp":                  {libcPath, "Memcmp"},
+	"__memcpy_chk":          {libcPath, "MemcpyChk"},
+	"memmove":               {libcPath, "Memmove"},
+	"memset_pattern16":      {libcPath, "MemsetPattern16"},
+	"__memset_chk":          {libcPath, "MemsetChk"},
+	"printf":                {libcPath, "Printf"},
+	"putc":                  {libcPath, "Putc"},
+	"putchar":               {libcPath, "Putchar"},
 	"__errno_location":      {libcPath, "ErrnoLocation"},
 	"close":                 {libcPath, "Close"},
 	"dlsym":                 {libcPath, "Dlsym"},
@@ -2526,25 +2538,25 @@ var libraryFunctions = map[string]goRef{
 	"sysconf":               {libcPath, "Sysconf"},
 	"syscall":               {libcPath, "Syscall"},
 	"write":                 {libcPath, "Write"},
-	"realloc":             {libcPath, "Realloc"},
-	"scanf":               {libcPath, "Scanf"},
-	"sscanf":              {libcPath, "Sscanf"},
-	"__isoc23_sscanf":     {libcPath, "Sscanf"},
-	"srand48":             {libcPath, "Srand48"},
-	"lrand48":             {libcPath, "Lrand48"},
-	"statx":               {libcPath, "Statx"},
-	"snprintf":            {libcPath, "Snprintf"},
-	"sqrt":                {"math", "Sqrt"},
-	"__strcat_chk":        {libcPath, "StrcatChk"},
-	"strchr":              {libcPath, "Strchr"},
-	"strcmp":              {libcPath, "Strcmp"},
-	"strcpy":              {libcPath, "Strcpy"},
-	"strcspn":             {libcPath, "Strcspn"},
-	"strlen":              {libcPath, "Strlen"},
-	"strncat":             {libcPath, "Strncat"},
-	"strncmp":             {libcPath, "Strncmp"},
-	"strncpy":             {libcPath, "Strncpy"},
-	"strrchr":             {libcPath, "Strrchr"},
-	"strspn":              {libcPath, "Strspn"},
-	"strstr":              {libcPath, "Strstr"},
+	"realloc":               {libcPath, "Realloc"},
+	"scanf":                 {libcPath, "Scanf"},
+	"sscanf":                {libcPath, "Sscanf"},
+	"__isoc23_sscanf":       {libcPath, "Sscanf"},
+	"srand48":               {libcPath, "Srand48"},
+	"lrand48":               {libcPath, "Lrand48"},
+	"statx":                 {libcPath, "Statx"},
+	"snprintf":              {libcPath, "Snprintf"},
+	"sqrt":                  {"math", "Sqrt"},
+	"__strcat_chk":          {libcPath, "StrcatChk"},
+	"strchr":                {libcPath, "Strchr"},
+	"strcmp":                {libcPath, "Strcmp"},
+	"strcpy":                {libcPath, "Strcpy"},
+	"strcspn":               {libcPath, "Strcspn"},
+	"strlen":                {libcPath, "Strlen"},
+	"strncat":               {libcPath, "Strncat"},
+	"strncmp":               {libcPath, "Strncmp"},
+	"strncpy":               {libcPath, "Strncpy"},
+	"strrchr":               {libcPath, "Strrchr"},
+	"strspn":                {libcPath, "Strspn"},
+	"strstr":                {libcPath, "Strstr"},
 }

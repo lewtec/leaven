@@ -2,6 +2,7 @@ package leaven
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
@@ -61,16 +62,118 @@ func deref(x jen.Code) *jen.Statement {
 	return jen.Op("*").Add(x)
 }
 
-func unsafePtr(x jen.Code) *jen.Statement {
+// Qual is T as jennifer AST. Named types become jen.Qual(pkg, name).
+func Qual[T any]() *jen.Statement {
+	return reflectType(reflect.TypeFor[T]())
+}
+
+func reflectType(t reflect.Type) *jen.Statement {
+	if t == nil {
+		return jen.Any()
+	}
+	if t.Name() != "" && t.PkgPath() != "" {
+		return jen.Qual(t.PkgPath(), t.Name())
+	}
+	switch t.Kind() {
+	case reflect.Bool:
+		return jen.Bool()
+	case reflect.Int:
+		return jen.Int()
+	case reflect.Int8:
+		return jen.Int8()
+	case reflect.Int16:
+		return jen.Int16()
+	case reflect.Int32:
+		return jen.Int32()
+	case reflect.Int64:
+		return jen.Int64()
+	case reflect.Uint:
+		return jen.Uint()
+	case reflect.Uint8:
+		return jen.Byte()
+	case reflect.Uint16:
+		return jen.Uint16()
+	case reflect.Uint32:
+		return jen.Uint32()
+	case reflect.Uint64:
+		return jen.Uint64()
+	case reflect.Uintptr:
+		return jen.Uintptr()
+	case reflect.Float32:
+		return jen.Float32()
+	case reflect.Float64:
+		return jen.Float64()
+	case reflect.String:
+		return jen.String()
+	case reflect.UnsafePointer:
+		return jen.Qual("unsafe", "Pointer")
+	case reflect.Ptr:
+		return jen.Op("*").Add(reflectType(t.Elem()))
+	case reflect.Slice:
+		return jen.Index().Add(reflectType(t.Elem()))
+	case reflect.Array:
+		return jen.Index(jen.Lit(t.Len())).Add(reflectType(t.Elem()))
+	case reflect.Map:
+		return jen.Map(reflectType(t.Key())).Add(reflectType(t.Elem()))
+	case reflect.Interface:
+		return jen.Any()
+	default:
+		if t.Name() != "" {
+			return jen.Id(t.Name())
+		}
+		return jen.Id(t.String())
+	}
+}
+
+// libcT is libc.Name[t](args…). t is Qual[T]() or TypeSpec.
+func libcT(name string, t jen.Code, args ...jen.Code) *jen.Statement {
+	return libc(name).Types(t).Call(args...)
+}
+
+// emitPtr is libc.Ptr(p) — (void *)p.
+func emitPtr(p jen.Code) *jen.Statement {
+	return libc("Ptr").Call(p)
+}
+
+// emitAs is libc.As[T](p) — (T *)p. t is the element type, not *T.
+func emitAs(t, p jen.Code) *jen.Statement {
+	return libcT("As", t, p)
+}
+
+// emitAddr is libc.Addr(p) — (uintptr)p.
+func emitAddr(p jen.Code) *jen.Statement {
+	return libc("Addr").Call(p)
+}
+
+// emitOff is libc.Off(p, n) — (char *)p + n.
+func emitOff(p, n jen.Code) *jen.Statement {
+	return libc("Off").Call(p, n)
+}
+
+// emitAddPtr is libc.AddPointer[T](p, i).
+func emitAddPtr(t, p, i jen.Code) *jen.Statement {
+	return libcT("AddPointer", t, p, i)
+}
+
+// emitLoad is libc.Load[T](p, off).
+func emitLoad(t, p, off jen.Code) *jen.Statement {
+	return libcT("Load", t, p, off)
+}
+
+// emitStore is libc.Store[T](p, off, v).
+func emitStore(t, p, off, v jen.Code) *jen.Statement {
+	return libcT("Store", t, p, off, v)
+}
+
+// emitUP is unsafe.Pointer(x) for integer bit patterns (inttoptr),
+// not a Go *T. Use emitPtr when x is already a pointer.
+func emitUP(x jen.Code) *jen.Statement {
 	return jen.Qual("unsafe", "Pointer").Call(x)
 }
 
-func uintptrOfPtr(x jen.Code) *jen.Statement {
-	return jen.Uintptr().Call(unsafePtr(x))
-}
-
-func ptrCast(typ, expr jen.Code) *jen.Statement {
-	return jen.Parens(typ).Call(unsafePtr(expr))
+// ptrToUint is uintptr(unsafe.Pointer(p)). emitUP so untyped nil is valid.
+func ptrToUint(p jen.Code) *jen.Statement {
+	return jen.Uintptr().Call(emitUP(p))
 }
 
 func goIntType(bits uint64) *jen.Statement  { return goBitsType(bits, false) }
@@ -166,7 +269,7 @@ func isStdStream(name string) bool {
 }
 
 func initStdStream(name string) *jen.Statement {
-	return libc("InitOstream").Call(unsafePtr(addrOf(jen.Id(name))))
+	return libc("InitOstream").Call(emitPtr(addrOf(jen.Id(name))))
 }
 
 func i1PackFn(n uint64) (string, bool) {
@@ -243,7 +346,7 @@ func vectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, err
 		return nil, err
 	}
 	return jen.Func().Params(jen.Id("v").Add(fromT)).Add(toT).Block(
-		jen.Return(deref(jen.Parens(ptrTyp(toT)).Call(unsafePtr(addrOf(jen.Id("v")))))),
+		jen.Return(deref(emitAs(toT, emitPtr(addrOf(jen.Id("v")))))),
 	).Call(src), nil
 }
 
@@ -322,7 +425,7 @@ func ident(name string) expr {
 }
 
 func addrExpr(base *jen.Statement) expr {
-	return expr{code: unsafePtr(addrOf(base)), base: base}
+	return expr{code: emitPtr(addrOf(base)), base: base}
 }
 
 func (e expr) load() *jen.Statement {

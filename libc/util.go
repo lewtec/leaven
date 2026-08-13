@@ -27,7 +27,7 @@ func As[T any](p unsafe.Pointer) *T {
 }
 
 // Addr is (uintptr)p. Map keys, nil-safe.
-func Addr(p *byte) uintptr {
+func Addr[T any](p *T) uintptr {
 	return uintptr(unsafe.Pointer(p))
 }
 

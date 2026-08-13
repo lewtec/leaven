@@ -6,8 +6,8 @@
       "contains": [
         "func advance(lexer unsafe.Pointer)",
         "local_advance",
-        "v1 = *(*unsafe.Pointer)(local_advance)",
-        "func() func(unsafe.Pointer, int32)"
+        "v1 = *libc.As[unsafe.Pointer](local_advance)",
+        "libc.FuncFromCode[func(unsafe.Pointer, int32)]"
       ],
       "not_contains": [
         "local_advance(v2"

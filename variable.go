@@ -20,9 +20,9 @@ import (
 // vtables forward-ref aliases before the alias line is parsed, so the parser
 // plants i8 @D1 globals; emit must still produce a real function pointer.
 var (
-	moduleFuncNames    map[string]bool
-	moduleTypeNames    map[string]bool
-	moduleFuncAliases  map[string]*ir.Func
+	moduleFuncNames   map[string]bool
+	moduleTypeNames   map[string]bool
+	moduleFuncAliases map[string]*ir.Func
 )
 
 // collectModuleNames records function and type identifiers used in the module.
@@ -224,12 +224,8 @@ func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
 	return jen.Add(typ).Add(compositeValues(elems))
 }
 
-func fnPtrBitcast(to, from *jen.Statement) *jen.Statement {
-	// Go forbids unsafe.Pointer(funcValue). Reinterpret via address of a temp.
-	return jen.Func().Params().Add(to).Block(
-		jen.Id("tmp").Op(":=").Add(from),
-		jen.Return(deref(jen.Parens(ptrTyp(to))).Call(unsafePtr(addrOf(jen.Id("tmp"))))),
-	).Call()
+func fnPtrBitcast(from *jen.Statement) *jen.Statement {
+	return libc("FuncCode").Call(from)
 }
 
 // FormatValue formats a constant or variable as it should appear in an expression.
@@ -249,7 +245,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if c, ok := namedRef(name); ok {
 			fn = c
 		}
-		return val(fnPtrBitcast(jen.Qual("unsafe", "Pointer"), fn)), nil
+		return val(fnPtrBitcast(fn)), nil
 
 	case *ir.Alias:
 		if v.Aliasee == nil {
@@ -268,7 +264,7 @@ func formatExpr(v value.Value) (expr, error) {
 			if c, ok := namedRef(name); ok {
 				fn = c
 			}
-			return val(fnPtrBitcast(jen.Qual("unsafe", "Pointer"), fn)), nil
+			return val(fnPtrBitcast(fn)), nil
 		}
 		if ref, ok := libraryGlobals[name]; ok {
 			return addrExpr(ref.code()), nil
@@ -333,14 +329,14 @@ func formatExpr(v value.Value) (expr, error) {
 			return val(bits), nil
 		}
 		if isTaggedPointerType(v.To) {
-			return val(uintptrOfPtr(from)), nil
+			return val(ptrToUint(from)), nil
 		}
 		if isTaggedPointerType(v.From.Type()) {
 			to, err := TypeSpec(v.To)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 			}
-			return val(ptrCast(to, from)), nil
+			return val(jen.Parens(to).Call(emitUP(from))), nil
 		}
 		// Pointer values are already unsafe.Pointer.
 		return val(from), nil
@@ -355,7 +351,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(jen.Parens(to).Call(unsafePtr(jen.Uintptr().Call(from)))), nil
+		return val(jen.Parens(to).Call(emitUP(jen.Uintptr().Call(from)))), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)
@@ -366,7 +362,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(conv(to, uintptrOfPtr(from))), nil
+		return val(conv(to, ptrToUint(from))), nil
 
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
@@ -570,6 +566,9 @@ func zeroOf(typ types.Type) (expr, error) {
 	case *types.FloatType:
 		return val(jen.Lit(0)), nil
 	case *types.PointerType:
+		if isTaggedPointerType(t) {
+			return val(jen.Lit(0)), nil
+		}
 		return val(jen.Nil()), nil
 	default:
 		return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, typ)
@@ -1094,7 +1093,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 			return conv(goUintType(t.BitSize), result), nil
 		}
 	case *types.PointerType:
-		return uintptrOfPtr(result), nil
+		return ptrToUint(result), nil
 	}
 
 	return result, nil

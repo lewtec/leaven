@@ -8,7 +8,7 @@
         "\"os\"",
         "\"github.com/lewtec/leaven/libc\"",
         "os.Stderr",
-        "*os.File",
+        "libc.As[os.File]",
         "libc.Fprintf",
         "libc.Abort",
         "libc.Realloc",

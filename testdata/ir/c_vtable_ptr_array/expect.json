@@ -5,11 +5,10 @@
       "package": "p",
       "contains": [
         "[4]unsafe.Pointer",
-        "unsafe.Pointer(&str)",
-        "unsafe.Pointer(&typeinfo)",
-        "var p unsafe.Pointer = unsafe.Pointer(&str)",
-        "tmp := dtor",
-        "*(*unsafe.Pointer)(unsafe.Pointer(&tmp))"
+        "libc.Ptr(&str)",
+        "libc.Ptr(&typeinfo)",
+        "var p unsafe.Pointer = libc.Ptr(&str)",
+        "libc.FuncCode(dtor)"
       ],
       "not_contains": [
         "unsafe.Pointer(dtor)",

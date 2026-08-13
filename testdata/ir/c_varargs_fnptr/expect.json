@@ -6,7 +6,7 @@
       "contains": [
         "package p",
         "func logf(self unsafe.Pointer, fmt unsafe.Pointer, varargs ...interface{})",
-        "tmp := logf"
+        "libc.FuncCode(logf)"
       ],
       "not_contains": [
         "unsafe.Pointer(logf)"

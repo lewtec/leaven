@@ -31,7 +31,7 @@ var slabLive sync.Map // uintptr → struct{}
 // Only for Go-heap objects (alloca→uintptr). Slab mallocs need no pin.
 func Retain[T any](p *T) *T {
 	if p != nil {
-		allocs.LoadOrStore(uintptr(unsafe.Pointer(p)), &allocRec{p: p})
+		allocs.LoadOrStore(Addr(p), &allocRec{p: p})
 	}
 	return p
 }

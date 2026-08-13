@@ -4,7 +4,7 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "AddPointer"
+        "libc.Off"
       ],
       "not_contains": [
         "non-pointer source"
