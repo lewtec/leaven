@@ -42,7 +42,7 @@ func Malloc[T any](n int64) *T {
 	if p == 0 {
 		return nil
 	}
-	return (*T)(unsafe.Pointer(p))
+	return As[T](unsafe.Pointer(p))
 }
 
 // Calloc allocates count*size zeroed bytes (C calloc).
@@ -58,8 +58,8 @@ func Calloc[T any](count, size int64) *T {
 	if p == 0 {
 		return nil
 	}
-	clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), int(n)))
-	return (*T)(unsafe.Pointer(p))
+	clear(Bytes(As[byte](unsafe.Pointer(p)), int(n)))
+	return As[T](unsafe.Pointer(p))
 }
 
 // Realloc is C realloc. n==0 frees p and returns nil.
@@ -76,7 +76,7 @@ func Realloc(p *byte, n int64) *byte {
 	if p == nil {
 		return Malloc[byte](n)
 	}
-	u := uintptr(unsafe.Pointer(p))
+	u := Addr(p)
 	if u <= 1 {
 		return Malloc[byte](n)
 	}
@@ -94,7 +94,7 @@ func Realloc(p *byte, n int64) *byte {
 	if q == nil {
 		return nil
 	}
-	copy(unsafe.Slice(q, int(n)), unsafe.Slice(p, oldCap))
+	copy(Bytes(q, int(n)), Bytes(p, oldCap))
 	Free(p)
 	return q
 }
@@ -104,7 +104,7 @@ func Arc4randomBuf(buf *byte, n int64) {
 	if buf == nil || n <= 0 {
 		return
 	}
-	if _, err := rand.Read(unsafe.Slice(buf, int(n))); err != nil {
+	if _, err := rand.Read(Bytes(buf, int(n))); err != nil {
 		panic(err)
 	}
 }
@@ -115,7 +115,7 @@ func Free(p *byte) {
 	if p == nil {
 		return
 	}
-	slabFree(uintptr(unsafe.Pointer(p)))
+	slabFree(Addr(p))
 }
 
 func xmalloc(n int64) uintptr {

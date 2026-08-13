@@ -72,7 +72,7 @@ func parseCFormatSpec(format []byte, pct int) (flags string, verb byte, after in
 //
 // It is based on the function of the same name in github.com/andybalholm/c2go.
 func fixPrintfFormat(f *byte, args []any) string {
-	format := unsafe.Slice(f, Strlen(f))
+	format := Bytes(f, int(Strlen(f)))
 	var buf strings.Builder
 	narg := 0
 	start := 0
@@ -104,7 +104,7 @@ func fixPrintfFormat(f *byte, args []any) string {
 			if narg < len(args) {
 				switch a := args[narg].(type) {
 				case *byte:
-					args[narg] = unsafe.Slice(a, Strlen(a))
+					args[narg] = Bytes(a, int(Strlen(a)))
 				}
 			}
 			buf.WriteString(flags)
@@ -155,7 +155,7 @@ func Printf(format *byte, args ...any) int32 {
 }
 
 func Puts(s *byte) int32 {
-	n, err := fmt.Printf("%s\n", unsafe.Slice(s, Strlen(s)))
+	n, err := fmt.Printf("%s\n", Bytes(s, int(Strlen(s))))
 	if err != nil {
 		return -1
 	}
@@ -165,7 +165,7 @@ func Puts(s *byte) int32 {
 // fixScanfFormat converts a scanf format string from C-style to Go-style,
 // and makes needed changes to the other arguments as well.
 func fixScanfFormat(f *byte, args []any) string {
-	format := unsafe.Slice(f, Strlen(f))
+	format := Bytes(f, int(Strlen(f)))
 	var buf strings.Builder
 	narg := 0
 	start := 0
@@ -260,7 +260,7 @@ func (s *stringScanner) Scan(state fmt.ScanState, verb rune) error {
 		result = append(result, c)
 	}
 	str := string(result)
-	b := unsafe.Slice(s.b, len(str)+1)
+	b := Bytes(s.b, len(str)+1)
 	copy(b, str)
 	b[len(b)-1] = 0
 	return nil
@@ -281,8 +281,8 @@ func Sscanf(str *byte, format *byte, args ...any) int32 {
 	if str == nil || format == nil {
 		return -1
 	}
-	in := unsafe.Slice(str, Strlen(str))
-	pat := unsafe.Slice(format, Strlen(format))
+	in := Bytes(str, int(Strlen(str)))
+	pat := Bytes(format, int(Strlen(format)))
 	n, eof := csscanf(in, pat, args)
 	if n == 0 && eof {
 		return -1
@@ -393,7 +393,7 @@ func csscanf(in, pat []byte, args []any) (n int, eof bool) {
 				}
 				dst := destData(args[ai])
 				if dst != nil {
-					out := unsafe.Slice((*byte)(dst), si-start+1)
+					out := Bytes(As[byte](dst), si-start+1)
 					copy(out, in[start:si])
 					out[si-start] = 0
 				}
@@ -417,7 +417,7 @@ func csscanf(in, pat []byte, args []any) (n int, eof bool) {
 				}
 				dst := destData(args[ai])
 				if dst != nil {
-					copy(unsafe.Slice((*byte)(dst), cnt), in[si:si+cnt])
+					copy(Bytes(As[byte](dst), cnt), in[si:si+cnt])
 				}
 				ai++
 				n++

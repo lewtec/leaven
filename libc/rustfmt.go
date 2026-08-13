@@ -17,7 +17,7 @@ type rustWriteStrFn func(w, data unsafe.Pointer, n int64) bool
 
 func rustStdoutWriteStr(_ unsafe.Pointer, data unsafe.Pointer, n int64) bool {
 	if data != nil && n > 0 {
-		os.Stdout.Write(unsafe.Slice((*byte)(data), int(n)))
+		os.Stdout.Write(Bytes(As[byte](data), int(n)))
 	}
 	return false
 }

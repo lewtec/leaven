@@ -78,7 +78,7 @@ func typeInfoKind(ti *byte) int {
 	if ti == nil {
 		return tiKindUnknown
 	}
-	vptr := *(*unsafe.Pointer)(unsafe.Pointer(ti))
+	vptr := Load[unsafe.Pointer](Ptr(ti), 0)
 	switch vptr {
 	case classTypeInfoVptr():
 		return tiKindClass
@@ -101,13 +101,14 @@ func DynamicCast(src, srcType, dstType *byte, src2dst int64) *byte {
 	if srcType == nil || dstType == nil {
 		panic("unsatisfied: __dynamic_cast")
 	}
-	vptr := *(*unsafe.Pointer)(unsafe.Pointer(src))
+	vptr := Load[unsafe.Pointer](Ptr(src), 0)
 	if vptr == nil {
 		panic("unsatisfied: __dynamic_cast")
 	}
-	offToTop := *(*int64)(unsafe.Add(vptr, -2*int(unsafe.Sizeof(uintptr(0)))))
-	whole := (*byte)(unsafe.Add(unsafe.Pointer(src), int(offToTop)))
-	wholeTI := *(**byte)(unsafe.Add(vptr, -int(unsafe.Sizeof(uintptr(0)))))
+	ptrSize := int(unsafe.Sizeof(uintptr(0)))
+	offToTop := Load[int64](vptr, -2*ptrSize)
+	whole := As[byte](Off(Ptr(src), int(offToTop)))
+	wholeTI := Load[*byte](vptr, -ptrSize)
 	_ = src2dst // hint only; the walk is the ABI result
 	return walkType(whole, wholeTI, dstType)
 }
@@ -123,7 +124,7 @@ func walkType(obj, ti, want *byte) *byte {
 	case tiKindClass:
 		return nil
 	case tiKindSI:
-		base := *(**byte)(unsafe.Add(unsafe.Pointer(ti), 2*int(unsafe.Sizeof(uintptr(0)))))
+		base := Load[*byte](Ptr(ti), 2*int(unsafe.Sizeof(uintptr(0))))
 		return walkType(obj, base, want)
 	case tiKindVMI:
 		return walkVMI(obj, ti, want)
@@ -133,25 +134,25 @@ func walkType(obj, ti, want *byte) *byte {
 }
 
 func walkVMI(obj, ti, want *byte) *byte {
-	vptr := *(*unsafe.Pointer)(unsafe.Pointer(obj))
+	vptr := Load[unsafe.Pointer](Ptr(obj), 0)
 	if vptr == nil {
 		panic("unsatisfied: __dynamic_cast")
 	}
-	baseCount := *(*uint32)(unsafe.Add(unsafe.Pointer(ti), 16+4))
-	bases := unsafe.Add(unsafe.Pointer(ti), 24)
+	baseCount := Load[uint32](Ptr(ti), 16+4)
+	bases := Off(Ptr(ti), 24)
 	var found *byte
 	for i := uint32(0); i < baseCount; i++ {
-		slot := unsafe.Add(bases, int(i)*16)
-		baseTI := *(**byte)(slot)
-		flags := *(*int64)(unsafe.Add(slot, 8))
+		slot := Off(bases, int(i)*16)
+		baseTI := Load[*byte](slot, 0)
+		flags := Load[int64](slot, 8)
 		if flags&tiPublicMask == 0 {
 			continue
 		}
 		off := flags >> tiOffsetShift
 		if flags&tiVirtualMask != 0 {
-			off = *(*int64)(unsafe.Add(vptr, int(off)))
+			off = Load[int64](vptr, int(off))
 		}
-		sub := (*byte)(unsafe.Add(unsafe.Pointer(obj), int(off)))
+		sub := As[byte](Off(Ptr(obj), int(off)))
 		got := walkType(sub, baseTI, want)
 		if got == nil {
 			continue

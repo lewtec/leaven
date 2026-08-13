@@ -24,18 +24,18 @@ func TestRbTreeIncDecHeader(t *testing.T) {
 	// header (end) + one black root. decrement(end) is the root.
 	var hdr, root rbNode
 	hdr.color = rbRed
-	hdr.parent = unsafe.Pointer(&root)
-	hdr.left = unsafe.Pointer(&root)
-	hdr.right = unsafe.Pointer(&root)
+	hdr.parent = &root
+	hdr.left = &root
+	hdr.right = &root
 	root.color = 1
-	root.parent = unsafe.Pointer(&hdr)
+	root.parent = &hdr
 
-	got := RbTreeDecrement((*byte)(unsafe.Pointer(&hdr)))
-	if got != (*byte)(unsafe.Pointer(&root)) {
+	got := RbTreeDecrement(rbByte(&hdr))
+	if got != rbByte(&root) {
 		t.Fatalf("dec end = %p, want root", got)
 	}
-	got = RbTreeIncrement((*byte)(unsafe.Pointer(&root)))
-	if got != (*byte)(unsafe.Pointer(&hdr)) {
+	got = RbTreeIncrement(rbByte(&root))
+	if got != rbByte(&hdr) {
 		t.Fatalf("inc root = %p, want end", got)
 	}
 }
@@ -48,16 +48,16 @@ func TestRbTreeInsertEmpty(t *testing.T) {
 		count uint64
 	}
 	var a rbNode
-	RbTreeInit((*byte)(unsafe.Pointer(&impl)))
+	RbTreeInit(As[byte](Ptr(&impl)))
 	hdr := &impl.hdr
-	RbTreeInsertAndRebalance(true, (*byte)(unsafe.Pointer(&a)), (*byte)(unsafe.Pointer(hdr)), (*byte)(unsafe.Pointer(hdr)))
-	if hdr.parent != unsafe.Pointer(&a) || hdr.left != unsafe.Pointer(&a) || hdr.right != unsafe.Pointer(&a) {
+	RbTreeInsertAndRebalance(true, rbByte(&a), rbByte(hdr), rbByte(hdr))
+	if hdr.parent != &a || hdr.left != &a || hdr.right != &a {
 		t.Fatalf("header %+v", *hdr)
 	}
-	if a.color != rbBlack || a.parent != unsafe.Pointer(hdr) {
+	if a.color != rbBlack || a.parent != hdr {
 		t.Fatalf("root %+v", a)
 	}
-	if p := RbTreeDecrement((*byte)(unsafe.Pointer(hdr))); p != (*byte)(unsafe.Pointer(&a)) {
+	if p := RbTreeDecrement(rbByte(hdr)); p != rbByte(&a) {
 		t.Fatalf("dec end")
 	}
 	if impl.count != 0 {
@@ -73,22 +73,22 @@ func TestRbTreeInorderTwo(t *testing.T) {
 	//    a
 	var hdr, a, b rbNode
 	hdr.color = rbRed
-	hdr.parent = unsafe.Pointer(&b)
-	hdr.left = unsafe.Pointer(&a)
-	hdr.right = unsafe.Pointer(&b)
+	hdr.parent = &b
+	hdr.left = &a
+	hdr.right = &b
 	b.color = 1
-	b.parent = unsafe.Pointer(&hdr)
-	b.left = unsafe.Pointer(&a)
+	b.parent = &hdr
+	b.left = &a
 	a.color = rbRed
-	a.parent = unsafe.Pointer(&b)
+	a.parent = &b
 
-	if p := RbTreeIncrement((*byte)(unsafe.Pointer(&a))); p != (*byte)(unsafe.Pointer(&b)) {
+	if p := RbTreeIncrement(rbByte(&a)); p != rbByte(&b) {
 		t.Fatalf("inc a")
 	}
-	if p := RbTreeDecrement((*byte)(unsafe.Pointer(&b))); p != (*byte)(unsafe.Pointer(&a)) {
+	if p := RbTreeDecrement(rbByte(&b)); p != rbByte(&a) {
 		t.Fatalf("dec b")
 	}
-	if p := RbTreeIncrement((*byte)(unsafe.Pointer(&b))); p != (*byte)(unsafe.Pointer(&hdr)) {
+	if p := RbTreeIncrement(rbByte(&b)); p != rbByte(&hdr) {
 		t.Fatalf("inc b")
 	}
 }

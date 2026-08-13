@@ -139,10 +139,10 @@ func Write(fd int32, buf *byte, n int64) int64 {
 // stack_t: { void *ss_sp; int ss_flags; size_t ss_size } @0,8,16.
 func Sigaltstack(ss, oss *byte) int32 {
 	if oss != nil {
-		base := unsafe.Pointer(oss)
-		*(**byte)(base) = nil
-		*(*int32)(unsafe.Add(base, 8)) = 0 // not SS_DISABLE
-		*(*uint64)(unsafe.Add(base, 16)) = 0
+		base := Ptr(oss)
+		Store[*byte](base, 0, nil)
+		Store[int32](base, 8, 0) // not SS_DISABLE
+		Store[uint64](base, 16, 0)
 	}
 	_ = ss // install accepted
 	return 0
