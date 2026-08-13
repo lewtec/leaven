@@ -42,6 +42,36 @@ define i1 @pure_b(ptr %x) {
 	}
 }
 
+// Local SSA %write / %read must not become libc.Write / libc.Read.
+func TestLocalNameNotLibraryRef(t *testing.T) {
+	src := `
+define void @record(i1 %write) {
+  %read = alloca i8, align 1
+  %z = zext i1 %write to i8
+  store i8 %z, ptr %read, align 1
+  %v = load i8, ptr %read, align 1
+  ret void
+}
+declare i64 @read(i32, ptr, i64)
+declare i64 @write(i32, ptr, i64)
+`
+	m, err := parseIR("t.ll", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Compile(&buf, m, "main"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "libc.Write") || strings.Contains(out, "libc.Read") {
+		t.Fatalf("local write/read remapped to libc:\n%s", out)
+	}
+	if !strings.Contains(out, "write") {
+		t.Fatalf("missing local write:\n%s", out)
+	}
+}
+
 func TestPackedBitIteratorSize(t *testing.T) {
 	// <{ ptr, i32 }> must be 12 bytes in Go so vector<bool> layout matches.
 	src := `

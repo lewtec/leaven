@@ -204,6 +204,11 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 	case *types.StructType:
 		var fields []jen.Code
 		for i, field := range t.Fields {
+			// Drop LLVM ZSTs (empty structs / PhantomData). Go struct{}
+			// still takes space in arrays and shifts later fields; LLVM size is 0.
+			if isZeroSizeType(field) {
+				continue
+			}
 			var fieldType *jen.Statement
 			var err error
 			if t.Packed && packedMixesPtrAndInt(t) {
@@ -226,7 +231,11 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error converting type of field %d: %w", i, err)
 			}
+			// Keep LLVM field index in the name (F0, F2, …) so GEP .Fi still works.
 			fields = append(fields, jen.Id(fieldName(i)).Add(fieldType))
+		}
+		if len(fields) == 0 {
+			return jen.Struct(), nil
 		}
 		return jen.Struct(fields...), nil
 
@@ -437,6 +446,137 @@ func i1VectorLen(t types.Type) (n uint64, ok bool) {
 func isI1Vector(t types.Type) bool {
 	_, ok := i1VectorLen(t)
 	return ok
+}
+
+// isZeroSizeType reports whether t has LLVM ABI size 0 (empty struct, [0 x T]).
+func isZeroSizeType(t types.Type) bool {
+	sz, err := llvmTypeSize(t)
+	return err == nil && sz == 0
+}
+
+// llvmFieldOffset is the ABI byte offset of field i in st.
+func llvmFieldOffset(st *types.StructType, i int64) (int64, error) {
+	if i < 0 || int(i) >= len(st.Fields) {
+		return 0, fmt.Errorf("%w: field %d", errUnsupportedIndexType, i)
+	}
+	var off int64
+	for j := int64(0); j < i; j++ {
+		fs, fa, err := llvmSizeAlign(st.Fields[j])
+		if err != nil {
+			return 0, err
+		}
+		if !st.Packed && fa > 1 {
+			off = alignUp(off, fa)
+		}
+		off += fs
+	}
+	if !st.Packed {
+		_, fa, err := llvmSizeAlign(st.Fields[i])
+		if err != nil {
+			return 0, err
+		}
+		if fa > 1 {
+			off = alignUp(off, fa)
+		}
+	}
+	return off, nil
+}
+
+// llvmTypeSize is the ABI size of t in bytes under the default x86_64
+// System V layout (matches rustc/clang Linux IR without a custom DL).
+func llvmTypeSize(t types.Type) (int64, error) {
+	sz, _, err := llvmSizeAlign(t)
+	return sz, err
+}
+
+func alignUp(off, align int64) int64 {
+	if align <= 1 {
+		return off
+	}
+	return (off + align - 1) / align * align
+}
+
+func llvmSizeAlign(t types.Type) (size, align int64, err error) {
+	switch t := t.(type) {
+	case *types.IntType:
+		switch {
+		case t.BitSize <= 8:
+			return 1, 1, nil
+		case t.BitSize <= 16:
+			return 2, 2, nil
+		case t.BitSize <= 32:
+			return 4, 4, nil
+		case t.BitSize <= 64:
+			return 8, 8, nil
+		case t.BitSize <= 128:
+			return 16, 16, nil
+		default:
+			b := (int64(t.BitSize) + 7) / 8
+			return b, 8, nil
+		}
+	case *types.FloatType:
+		switch t.Kind {
+		case types.FloatKindFloat:
+			return 4, 4, nil
+		case types.FloatKindDouble:
+			return 8, 8, nil
+		case types.FloatKindX86_FP80:
+			return 16, 16, nil
+		default:
+			return 0, 0, fmt.Errorf("%w: %v", errUnsupportedFloatType, t.Kind)
+		}
+	case *types.PointerType:
+		return 8, 8, nil
+	case *types.FuncType:
+		return 8, 8, nil
+	case *types.ArrayType:
+		es, ea, err := llvmSizeAlign(t.ElemType)
+		if err != nil {
+			return 0, 0, err
+		}
+		return int64(t.Len) * es, ea, nil
+	case *types.VectorType:
+		if n, ok := i1VectorLen(t); ok {
+			// <N x i1> packs to ceil(N/8) bytes in memory forms.
+			b := (int64(n) + 7) / 8
+			if b == 0 {
+				b = 1
+			}
+			return b, 1, nil
+		}
+		es, ea, err := llvmSizeAlign(t.ElemType)
+		if err != nil {
+			return 0, 0, err
+		}
+		return int64(t.Len) * es, ea, nil
+	case *types.StructType:
+		if len(t.Fields) == 0 {
+			return 0, 1, nil
+		}
+		var off, maxA int64 = 0, 1
+		for _, f := range t.Fields {
+			fs, fa, err := llvmSizeAlign(f)
+			if err != nil {
+				return 0, 0, err
+			}
+			if fa > maxA {
+				maxA = fa
+			}
+			if !t.Packed && fa > 1 {
+				off = alignUp(off, fa)
+			}
+			off += fs
+		}
+		if !t.Packed && maxA > 1 {
+			off = alignUp(off, maxA)
+		}
+		if off == 0 {
+			return 0, 1, nil
+		}
+		return off, maxA, nil
+	default:
+		return 0, 0, fmt.Errorf("%w: size of %T", errUnsupportedType, t)
+	}
 }
 
 // hasPointers returns whether t contains pointers.

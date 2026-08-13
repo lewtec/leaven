@@ -262,11 +262,9 @@ func formatExpr(v value.Value) (expr, error) {
 		return addrExpr(jen.Id(name)), nil
 
 	case value.Named:
-		name := VariableName(v)
-		if c, ok := namedRef(name); ok {
-			return val(c), nil
-		}
-		return ident(name), nil
+		// Locals/params keep their VariableName. namedRef is only for
+		// globals/funcs (e.g. @read → libc.Read); a local %read must not.
+		return ident(VariableName(v)), nil
 
 	case *ir.Arg:
 		return formatExpr(v.Value)

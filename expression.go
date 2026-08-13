@@ -56,6 +56,13 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if err != nil {
 		return expr{}, err
 	}
+	// Element stride must use LLVM ABI size, not Go sizeof. Nested ZST
+	// fields (Rust newtypes / PhantomData as struct{}) inflate Go structs
+	// (e.g. OsString nest 40 vs LLVM 24) and break argv/Vec GEPs.
+	elemSize, err := llvmTypeSize(elemType)
+	if err != nil {
+		return expr{}, err
+	}
 
 	var result *jen.Statement
 	if zeroFirst && srcExpr.base != nil && len(indices) > 1 {
@@ -68,8 +75,12 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 				return expr{}, err
 			}
 			base = ptrCast(ptrTyp(telem), base)
-		} else {
+		} else if len(indices) > 1 {
+			// Field GEPs need a typed *T for .F0 chains.
 			base = ptrCast(ptrTyp(et), base)
+		} else {
+			// Pure element GEP: byte stride with LLVM size.
+			base = ptrCast(jen.Op("*").Byte(), base)
 		}
 		if zeroFirst {
 			result = base
@@ -78,7 +89,13 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating first index (%v): %w", firstIndex, err)
 			}
-			result = libc("AddPointer").Types(et).Call(base, jen.Int().Call(idx))
+			if len(indices) > 1 {
+				result = libc("AddPointer").Types(et).Call(base, jen.Int().Call(idx))
+			} else {
+				// (*byte)(p) + idx*elemSize
+				off := jen.Int().Call(idx).Op("*").Lit(int(elemSize))
+				result = libc("AddPointer").Types(jen.Byte()).Call(base, off)
+			}
 		}
 	}
 
@@ -103,9 +120,29 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if !ok {
 				return expr{}, fmt.Errorf("%w: %v %T", errNonConstantStructIdx, index, index)
 			}
-			result = jen.Add(result).Dot(fieldNameU(ci.X.Uint64()))
-			currentType = ct.Fields[ci.X.Int64()]
-			takeAddress = true
+			fi := ci.X.Int64()
+			if fi < 0 || int(fi) >= len(ct.Fields) {
+				return expr{}, fmt.Errorf("%w: field %d of %v", errUnsupportedIndexType, fi, ct)
+			}
+			currentType = ct.Fields[fi]
+			if isZeroSizeType(currentType) {
+				// ZST omitted from Go struct; GEP address = base + ABI offset.
+				off, err := llvmFieldOffset(ct, fi)
+				if err != nil {
+					return expr{}, err
+				}
+				var base *jen.Statement
+				if takeAddress {
+					base = ptrCast(jen.Op("*").Byte(), unsafePtr(addrOf(result)))
+				} else {
+					base = ptrCast(jen.Op("*").Byte(), unsafePtr(result))
+				}
+				result = libc("AddPointer").Types(jen.Byte()).Call(base, jen.Lit(int(off)))
+				takeAddress = false
+			} else {
+				result = jen.Add(result).Dot(fieldNameU(ci.X.Uint64()))
+				takeAddress = true
+			}
 
 		default:
 			return expr{}, fmt.Errorf("%w: %v", errUnsupportedIndexType, currentType)
@@ -135,7 +172,7 @@ func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []val
 	if err != nil {
 		return expr{}, err
 	}
-	et, err := TypeSpec(elemType)
+	elemSize, err := llvmTypeSize(elemType)
 	if err != nil {
 		return expr{}, err
 	}
@@ -143,11 +180,9 @@ func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []val
 	elems := make([]jen.Code, n)
 	for i := int64(0); i < n; i++ {
 		// Fresh base each lane — jennifer Statements are mutable builders.
-		base := jen.Parens(ptrTyp(et)).Call(jen.Add(srcExpr))
-		elems[i] = unsafePtr(libc("AddPointer").Types(et).Call(
-			base,
-			jen.Int().Call(jen.Add(idxExpr).Index(litUntyped(i))),
-		))
+		base := jen.Parens(jen.Op("*").Byte()).Call(jen.Add(srcExpr))
+		off := jen.Int().Call(jen.Add(idxExpr).Index(litUntyped(i))).Op("*").Lit(int(elemSize))
+		elems[i] = unsafePtr(libc("AddPointer").Types(jen.Byte()).Call(base, off))
 	}
 	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
@@ -170,7 +205,7 @@ func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *
 	if err != nil {
 		return expr{}, err
 	}
-	et, err := TypeSpec(elemType)
+	elemSize, err := llvmTypeSize(elemType)
 	if err != nil {
 		return expr{}, err
 	}
@@ -183,9 +218,10 @@ func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *
 		if idxVec {
 			off = jen.Add(idxExpr).Index(litUntyped(i))
 		}
-		elems[i] = unsafePtr(libc("AddPointer").Types(et).Call(
-			jen.Parens(ptrTyp(et)).Call(lane),
-			jen.Int().Call(off),
+		byteOff := jen.Int().Call(off).Op("*").Lit(int(elemSize))
+		elems[i] = unsafePtr(libc("AddPointer").Types(jen.Byte()).Call(
+			jen.Parens(jen.Op("*").Byte()).Call(lane),
+			byteOff,
 		))
 	}
 	if len(indices) > 1 {
