@@ -67,7 +67,7 @@ void DeleteTree(treeNode* tree)
 } /* DeleteTree() */
 
 
-int test_main()
+int main()
 {
     unsigned   N, depth, minDepth, maxDepth, stretchDepth;
     treeNode   *stretchTree, *longLivedTree, *tempTree;

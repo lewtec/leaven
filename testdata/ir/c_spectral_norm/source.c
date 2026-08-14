@@ -34,7 +34,7 @@ void eval_At_times_u(int N, const double u[], double Au[])
 void eval_AtA_times_u(int N, const double u[], double AtAu[])
 { double v[N]; eval_A_times_u(N,u,v); eval_At_times_u(N,v,AtAu); }
 
-int test_main()
+int main()
 {
   int i;
   const int N = 2000;

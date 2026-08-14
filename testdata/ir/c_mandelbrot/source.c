@@ -12,7 +12,7 @@
 
 #include<stdio.h>
 
-int test_main ()
+int main()
 {
     int w, h, bit_num = 0;
     char byte_acc = 0;

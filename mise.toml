@@ -31,10 +31,6 @@ run = "go run ./internal/genir -check"
 description = "Write testdata/ir/*/input.22.ll with clang 22 (keeps input.14.ll)"
 run = "go run ./internal/genir -c conda:clang@22.1.8 -cxx conda:clangxx@22.1.8"
 
-[tasks."test:live"]
-description = "C vs leaven differential (needs clang); -v lists fixtures"
-run = "go test -tags=live -v -count=1 -timeout 10m -skip TestAssimilate ./..."
-
 [tasks."test:csmith"]
 description = "Csmith smoke: known-good seed=1"
 run = "go test -tags=csmith -count=1 -timeout 10m -run 'TestCsmithFixedSeeds/seed=1$'"

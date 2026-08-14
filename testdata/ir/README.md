@@ -42,5 +42,4 @@ Skip generation when the compiler cannot emit the pattern. Put `leaven:hand-ir` 
 
 ```bash
 go test ./...
-mise run test:live    # optional C vs Go; needs clang
 ```
