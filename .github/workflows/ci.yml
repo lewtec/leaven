@@ -25,8 +25,8 @@ jobs:
       - name: Set up tools (mise)
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 
-      - name: Integration tests
-        run: mise run test:live
+      - name: IR fixtures
+        run: mise run test
 
       - name: Csmith smoke (seed=1)
         run: mise run test:csmith
