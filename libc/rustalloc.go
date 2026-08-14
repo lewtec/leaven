@@ -3,10 +3,11 @@ package libc
 import (
 	"math"
 	"math/bits"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 // RustAlloc is __rust_alloc(size, align) and C++ operator new.
@@ -139,19 +140,69 @@ func UMulWithOverflowU64(a, b int64) struct {
 	}{int64(lo), hi != 0}
 }
 
+// Linux statx(2) dirfd/flags and the stx_size field rustc FileAttr reads.
+const (
+	statxAtFDCWD     = -100
+	statxAtEmptyPath = 0x1000
+	statxAtNoFollow  = 0x100
+	statxSizeOff     = 40
+)
+
 // Statx is Linux statx(2). rustc std FileAttr declares
 // `extern_weak ... @statx` and calls it when the symbol exists.
+// Fills Linux statx_t (stx_size at offset 40) from os.FileInfo.
 func Statx(dirfd int32, pathname *byte, flags int32, mask int32, buf *byte) int32 {
 	if buf == nil {
 		return -1
 	}
+	fi, err := statxInfo(dirfd, pathname, flags)
+	if err != nil {
+		return -1
+	}
+	Memset(buf, 0, 256)
+	Store[uint64](Ptr(buf), statxSizeOff, uint64(fi.Size()))
+	return 0
+}
+
+func statxInfo(dirfd int32, pathname *byte, flags int32) (os.FileInfo, error) {
 	path := ""
 	if pathname != nil {
 		path = GoString(pathname)
 	}
-	st := As[unix.Statx_t](Ptr(buf))
-	if err := unix.Statx(int(dirfd), path, int(flags), int(uint32(mask)), st); err != nil {
-		return -1
+	if flags&statxAtEmptyPath != 0 && path == "" {
+		return statxFd(dirfd)
 	}
-	return 0
+	if path == "" {
+		return nil, os.ErrInvalid
+	}
+	if !filepath.IsAbs(path) && dirfd != statxAtFDCWD {
+		if dir, err := statxFdName(dirfd); err == nil {
+			path = filepath.Join(dir, path)
+		}
+	}
+	if flags&statxAtNoFollow != 0 {
+		return os.Lstat(path)
+	}
+	return os.Stat(path)
+}
+
+func statxFd(fd int32) (os.FileInfo, error) {
+	if f := fdGet(fd); f != nil {
+		return f.Stat()
+	}
+	f := os.NewFile(uintptr(fd), "")
+	if f == nil {
+		return nil, os.ErrInvalid
+	}
+	// NewFile takes ownership; we only Stat. Drop the finalizer so GC
+	// does not close the caller's fd.
+	runtime.SetFinalizer(f, nil)
+	return f.Stat()
+}
+
+func statxFdName(fd int32) (string, error) {
+	if f := fdGet(fd); f != nil {
+		return f.Name(), nil
+	}
+	return "", os.ErrInvalid
 }

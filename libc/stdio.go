@@ -65,8 +65,9 @@ func PthreadGetattrNp(thread int64, attr *byte) int32 {
 func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 	_ = attr
 	if stackaddr != nil {
-		// Fake stack base.
-		Store(Ptr(stackaddr), 0, unsafe.Pointer(uintptr(0x7fff00000000)))
+		// High dummy address that fits in 32- and 64-bit uintptr.
+		const base = uintptr(1) << (8*unsafe.Sizeof(uintptr(0)) - 16)
+		Store(Ptr(stackaddr), 0, unsafe.Pointer(base))
 	}
 	if stacksize != nil {
 		Store[uint64](Ptr(stacksize), 0, 8<<20) // 8 MiB
