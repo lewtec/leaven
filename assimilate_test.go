@@ -71,7 +71,6 @@ func testAssimilateRhai(t *testing.T) {
 	env := append(os.Environ(),
 		"CC="+clang,
 		"CXX="+clangxx,
-		"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="+clang,
 		"RUSTFLAGS=-C debuginfo=0 -C linker="+clang+" -C link-arg=--sysroot="+sysroot+" -C link-arg=-L"+libdir,
 	)
 
@@ -460,8 +459,12 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 	t.Helper()
 	clang = miseWhich(t, "clang", "conda:clang@22.1.8")
 	prefix := filepath.Dir(filepath.Dir(clang))
-	sysroot = filepath.Join(prefix, "x86_64-conda-linux-gnu", "sysroot")
 	libdir = filepath.Join(prefix, "lib")
+	matches, err := filepath.Glob(filepath.Join(prefix, "*-conda-*-gnu", "sysroot"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("conda sysroot under %s: %v", prefix, err)
+	}
+	sysroot = matches[0]
 	return clang, sysroot, libdir
 }
 

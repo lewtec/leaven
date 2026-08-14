@@ -6,12 +6,16 @@ import (
 )
 
 // Itanium type_info vtables. User IR stores GEP(@VT, 2) as the type_info
-// vptr. DynamicCast compares that word to identify class / si / vmi.
+// vptr (byte offset 16). Slots are 8 bytes so that GEP matches x86_64 IR
+// on 32-bit GOARCH.
 var (
-	ClassTypeInfoVT    [4]unsafe.Pointer
-	SIClassTypeInfoVT  [4]unsafe.Pointer
-	VMIClassTypeInfoVT [4]unsafe.Pointer
+	ClassTypeInfoVT    [4]uint64
+	SIClassTypeInfoVT  [4]uint64
+	VMIClassTypeInfoVT [4]uint64
 )
+
+// abiPtr is the LLVM pointer size in the IR we consume (x86_64).
+const abiPtr = 8
 
 const (
 	tiKindUnknown = iota
@@ -65,10 +69,14 @@ func invokeCxa(fn, arg *byte) {
 	f(Ptr(arg))
 }
 
-func classTypeInfoVptr() unsafe.Pointer   { return Ptr(&ClassTypeInfoVT[2]) }
-func siClassTypeInfoVptr() unsafe.Pointer { return Ptr(&SIClassTypeInfoVT[2]) }
+func classTypeInfoVptr() unsafe.Pointer {
+	return Off(Ptr(&ClassTypeInfoVT[0]), 2*abiPtr)
+}
+func siClassTypeInfoVptr() unsafe.Pointer {
+	return Off(Ptr(&SIClassTypeInfoVT[0]), 2*abiPtr)
+}
 func vmiClassTypeInfoVptr() unsafe.Pointer {
-	return Ptr(&VMIClassTypeInfoVT[2])
+	return Off(Ptr(&VMIClassTypeInfoVT[0]), 2*abiPtr)
 }
 
 func typeInfoKind(ti *byte) int {
@@ -102,10 +110,9 @@ func DynamicCast(src, srcType, dstType *byte, src2dst int64) *byte {
 	if vptr == nil {
 		panic("unsatisfied: __dynamic_cast")
 	}
-	ptrSize := int(unsafe.Sizeof(uintptr(0)))
-	offToTop := Load[int64](vptr, -2*ptrSize)
+	offToTop := Load[int64](vptr, -2*abiPtr)
 	whole := As[byte](Off(Ptr(src), int(offToTop)))
-	wholeTI := Load[*byte](vptr, -ptrSize)
+	wholeTI := Load[*byte](vptr, -abiPtr)
 	_ = src2dst // hint only; the walk is the ABI result
 	return walkType(whole, wholeTI, dstType)
 }
@@ -121,7 +128,7 @@ func walkType(obj, ti, want *byte) *byte {
 	case tiKindClass:
 		return nil
 	case tiKindSI:
-		base := Load[*byte](Ptr(ti), 2*int(unsafe.Sizeof(uintptr(0))))
+		base := Load[*byte](Ptr(ti), 2*abiPtr)
 		return walkType(obj, base, want)
 	case tiKindVMI:
 		return walkVMI(obj, ti, want)

@@ -137,7 +137,7 @@ func typeDefinitionIgnoringTagged(t types.Type) (*jen.Statement, error) {
 func TypeDefinition(t types.Type) (*jen.Statement, error) {
 	switch t := t.(type) {
 	case *types.ArrayType:
-		elemType, err := TypeSpec(t.ElemType)
+		elemType, err := memSlotType(t.ElemType)
 		if err != nil {
 			return nil, err
 		}
@@ -225,6 +225,10 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 				} else {
 					fieldType, err = TypeSpec(field)
 				}
+			} else if _, ok := field.(*types.PointerType); ok && !isTaggedPointerType(field) {
+				// LLVM ptr is 8 bytes (x86_64 IR). Go unsafe.Pointer is 4 on
+				// 386; keep the IR slot width so GEP *8 lands on the field.
+				fieldType = jen.Uint64()
 			} else if structFieldUintptr(t, field) {
 				// This slot may hold a tagged non-pointer (union payload or
 				// packed ptr+int). Do not put it in a GC pointer field.
@@ -489,6 +493,34 @@ func llvmFieldOffset(st *types.StructType, i int64) (int64, error) {
 		}
 	}
 	return off, nil
+}
+
+// memSlotType is the in-memory Go type for an LLVM value in an array or
+// struct. Pointer slots stay 8 bytes so x86_64 GEP strides match.
+func memSlotType(t types.Type) (*jen.Statement, error) {
+	if pt, ok := t.(*types.PointerType); ok && !isTaggedPointerType(pt) {
+		return jen.Uint64(), nil
+	}
+	return TypeSpec(t)
+}
+
+func isMemPtr(t types.Type) bool {
+	pt, ok := t.(*types.PointerType)
+	return ok && !isTaggedPointerType(pt)
+}
+
+func asMemSlotExpr(t types.Type, e *jen.Statement) *jen.Statement {
+	if isMemPtr(t) {
+		return jen.Uint64().Call(jen.Uintptr().Call(e))
+	}
+	return e
+}
+
+func fromMemSlotExpr(t types.Type, e *jen.Statement) *jen.Statement {
+	if isMemPtr(t) {
+		return emitUP(jen.Uintptr().Call(e))
+	}
+	return e
 }
 
 // llvmTypeSize is the ABI size of t in bytes under the default x86_64

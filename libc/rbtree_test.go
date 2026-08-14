@@ -6,6 +6,9 @@ import (
 )
 
 func TestRbNodeLayout(t *testing.T) {
+	if unsafe.Sizeof(uintptr(0)) != 8 {
+		t.Skip("rbNode overlay matches x86_64 libstdc++")
+	}
 	if unsafe.Offsetof(rbNode{}.color) != rbColorOff {
 		t.Fatalf("color")
 	}

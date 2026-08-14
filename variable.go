@@ -226,6 +226,23 @@ func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
 	return jen.Add(typ).Add(compositeValues(elems))
 }
 
+// formatMemSlot formats a value stored in an aggregate. LLVM ptr slots are
+// uint64 (8 bytes) so x86_64 GEP *8 is valid on 32-bit GOARCH.
+func formatMemSlot(c value.Value) (jen.Code, error) {
+	e, err := FormatValue(c)
+	if err != nil {
+		return nil, err
+	}
+	pt, ok := c.Type().(*types.PointerType)
+	if !ok || isTaggedPointerType(pt) {
+		return e, nil
+	}
+	if _, isNull := c.(*constant.Null); isNull {
+		return jen.Lit(0), nil
+	}
+	return jen.Uint64().Call(jen.Uintptr().Call(e)), nil
+}
+
 func fnPtrBitcast(from *jen.Statement) *jen.Statement {
 	return Sym(libc.FuncCode[func()]).Call(from)
 }
@@ -288,7 +305,7 @@ func formatExpr(v value.Value) (expr, error) {
 		}
 		elems := make([]jen.Code, len(v.Elems))
 		for i, c := range v.Elems {
-			e, err := FormatValue(c)
+			e, err := formatMemSlot(c)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating element %d (%v): %w", i, c, err)
 			}
@@ -503,7 +520,7 @@ func formatExpr(v value.Value) (expr, error) {
 		}
 		elems := make([]jen.Code, len(v.Fields))
 		for i, c := range v.Fields {
-			e, err := FormatValue(c)
+			e, err := formatMemSlot(c)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
 			}

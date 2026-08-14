@@ -107,7 +107,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			jen.If(jen.Op("!").Id(okName)).Block(
 				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
 			),
-			assign(name, jen.Add(ret).Values(jen.Id(oldName), jen.Id(okName))),
+			assign(name, jen.Add(ret).Values(asMemSlotExpr(inst.Cmp.Type(), jen.Id(oldName)), jen.Id(okName))),
 		}, nil
 
 	case *ir.InstAtomicRMW:
@@ -307,7 +307,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), expr)), nil
+		return one(assign(VariableName(inst), fromMemSlotExpr(inst.Type(), expr))), nil
 
 	case *ir.InstInsertValue:
 		x, err := translateOp(inst.X, "aggregate")
@@ -324,7 +324,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		return []jen.Code{
 			assign(VariableName(inst), x),
-			jen.Add(dest).Op("=").Add(elem),
+			jen.Add(dest).Op("=").Add(asMemSlotExpr(inst.Elem.Type(), elem)),
 		}, nil
 
 	case *ir.InstFAdd:

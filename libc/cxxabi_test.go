@@ -25,22 +25,22 @@ func TestDynamicCastSI(t *testing.T) {
 	baseName := append([]byte("4Base"), 0)
 	derName := append([]byte("7Derived"), 0)
 	var baseTI struct {
-		vptr unsafe.Pointer
-		name *byte
+		vptr uint64
+		name uint64
 	}
-	baseTI.vptr = unsafe.Pointer(&ClassTypeInfoVT[2])
-	baseTI.name = &baseName[0]
+	baseTI.vptr = uint64(uintptr(classTypeInfoVptr()))
+	baseTI.name = uint64(uintptr(unsafe.Pointer(&baseName[0])))
 	var derTI struct {
-		vptr unsafe.Pointer
-		name *byte
-		base unsafe.Pointer
+		vptr uint64
+		name uint64
+		base uint64
 	}
-	derTI.vptr = unsafe.Pointer(&SIClassTypeInfoVT[2])
-	derTI.name = &derName[0]
-	derTI.base = unsafe.Pointer(&baseTI)
+	derTI.vptr = uint64(uintptr(siClassTypeInfoVptr()))
+	derTI.name = uint64(uintptr(unsafe.Pointer(&derName[0])))
+	derTI.base = uint64(uintptr(unsafe.Pointer(&baseTI)))
 
-	var vt [3]unsafe.Pointer
-	vt[1] = unsafe.Pointer(&derTI)
+	var vt [3]uint64
+	vt[1] = uint64(uintptr(unsafe.Pointer(&derTI)))
 	var obj struct{ vptr unsafe.Pointer }
 	obj.vptr = unsafe.Pointer(&vt[2])
 
@@ -49,8 +49,8 @@ func TestDynamicCastSI(t *testing.T) {
 		t.Fatalf("downcast %p want %p", got, &obj)
 	}
 
-	var baseVT [3]unsafe.Pointer
-	baseVT[1] = unsafe.Pointer(&baseTI)
+	var baseVT [3]uint64
+	baseVT[1] = uint64(uintptr(unsafe.Pointer(&baseTI)))
 	var baseObj struct{ vptr unsafe.Pointer }
 	baseObj.vptr = unsafe.Pointer(&baseVT[2])
 	if DynamicCast((*byte)(unsafe.Pointer(&baseObj)), (*byte)(unsafe.Pointer(&baseTI)), (*byte)(unsafe.Pointer(&derTI)), 0) != nil {
@@ -59,9 +59,9 @@ func TestDynamicCastSI(t *testing.T) {
 }
 
 func TestDynamicCastUnknownKindPanics(t *testing.T) {
-	var srcTI, dstTI [2]unsafe.Pointer
-	var vt [3]unsafe.Pointer
-	vt[1] = unsafe.Pointer(&srcTI[0])
+	var srcTI, dstTI [2]uint64
+	var vt [3]uint64
+	vt[1] = uint64(uintptr(unsafe.Pointer(&srcTI[0])))
 	var obj struct{ vptr unsafe.Pointer }
 	obj.vptr = unsafe.Pointer(&vt[2])
 	defer func() {

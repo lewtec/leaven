@@ -4,7 +4,7 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "[4]unsafe.Pointer",
+        "[4]uint64",
         "libc.Ptr(&str)",
         "libc.Ptr(&typeinfo)",
         "var p unsafe.Pointer = libc.Ptr(&str)",

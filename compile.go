@@ -234,9 +234,9 @@ func vttStandin(name string, t types.Type) *jen.Statement {
 	}
 	elems := make([]jen.Code, n)
 	for i := range elems {
-		elems[i] = Sym(libc.StandinVptr).Call()
+		elems[i] = jen.Uint64().Call(jen.Uintptr().Call(Sym(libc.StandinVptr).Call()))
 	}
-	arr := jen.Index(litUntyped(int64(n))).Qual("unsafe", "Pointer").Values(elems...)
+	arr := jen.Index(litUntyped(int64(n))).Uint64().Values(elems...)
 	if wrap {
 		return jen.Values(arr)
 	}
