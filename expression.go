@@ -15,7 +15,7 @@ import (
 // indexing into a struct/array or as AddPointer's type argument.
 func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (expr, error) {
 	if vt, ok := src.Type().(*types.VectorType); ok {
-		return vectorGEP(elemType, src, indices, vt)
+		return vectorGEP(vecGEP{elem: elemType, src: src, indices: indices, n: vt.Len})
 	}
 	// Scalar ptr + vector index → vector of pointers (rustc stride loops).
 	if len(indices) > 0 {
@@ -24,7 +24,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			idx0 = ci.Constant
 		}
 		if ivt, ok := idx0.Type().(*types.VectorType); ok {
-			return scalarPtrVectorIndexGEP(elemType, src, indices, ivt)
+			return scalarPtrVectorIndexGEP(vecGEP{elem: elemType, src: src, indices: indices, n: ivt.Len})
 		}
 	}
 	if _, ok := src.Type().(*types.PointerType); !ok {
@@ -154,16 +154,23 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	return val(emitPtr(result)), nil
 }
 
+type vecGEP struct {
+	elem    types.Type
+	src     value.Value
+	indices []value.Value
+	n       uint64
+}
+
 // scalarPtrVectorIndexGEP is getelementptr T, ptr %p, <N x iK> %idx.
-func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []value.Value, ivt *types.VectorType) (expr, error) {
-	if len(indices) != 1 {
+func scalarPtrVectorIndexGEP(g vecGEP) (expr, error) {
+	if len(g.indices) != 1 {
 		return expr{}, fmt.Errorf("%w: vector index gep extra indices", errUnsupportedIndexType)
 	}
-	srcExpr, err := FormatValue(src)
+	srcExpr, err := FormatValue(g.src)
 	if err != nil {
 		return expr{}, err
 	}
-	idx := indices[0]
+	idx := g.indices[0]
 	if ci, ok := idx.(*constant.Index); ok {
 		idx = ci.Constant
 	}
@@ -171,11 +178,11 @@ func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []val
 	if err != nil {
 		return expr{}, err
 	}
-	elemSize, err := llvmTypeSize(elemType)
+	elemSize, err := llvmTypeSize(g.elem)
 	if err != nil {
 		return expr{}, err
 	}
-	n := int64(ivt.Len)
+	n := int64(g.n)
 	elems := make([]jen.Code, n)
 	for i := int64(0); i < n; i++ {
 		// Fresh src each lane — jennifer Statements are mutable builders.
@@ -187,15 +194,15 @@ func scalarPtrVectorIndexGEP(elemType types.Type, src value.Value, indices []val
 
 // vectorGEP is getelementptr on a vector of pointers. Each lane is offset
 // by the (broadcast) index in units of elemType.
-func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *types.VectorType) (expr, error) {
-	if len(indices) == 0 {
+func vectorGEP(g vecGEP) (expr, error) {
+	if len(g.indices) == 0 {
 		return expr{}, fmt.Errorf("%w: no indices", errUnsupportedIndexType)
 	}
-	srcExpr, err := FormatValue(src)
+	srcExpr, err := FormatValue(g.src)
 	if err != nil {
 		return expr{}, err
 	}
-	idx := indices[0]
+	idx := g.indices[0]
 	if ci, ok := idx.(*constant.Index); ok {
 		idx = ci.Constant
 	}
@@ -203,12 +210,12 @@ func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *
 	if err != nil {
 		return expr{}, err
 	}
-	elemSize, err := llvmTypeSize(elemType)
+	elemSize, err := llvmTypeSize(g.elem)
 	if err != nil {
 		return expr{}, err
 	}
 	_, idxVec := idx.Type().(*types.VectorType)
-	n := int64(vt.Len)
+	n := int64(g.n)
 	elems := make([]jen.Code, n)
 	for i := int64(0); i < n; i++ {
 		lane := jen.Add(srcExpr).Index(litUntyped(i))
@@ -219,7 +226,7 @@ func vectorGEP(elemType types.Type, src value.Value, indices []value.Value, vt *
 		byteOff := jen.Int().Call(off).Op("*").Lit(int(elemSize))
 		elems[i] = emitOff(lane, byteOff)
 	}
-	if len(indices) > 1 {
+	if len(g.indices) > 1 {
 		return expr{}, fmt.Errorf("%w: vector gep extra indices", errUnsupportedIndexType)
 	}
 	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
@@ -299,19 +306,25 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	return fromMemSlotExpr(elem, slot), nil
 }
 
-func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
+type storeDst struct {
+	dst  expr
+	val  value.Value
+	elem types.Type
+}
+
+func typedStore(d storeDst, src jen.Code) (*jen.Statement, error) {
 	// Named scalar ptr cell (global/alloca) is unsafe.Pointer. Overlay
 	// and aggregate slots are uint64.
-	scalarCell := dst.base != nil && wholeVarAccess(dstVal, elem) && isScalarPtrObject(dstVal)
-	if isTaggedPointerType(elem) {
+	scalarCell := d.dst.base != nil && wholeVarAccess(d.val, d.elem) && isScalarPtrObject(d.val)
+	if isTaggedPointerType(d.elem) {
 		src = ptrToUint(src)
-	} else if isMemPtr(elem) && !scalarCell {
-		src = asMemSlotCode(elem, src)
+	} else if isMemPtr(d.elem) && !scalarCell {
+		src = asMemSlotCode(d.elem, src)
 	}
-	if dst.base != nil && wholeVarAccess(dstVal, elem) {
-		return dst.store(src), nil
+	if d.dst.base != nil && wholeVarAccess(d.val, d.elem) {
+		return d.dst.store(src), nil
 	}
-	slot, err := overlayMem(dst.code, dstVal.Type(), elem)
+	slot, err := overlayMem(d.dst.code, d.val.Type(), d.elem)
 	if err != nil {
 		return nil, err
 	}

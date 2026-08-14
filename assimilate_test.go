@@ -36,12 +36,16 @@ func testAssimilateCsmith(t *testing.T) {
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
 	// Debug keeps -g; v22 skips #dbg_* records.
-	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, []string{
-		"-DCMAKE_BUILD_TYPE=Debug",
-		"-DCMAKE_C_FLAGS=-O0",
-		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
+	cmakeConfigure(t, cmakeCfg{
+		cmake: cmake, ninja: ninja, clang: clang, clangxx: clangxx, m4: m4,
+		src: root, dst: build,
+		extra: []string{
+			"-DCMAKE_BUILD_TYPE=Debug",
+			"-DCMAKE_C_FLAGS=-O0",
+			"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
+		},
 	})
-	cmakeBuild(t, cmake, ninja, build, "csmith")
+	cmakeBuild(t, cmakeBuildCfg{cmake: cmake, ninja: ninja, dir: build, targets: []string{"csmith"}})
 
 	native := filepath.Join(build, "src", "csmith")
 	if _, err := os.Stat(native); err != nil {
@@ -49,7 +53,7 @@ func testAssimilateCsmith(t *testing.T) {
 	}
 
 	ll := filepath.Join(build, "csmith.ll")
-	emitIRFromCompileCommands(t, build, ll, link)
+	emitIRFromCompileCommands(t, emitIRCfg{build: build, outLL: ll, link: link})
 	// Seed 1 is the small smoke case. Seed 42 emits ~50× more C (multi-func,
 	// deep blocks, bitfields, pointer chains) — still the generator binary,
 	// but exercises more of its IR paths under leaven.
@@ -59,7 +63,7 @@ func testAssimilateCsmith(t *testing.T) {
 	} {
 		args := args
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			crossCheck(t, native, ll, args)
+			crossCheck(t, checkCfg{native: native, ll: ll, args: args})
 		})
 	}
 }
@@ -159,8 +163,8 @@ func testAssimilateRhai(t *testing.T) {
 			if err := os.WriteFile(script, []byte(p.src), 0644); err != nil {
 				t.Fatal(err)
 			}
-			want := runTimeout(t, 30*time.Second, native, script)
-			got := runTimeout(t, 3*time.Minute, bin, script)
+			want := runTimeout(t, runCfg{d: 30 * time.Second, bin: native, args: []string{script}})
+			got := runTimeout(t, runCfg{d: 3 * time.Minute, bin: bin, args: []string{script}})
 			if !bytes.Equal(want, got) {
 				t.Fatalf("native vs leaven mismatch\n---- native (%d) ----\n%s\n---- leaven (%d) ----\n%s",
 					len(want), tailBytes(want, 1500), len(got), tailBytes(got, 1500))
@@ -177,42 +181,57 @@ type compileCommand struct {
 	Output    string   `json:"output"`
 }
 
-func cmakeConfigure(t *testing.T, cmake, ninja, clang, clangxx, m4, src, dst string, extra []string) {
+type cmakeCfg struct {
+	cmake, ninja, clang, clangxx, m4 string
+	src, dst                         string
+	extra                            []string
+}
+
+type cmakeBuildCfg struct {
+	cmake, ninja, dir string
+	targets           []string
+}
+
+type emitIRCfg struct {
+	build, outLL, link string
+}
+
+func cmakeConfigure(t *testing.T, cfg cmakeCfg) {
 	t.Helper()
 	args := []string{
-		"-S", src, "-B", dst,
+		"-S", cfg.src, "-B", cfg.dst,
 		"-G", "Ninja",
 		"-DCMAKE_BUILD_TYPE=Release",
 		"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-		"-DCMAKE_C_COMPILER=" + clang,
-		"-DCMAKE_CXX_COMPILER=" + clangxx,
-		"-DCMAKE_MAKE_PROGRAM=" + ninja,
-		"-DM4=" + m4,
+		"-DCMAKE_C_COMPILER=" + cfg.clang,
+		"-DCMAKE_CXX_COMPILER=" + cfg.clangxx,
+		"-DCMAKE_MAKE_PROGRAM=" + cfg.ninja,
+		"-DM4=" + cfg.m4,
 	}
-	args = append(args, extra...)
-	cmd := exec.Command(cmake, args...)
-	cmd.Env = append(os.Environ(), "CC="+clang, "CXX="+clangxx)
+	args = append(args, cfg.extra...)
+	cmd := exec.Command(cfg.cmake, args...)
+	cmd.Env = append(os.Environ(), "CC="+cfg.clang, "CXX="+cfg.clangxx)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cmake configure: %v\n%s", err, tailBytes(out, 4000))
 	}
 }
 
-func cmakeBuild(t *testing.T, cmake, ninja, dir string, targets ...string) {
+func cmakeBuild(t *testing.T, cfg cmakeBuildCfg) {
 	t.Helper()
-	args := []string{"--build", dir, "--parallel"}
-	for _, tgt := range targets {
+	args := []string{"--build", cfg.dir, "--parallel"}
+	for _, tgt := range cfg.targets {
 		args = append(args, "--target", tgt)
 	}
-	cmd := exec.Command(cmake, args...)
-	cmd.Env = append(os.Environ(), "CMAKE_MAKE_PROGRAM="+ninja)
+	cmd := exec.Command(cfg.cmake, args...)
+	cmd.Env = append(os.Environ(), "CMAKE_MAKE_PROGRAM="+cfg.ninja)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cmake --build: %v\n%s", err, tailBytes(out, 8000))
 	}
 }
 
-func emitIRFromCompileCommands(t *testing.T, build, outLL, llvmLink string) {
+func emitIRFromCompileCommands(t *testing.T, cfg emitIRCfg) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(build, "compile_commands.json"))
+	raw, err := os.ReadFile(filepath.Join(cfg.build, "compile_commands.json"))
 	if err != nil {
 		t.Fatalf("compile_commands.json: %v", err)
 	}
@@ -220,7 +239,7 @@ func emitIRFromCompileCommands(t *testing.T, build, outLL, llvmLink string) {
 	if err := json.Unmarshal(raw, &cmds); err != nil {
 		t.Fatalf("compile_commands.json: %v", err)
 	}
-	irDir := filepath.Join(build, "ll")
+	irDir := filepath.Join(cfg.build, "ll")
 	if err := os.MkdirAll(irDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -255,12 +274,12 @@ func emitIRFromCompileCommands(t *testing.T, build, outLL, llvmLink string) {
 	if len(lls) == 0 {
 		t.Fatalf("compile_commands.json had 0 C/C++ TUs")
 	}
-	linkArgs := append([]string{"-S", "-o", outLL}, lls...)
-	cmd := exec.Command(llvmLink, linkArgs...)
+	linkArgs := append([]string{"-S", "-o", cfg.outLL}, lls...)
+	cmd := exec.Command(cfg.link, linkArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("llvm-link %d TUs: %v\n%s", len(lls), err, tailBytes(out, 4000))
 	}
-	t.Logf("llvm-link %d TUs -> %s", len(lls), filepath.Base(outLL))
+	t.Logf("llvm-link %d TUs -> %s", len(lls), filepath.Base(cfg.outLL))
 }
 
 func withEmitLLVM(args []string, ll string) []string {
@@ -329,21 +348,32 @@ func splitQuoted(s string) []string {
 	return out
 }
 
-func crossCheck(t *testing.T, native, ll string, args []string) {
-	t.Helper()
-	want := runTimeout(t, 15*time.Second, native, args...)
+type checkCfg struct {
+	native, ll string
+	args       []string
+}
 
-	m, err := parseIRFile(ll)
+type runCfg struct {
+	d    time.Duration
+	bin  string
+	args []string
+}
+
+func crossCheck(t *testing.T, cfg checkCfg) {
+	t.Helper()
+	want := runTimeout(t, runCfg{d: 15 * time.Second, bin: cfg.native, args: cfg.args})
+
+	m, err := parseIRFile(cfg.ll)
 	if err != nil {
-		t.Fatalf("parse %s: %v\n%s", filepath.Base(ll), err, irSnippet(ll, err))
+		t.Fatalf("parse %s: %v\n%s", filepath.Base(cfg.ll), err, irSnippet(cfg.ll, err))
 	}
 	var buf bytes.Buffer
 	if err := Compile(&buf, m, "main"); err != nil {
-		t.Fatalf("compile %s: %v", filepath.Base(ll), err)
+		t.Fatalf("compile %s: %v", filepath.Base(cfg.ll), err)
 	}
 	src, err := format.Source(buf.Bytes())
 	if err != nil {
-		t.Fatalf("gofmt %s: %v", filepath.Base(ll), err)
+		t.Fatalf("gofmt %s: %v", filepath.Base(cfg.ll), err)
 	}
 
 	dir := t.TempDir()
@@ -363,7 +393,7 @@ func crossCheck(t *testing.T, native, ll string, args []string) {
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("go mod tidy: %v\n%s", err, tailBytes(out, 2000))
 	}
-	got := runGoDir(t, dir, args...)
+	got := runGoDir(t, dir, cfg.args...)
 	if !bytes.Equal(want, got) {
 		t.Fatalf("native vs leaven mismatch\n---- native (%d bytes) ----\n%s\n---- leaven (%d bytes) ----\n%s",
 			len(want), tailBytes(want, 2000), len(got), tailBytes(got, 2000))
@@ -395,28 +425,28 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
 	// -O0 csmith Go is much slower than native; seed=1 can exceed 30s.
-	return runTimeout(t, 3*time.Minute, bin, args...)
+	return runTimeout(t, runCfg{d: 3 * time.Minute, bin: bin, args: args})
 }
 
-func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byte {
+func runTimeout(t *testing.T, cfg runCfg) []byte {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(cfg.bin, cfg.args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("%s: %v", filepath.Base(bin), err)
+		t.Fatalf("%s: %v", filepath.Base(cfg.bin), err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, tailBytes(buf.Bytes(), 4000))
+			t.Fatalf("%s: %v\n%s", filepath.Base(cfg.bin), err, tailBytes(buf.Bytes(), 4000))
 		}
-	case <-time.After(d):
+	case <-time.After(cfg.d):
 		_ = cmd.Process.Kill()
-		t.Fatalf("%s timeout after %s\n%s", filepath.Base(bin), d, tailBytes(buf.Bytes(), 4000))
+		t.Fatalf("%s timeout after %s\n%s", filepath.Base(cfg.bin), cfg.d, tailBytes(buf.Bytes(), 4000))
 	}
 	return buf.Bytes()
 }

@@ -518,7 +518,7 @@ func writeFuncBody(g *jen.Group, fn *ir.Func, isGoMain bool) error {
 			}
 			normal, ok := term.NormalRetTarget.(*ir.Block)
 			if !ok {
-				return fmt.Errorf("invoke normal dest is %T", term.NormalRetTarget)
+				return fmt.Errorf("invoke normal dest is %T: %w", term.NormalRetTarget, errUnsupportedTerminator)
 			}
 			phis, err := PhiAssignments(b, normal)
 			if err != nil {

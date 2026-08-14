@@ -694,7 +694,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		st, err := typedStore(dest, inst.Dst, inst.Src.Type(), src)
+		st, err := typedStore(storeDst{dst: dest, val: inst.Dst, elem: inst.Src.Type()}, src)
 		if err != nil {
 			return nil, err
 		}
@@ -936,27 +936,33 @@ func icmpPredOp(pred enum.IPred) (op string, signed, unsigned bool, err error) {
 	}
 }
 
-func translateI128Bin(name, op string, x, y value.Value, ashr bool) ([]jen.Code, bool, error) {
-	bits, ok := wideBits(x.Type())
+type i128bin struct {
+	name, op string
+	x, y     value.Value
+	ashr     bool
+}
+
+func translateI128Bin(b i128bin) ([]jen.Code, bool, error) {
+	bits, ok := wideBits(b.x.Type())
 	if !ok {
-		bits, ok = wideBits(y.Type())
+		bits, ok = wideBits(b.y.Type())
 	}
 	if !ok {
 		return nil, false, nil
 	}
-	fn, ok := wideBinFunc(bits, op, ashr)
+	fn, ok := wideBinFunc(bits, b.op, b.ashr)
 	if !ok {
-		return nil, false, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
+		return nil, false, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, b.op)
 	}
-	xv, err := translateOp(x, "left operand")
+	xv, err := translateOp(b.x, "left operand")
 	if err != nil {
 		return nil, true, err
 	}
-	yv, err := translateOp(y, "right operand")
+	yv, err := translateOp(b.y, "right operand")
 	if err != nil {
 		return nil, true, err
 	}
-	return one(assign(name, fn.Call(xv, yv))), true, nil
+	return one(assign(b.name, fn.Call(xv, yv))), true, nil
 }
 
 func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
@@ -971,7 +977,7 @@ func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		}
 		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
 	}
-	if stmts, ok, err := translateI128Bin(VariableName(inst), b.op, b.x, b.y, false); ok {
+	if stmts, ok, err := translateI128Bin(i128bin{name: VariableName(inst), op: b.op, x: b.x, y: b.y}); ok {
 		return stmts, err
 	}
 	xv, err := translateOp(b.x, "left operand")
@@ -1170,41 +1176,48 @@ func asFilePtr(x jen.Code) *jen.Statement {
 	return emitAs(Qual[os.File](), x)
 }
 
-func libcCallArg(name string, i int, a value.Value, got jen.Code) *jen.Statement {
-	if _, ok := a.Type().(*types.PointerType); !ok {
-		if s, ok := got.(*jen.Statement); ok {
+type libcArg struct {
+	name string
+	i    int
+	a    value.Value
+	got  jen.Code
+}
+
+func libcCallArg(arg libcArg) *jen.Statement {
+	if _, ok := arg.a.Type().(*types.PointerType); !ok {
+		if s, ok := arg.got.(*jen.Statement); ok {
 			return s
 		}
-		return jen.Add(got)
+		return jen.Add(arg.got)
 	}
-	if isTaggedPointerType(a.Type()) {
-		got = emitUP(got)
+	if isTaggedPointerType(arg.a.Type()) {
+		arg.got = emitUP(arg.got)
 	}
-	switch name {
+	switch arg.name {
 	case "fprintf":
-		if i == 0 {
-			return asFilePtr(got)
+		if arg.i == 0 {
+			return asFilePtr(arg.got)
 		}
-		if i == 1 {
-			return asBytePtr(got)
+		if arg.i == 1 {
+			return asBytePtr(arg.got)
 		}
 	case "fputs":
-		if i == 0 {
-			return asBytePtr(got)
+		if arg.i == 0 {
+			return asBytePtr(arg.got)
 		}
-		if i == 1 {
-			return asFilePtr(got)
+		if arg.i == 1 {
+			return asFilePtr(arg.got)
 		}
 	case "fputc", "putc", "fclose":
-		if i == 1 || (name == "fclose" && i == 0) {
-			return asFilePtr(got)
+		if arg.i == 1 || (arg.name == "fclose" && arg.i == 0) {
+			return asFilePtr(arg.got)
 		}
 	case "fdopen":
-		if i == 1 {
-			return asBytePtr(got)
+		if arg.i == 1 {
+			return asBytePtr(arg.got)
 		}
 	}
-	return asBytePtr(got)
+	return asBytePtr(arg.got)
 }
 
 func calleeLLVMName(v value.Value) string {
@@ -1741,7 +1754,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if ref, ok := libraryFunctions[llvmName]; ok {
 			callee = ref.code()
 			for i, a := range inst.Args {
-				args[i] = libcCallArg(llvmName, i, a, args[i])
+				args[i] = libcCallArg(libcArg{name: llvmName, i: i, a: a, got: args[i]})
 			}
 			typedPtr = libcReturnsTypedPtr(llvmName)
 		} else if cxxNoopDtor(llvmName) {
@@ -1865,16 +1878,20 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 
 func atomicSwapFunc(t types.Type) (*jen.Statement, bool) {
 	// Go has no SwapInt8; libc CAS-loop on the holding word.
-	return atomicWordFunc(t, atomic.SwapPointer, libc.AtomicSwapI8, atomic.SwapInt32, atomic.SwapInt64)
+	return atomicWordFunc(t, atomicWord{ptr: atomic.SwapPointer, i8: libc.AtomicSwapI8, i32: atomic.SwapInt32, i64: atomic.SwapInt64})
 }
 
 func atomicCASFunc(t types.Type) (*jen.Statement, bool) {
-	return atomicWordFunc(t, atomic.CompareAndSwapPointer, libc.AtomicCASI8, atomic.CompareAndSwapInt32, atomic.CompareAndSwapInt64)
+	return atomicWordFunc(t, atomicWord{ptr: atomic.CompareAndSwapPointer, i8: libc.AtomicCASI8, i32: atomic.CompareAndSwapInt32, i64: atomic.CompareAndSwapInt64})
 }
 
-func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) {
+type atomicWord struct {
+	ptr, i8, i32, i64 any
+}
+
+func atomicWordFunc(t types.Type, w atomicWord) (*jen.Statement, bool) {
 	if _, ok := t.(*types.PointerType); ok {
-		return Sym(ptr).code(), true
+		return Sym(w.ptr).code(), true
 	}
 	it, ok := t.(*types.IntType)
 	if !ok {
@@ -1882,11 +1899,11 @@ func atomicWordFunc(t types.Type, ptr, i8, i32, i64 any) (*jen.Statement, bool) 
 	}
 	switch goIntBits(it.BitSize) {
 	case 8:
-		return Sym(i8).code(), true
+		return Sym(w.i8).code(), true
 	case 32:
-		return Sym(i32).code(), true
+		return Sym(w.i32).code(), true
 	case 64:
-		return Sym(i64).code(), true
+		return Sym(w.i64).code(), true
 	default:
 		return nil, false
 	}

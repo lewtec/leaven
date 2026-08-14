@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -118,7 +119,9 @@ func run(args []string) error {
 		if err := compileOne(cfg, f, dest); err != nil {
 			return fmt.Errorf("%s: %w", f.name, err)
 		}
-		_ = os.Remove(filepath.Join(f.dir, "input.ll"))
+		if err := os.Remove(filepath.Join(f.dir, "input.ll")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove leftover input.ll: %w", err)
+		}
 		regen++
 	}
 
@@ -306,9 +309,15 @@ func cxxIsystem(cfg config, f fixture) []string {
 		candidates = append(candidates, filepath.Join(filepath.Dir(real), ".."))
 	}
 	for _, c := range candidates {
-		matches, _ := filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "include", "c++"))
+		matches, err := filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "include", "c++"))
+		if err != nil {
+			continue
+		}
 		if len(matches) == 0 {
-			matches, _ = filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "*", "include", "c++"))
+			matches, err = filepath.Glob(filepath.Join(c, "lib", "gcc", "*", "*", "*", "include", "c++"))
+			if err != nil {
+				continue
+			}
 		}
 		if len(matches) == 0 {
 			continue
@@ -317,7 +326,8 @@ func cxxIsystem(cfg config, f fixture) []string {
 		triple := filepath.Join(inc, "x86_64-conda-linux-gnu")
 		if _, err := os.Stat(triple); err != nil {
 			// any * subdirectory
-			if ts, _ := filepath.Glob(filepath.Join(inc, "*-*")); len(ts) > 0 {
+			ts, err := filepath.Glob(filepath.Join(inc, "*-*"))
+			if err == nil && len(ts) > 0 {
 				triple = ts[0]
 			}
 		}
@@ -428,7 +438,7 @@ func moduleRoot() (string, error) {
 func sameFile(a, b string) (bool, error) {
 	da, err := os.ReadFile(a)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
 		return false, err

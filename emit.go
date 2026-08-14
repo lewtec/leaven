@@ -399,7 +399,10 @@ func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, err
 	toF, _ := to.(*types.FloatType)
 	fromI, _ := from.(*types.IntType)
 	toI, _ := to.(*types.IntType)
-	bits, _ := scalarBitSize(from)
+	bits, ok := scalarBitSize(from)
+	if !ok {
+		return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, from, to)
+	}
 	switch {
 	case fromF != nil && toI != nil:
 		switch bits {
