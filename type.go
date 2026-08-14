@@ -511,14 +511,21 @@ func isMemPtr(t types.Type) bool {
 
 func asMemSlotExpr(t types.Type, e *jen.Statement) *jen.Statement {
 	if isMemPtr(t) {
-		return jen.Uint64().Call(jen.Uintptr().Call(e))
+		return Sym(libc.PtrBits).Call(e)
+	}
+	return e
+}
+
+func asMemSlotCode(t types.Type, e jen.Code) jen.Code {
+	if isMemPtr(t) {
+		return Sym(libc.PtrBits).Call(e)
 	}
 	return e
 }
 
 func fromMemSlotExpr(t types.Type, e *jen.Statement) *jen.Statement {
 	if isMemPtr(t) {
-		return emitUP(jen.Uintptr().Call(e))
+		return Sym(libc.PtrFromBits).Call(e)
 	}
 	return e
 }

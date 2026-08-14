@@ -31,6 +31,12 @@ func Addr[T any](p *T) uintptr {
 	return uintptr(unsafe.Pointer(p))
 }
 
+// PtrBits is an LLVM ptr memory slot (uint64) from a Go pointer. nil-safe.
+func PtrBits(p unsafe.Pointer) uint64 { return uint64(uintptr(p)) }
+
+// PtrFromBits is a Go pointer from an LLVM ptr memory slot.
+func PtrFromBits(u uint64) unsafe.Pointer { return unsafe.Pointer(uintptr(u)) }
+
 // Off is (char *)p + n.
 func Off(p unsafe.Pointer, n int) unsafe.Pointer {
 	return unsafe.Add(p, n)

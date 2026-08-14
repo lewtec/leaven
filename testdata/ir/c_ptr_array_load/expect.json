@@ -4,12 +4,10 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "var AllVars struct",
-        "*libc.As[uint64](libc.Ptr(&AllVars))"
+        "[2]uint64",
+        "libc.PtrFromBits("
       ],
       "not_contains": [
-        "AllVars = p",
-        "AllVars = v0",
         "cannot use"
       ]
     }

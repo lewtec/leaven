@@ -236,8 +236,23 @@ func wholeVarAccess(v value.Value, elem types.Type) bool {
 	return types.Equal(g.ContentType, elem)
 }
 
+// isScalarPtrObject reports a load/store of a whole ptr cell (global or
+// alloca), not an array/struct slot. Those cells stay unsafe.Pointer.
+func isScalarPtrObject(v value.Value) bool {
+	switch x := v.(type) {
+	case *ir.Global:
+		_, ok := x.ContentType.(*types.PointerType)
+		return ok
+	case *ir.InstAlloca:
+		_, ok := x.ElemType.(*types.PointerType)
+		return ok
+	default:
+		return false
+	}
+}
+
 func overlayMem(addr *jen.Statement, addrTy, elem types.Type) (*jen.Statement, error) {
-	t, err := TypeSpec(elem)
+	t, err := memSlotType(elem)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +267,11 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	// not the object as a Go slice or as a pointer value.
 	if g, ok := srcVal.(*ir.Global); ok && isStdStream(VariableName(g)) {
 		if _, ok := elem.(*types.PointerType); ok {
-			return overlayMem(src.code, srcVal.Type(), elem)
+			slot, err := overlayMem(src.code, srcVal.Type(), elem)
+			if err != nil {
+				return nil, err
+			}
+			return fromMemSlotExpr(elem, slot), nil
 		}
 	}
 	if src.base != nil && wholeVarAccess(srcVal, elem) {
@@ -265,7 +284,11 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 					return emitPtr(loaded), nil
 				}
 			}
-			return loaded, nil
+			// Scalar ptr globals/allocas are unsafe.Pointer. Array/struct
+			// slots are uint64 and need PtrFromBits.
+			if !isScalarPtrObject(srcVal) {
+				return fromMemSlotExpr(elem, loaded), nil
+			}
 		}
 		return loaded, nil
 	}
@@ -273,10 +296,16 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	if err != nil {
 		return nil, err
 	}
-	return slot, nil
+	return fromMemSlotExpr(elem, slot), nil
 }
 
 func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
+	// Named scalar ptr cell (global/alloca) is unsafe.Pointer. Overlay
+	// and aggregate slots are uint64.
+	scalarCell := dst.base != nil && wholeVarAccess(dstVal, elem) && isScalarPtrObject(dstVal)
+	if isMemPtr(elem) && !scalarCell {
+		src = asMemSlotCode(elem, src)
+	}
 	if dst.base != nil && wholeVarAccess(dstVal, elem) {
 		return dst.store(src), nil
 	}
