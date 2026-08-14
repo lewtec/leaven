@@ -36,7 +36,7 @@ func testAssimilateCsmith(t *testing.T) {
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
 	// Debug keeps -g; v22 skips #dbg_* records.
-	cmakeConfigure(t, cmakeCfg{
+	cmakeConfigure(t, cmakeConfig{
 		cmake: cmake, ninja: ninja, clang: clang, clangxx: clangxx, m4: m4,
 		src: root, dst: build,
 		extra: []string{
@@ -45,7 +45,7 @@ func testAssimilateCsmith(t *testing.T) {
 			"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
 		},
 	})
-	cmakeBuild(t, cmakeBuildCfg{cmake: cmake, ninja: ninja, dir: build, targets: []string{"csmith"}})
+	cmakeBuild(t, cmakeBuildConfig{cmake: cmake, ninja: ninja, dir: build, targets: []string{"csmith"}})
 
 	native := filepath.Join(build, "src", "csmith")
 	if _, err := os.Stat(native); err != nil {
@@ -53,7 +53,7 @@ func testAssimilateCsmith(t *testing.T) {
 	}
 
 	ll := filepath.Join(build, "csmith.ll")
-	emitIRFromCompileCommands(t, emitIRCfg{build: build, outLL: ll, link: link})
+	emitIRFromCompileCommands(t, emitIRConfig{build: build, outLL: ll, link: link})
 	// Seed 1 is the small smoke case. Seed 42 emits ~50× more C (multi-func,
 	// deep blocks, bitfields, pointer chains) — still the generator binary,
 	// but exercises more of its IR paths under leaven.
@@ -63,7 +63,7 @@ func testAssimilateCsmith(t *testing.T) {
 	} {
 		args := args
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			crossCheck(t, checkCfg{native: native, ll: ll, args: args})
+			crossCheck(t, checkConfig{native: native, ll: ll, args: args})
 		})
 	}
 }
@@ -163,8 +163,8 @@ func testAssimilateRhai(t *testing.T) {
 			if err := os.WriteFile(script, []byte(p.src), 0644); err != nil {
 				t.Fatal(err)
 			}
-			want := runTimeout(t, runCfg{d: 30 * time.Second, bin: native, args: []string{script}})
-			got := runTimeout(t, runCfg{d: 3 * time.Minute, bin: bin, args: []string{script}})
+			want := runTimeout(t, runConfig{d: 30 * time.Second, bin: native, args: []string{script}})
+			got := runTimeout(t, runConfig{d: 3 * time.Minute, bin: bin, args: []string{script}})
 			if !bytes.Equal(want, got) {
 				t.Fatalf("native vs leaven mismatch\n---- native (%d) ----\n%s\n---- leaven (%d) ----\n%s",
 					len(want), tailBytes(want, 1500), len(got), tailBytes(got, 1500))
@@ -181,22 +181,22 @@ type compileCommand struct {
 	Output    string   `json:"output"`
 }
 
-type cmakeCfg struct {
+type cmakeConfig struct {
 	cmake, ninja, clang, clangxx, m4 string
 	src, dst                         string
 	extra                            []string
 }
 
-type cmakeBuildCfg struct {
+type cmakeBuildConfig struct {
 	cmake, ninja, dir string
 	targets           []string
 }
 
-type emitIRCfg struct {
+type emitIRConfig struct {
 	build, outLL, link string
 }
 
-func cmakeConfigure(t *testing.T, cfg cmakeCfg) {
+func cmakeConfigure(t *testing.T, cfg cmakeConfig) {
 	t.Helper()
 	args := []string{
 		"-S", cfg.src, "-B", cfg.dst,
@@ -216,7 +216,7 @@ func cmakeConfigure(t *testing.T, cfg cmakeCfg) {
 	}
 }
 
-func cmakeBuild(t *testing.T, cfg cmakeBuildCfg) {
+func cmakeBuild(t *testing.T, cfg cmakeBuildConfig) {
 	t.Helper()
 	args := []string{"--build", cfg.dir, "--parallel"}
 	for _, tgt := range cfg.targets {
@@ -229,7 +229,7 @@ func cmakeBuild(t *testing.T, cfg cmakeBuildCfg) {
 	}
 }
 
-func emitIRFromCompileCommands(t *testing.T, cfg emitIRCfg) {
+func emitIRFromCompileCommands(t *testing.T, cfg emitIRConfig) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(cfg.build, "compile_commands.json"))
 	if err != nil {
@@ -348,20 +348,20 @@ func splitQuoted(s string) []string {
 	return out
 }
 
-type checkCfg struct {
+type checkConfig struct {
 	native, ll string
 	args       []string
 }
 
-type runCfg struct {
+type runConfig struct {
 	d    time.Duration
 	bin  string
 	args []string
 }
 
-func crossCheck(t *testing.T, cfg checkCfg) {
+func crossCheck(t *testing.T, cfg checkConfig) {
 	t.Helper()
-	want := runTimeout(t, runCfg{d: 15 * time.Second, bin: cfg.native, args: cfg.args})
+	want := runTimeout(t, runConfig{d: 15 * time.Second, bin: cfg.native, args: cfg.args})
 
 	m, err := parseIRFile(cfg.ll)
 	if err != nil {
@@ -425,10 +425,10 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
 	// -O0 csmith Go is much slower than native; seed=1 can exceed 30s.
-	return runTimeout(t, runCfg{d: 3 * time.Minute, bin: bin, args: args})
+	return runTimeout(t, runConfig{d: 3 * time.Minute, bin: bin, args: args})
 }
 
-func runTimeout(t *testing.T, cfg runCfg) []byte {
+func runTimeout(t *testing.T, cfg runConfig) []byte {
 	t.Helper()
 	cmd := exec.Command(cfg.bin, cfg.args...)
 	var buf bytes.Buffer

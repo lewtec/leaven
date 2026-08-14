@@ -15,7 +15,7 @@ import (
 // indexing into a struct/array or as AddPointer's type argument.
 func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) (expr, error) {
 	if vt, ok := src.Type().(*types.VectorType); ok {
-		return vectorGEP(vecGEP{elem: elemType, src: src, indices: indices, n: vt.Len})
+		return vectorGEP(vectorGEPArgs{elem: elemType, src: src, indices: indices, n: vt.Len})
 	}
 	// Scalar ptr + vector index → vector of pointers (rustc stride loops).
 	if len(indices) > 0 {
@@ -24,7 +24,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			idx0 = ci.Constant
 		}
 		if ivt, ok := idx0.Type().(*types.VectorType); ok {
-			return scalarPtrVectorIndexGEP(vecGEP{elem: elemType, src: src, indices: indices, n: ivt.Len})
+			return scalarPtrVectorIndexGEP(vectorGEPArgs{elem: elemType, src: src, indices: indices, n: ivt.Len})
 		}
 	}
 	if _, ok := src.Type().(*types.PointerType); !ok {
@@ -49,7 +49,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	}
 
 	if len(indices) == 1 && zeroFirst {
-		return val(srcExpr.code), nil
+		return asExpr(srcExpr.code), nil
 	}
 
 	et, err := TypeSpec(elemType)
@@ -74,7 +74,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if err != nil {
 				return expr{}, err
 			}
-			base = emitAs(telem, emitUP(base))
+			base = emitAs(telem, emitUnsafePointer(base))
 		} else if len(indices) > 1 {
 			// Field GEPs need a typed *T for .F0 chains.
 			base = emitAs(et, base)
@@ -151,10 +151,10 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 	if takeAddress {
 		return addrExpr(result), nil
 	}
-	return val(emitPtr(result)), nil
+	return asExpr(emitPtr(result)), nil
 }
 
-type vecGEP struct {
+type vectorGEPArgs struct {
 	elem    types.Type
 	src     value.Value
 	indices []value.Value
@@ -162,7 +162,7 @@ type vecGEP struct {
 }
 
 // scalarPtrVectorIndexGEP is getelementptr T, ptr %p, <N x iK> %idx.
-func scalarPtrVectorIndexGEP(g vecGEP) (expr, error) {
+func scalarPtrVectorIndexGEP(g vectorGEPArgs) (expr, error) {
 	if len(g.indices) != 1 {
 		return expr{}, fmt.Errorf("%w: vector index gep extra indices", errUnsupportedIndexType)
 	}
@@ -189,12 +189,12 @@ func scalarPtrVectorIndexGEP(g vecGEP) (expr, error) {
 		off := jen.Int().Call(jen.Add(idxExpr).Index(litUntyped(i))).Op("*").Lit(int(elemSize))
 		elems[i] = emitOff(jen.Add(srcExpr), off)
 	}
-	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
+	return asExpr(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
 
 // vectorGEP is getelementptr on a vector of pointers. Each lane is offset
 // by the (broadcast) index in units of elemType.
-func vectorGEP(g vecGEP) (expr, error) {
+func vectorGEP(g vectorGEPArgs) (expr, error) {
 	if len(g.indices) == 0 {
 		return expr{}, fmt.Errorf("%w: no indices", errUnsupportedIndexType)
 	}
@@ -229,7 +229,7 @@ func vectorGEP(g vecGEP) (expr, error) {
 	if len(g.indices) > 1 {
 		return expr{}, fmt.Errorf("%w: vector gep extra indices", errUnsupportedIndexType)
 	}
-	return val(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
+	return asExpr(jen.Index(litUntyped(n)).Qual("unsafe", "Pointer").Values(elems...)), nil
 }
 
 // wholeVarAccess reports whether addrExpr.base is the entire LLVM object of
@@ -264,7 +264,7 @@ func overlayMem(addr *jen.Statement, addrTy, elem types.Type) (*jen.Statement, e
 		return nil, err
 	}
 	if isTaggedPointerType(addrTy) {
-		addr = emitUP(addr)
+		addr = emitUnsafePointer(addr)
 	}
 	return deref(emitAs(t, addr)), nil
 }
@@ -306,13 +306,13 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	return fromMemSlotExpr(elem, slot), nil
 }
 
-type storeDst struct {
+type storeDest struct {
 	dst  expr
 	val  value.Value
 	elem types.Type
 }
 
-func typedStore(d storeDst, src jen.Code) (*jen.Statement, error) {
+func typedStore(d storeDest, src jen.Code) (*jen.Statement, error) {
 	// Named scalar ptr cell (global/alloca) is unsafe.Pointer. Overlay
 	// and aggregate slots are uint64.
 	scalarCell := d.dst.base != nil && wholeVarAccess(d.val, d.elem) && isScalarPtrObject(d.val)

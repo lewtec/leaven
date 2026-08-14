@@ -49,22 +49,22 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return one(vectorBin(vecBin{dest: name, op: "+", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "+", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128Add, libc.I256Add).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128Add, libc.I256Add).Call(x, y))), nil
 		}
 		if ciy, ok := inst.Y.(*constant.Int); ok && ciy.X.Sign() == -1 {
 			// Use the constant's own minus sign.
-			return one(jen.Id(name).Op("=").Add(x).Op(ciy.X.String())), nil
+			return stmt(jen.Id(name).Op("=").Add(x).Op(ciy.X.String())), nil
 		}
-		return one(assign(name, bin(x, "+", y))), nil
+		return stmt(assign(name, infix(x, "+", y))), nil
 
 	case *ir.InstFence:
 		// Ordering is recorded on the IR; Go has no distinct fence
 		// opcodes. The atomic bump is the same compiler barrier rustc
 		// uses empty asm ~{memory} for.
-		return one(Sym(libc.Fence).Call()), nil
+		return stmt(Sym(libc.Fence).Call()), nil
 
 	case *ir.InstCmpXchg:
 		ptr, err := translateOp(inst.Ptr, "pointer")
@@ -92,7 +92,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		if isTaggedPointerType(inst.Ptr.Type()) {
-			ptr = emitUP(ptr)
+			ptr = emitUnsafePointer(ptr)
 		}
 		p := emitAs(elem, ptr)
 		name := VariableName(inst)
@@ -103,7 +103,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		// Temps are predeclared in writeFuncBody (no := — goto would jump over).
 		return []jen.Code{
 			jen.Id(okName).Op("=").Add(casFn.Call(p, cmp, neu)),
-			jen.Id(oldName).Op("=").Add(conv(elem, cmp)),
+			jen.Id(oldName).Op("=").Add(convert(elem, cmp)),
 			jen.If(jen.Op("!").Id(okName)).Block(
 				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
 			),
@@ -125,7 +125,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		if isTaggedPointerType(inst.Dst.Type()) {
-			dst = emitUP(dst)
+			dst = emitUnsafePointer(dst)
 		}
 		dst = emitAs(elem, dst)
 		switch inst.Op {
@@ -135,19 +135,19 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
 			}
 			// atomicrmw returns the old value; Add* returns the new value.
-			return one(assign(name, bin(addFn.Call(dst, x), "-", x))), nil
+			return stmt(assign(name, infix(addFn.Call(dst, x), "-", x))), nil
 		case enum.AtomicOpSub:
 			addFn, ok := atomicAddFunc(inst.Type())
 			if !ok {
 				return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
 			}
-			return one(assign(name, bin(addFn.Call(dst, jen.Op("-").Parens(x)), "+", x))), nil
+			return stmt(assign(name, infix(addFn.Call(dst, jen.Op("-").Parens(x)), "+", x))), nil
 		case enum.AtomicOpXChg:
 			swapFn, ok := atomicSwapFunc(inst.Type())
 			if !ok {
 				return nil, fmt.Errorf("%w: atomicrmw xchg on %v", errUnsupportedInstruction, inst.Type())
 			}
-			return one(assign(name, swapFn.Call(dst, x))), nil
+			return stmt(assign(name, swapFn.Call(dst, x))), nil
 		default:
 			return nil, fmt.Errorf("%w: atomicrmw %v", errUnsupportedInstruction, inst.Op)
 		}
@@ -171,20 +171,20 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
 			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return one(assign(name, emitAddr(Sym(libc.Retain[byte]).Call(jen.New(t))))), nil
+				return stmt(assign(name, emitAddr(Sym(libc.Retain[byte]).Call(jen.New(t))))), nil
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				return one(assign(name, allocAlign8(jen.Uintptr()))), nil
+				return stmt(assign(name, allocAlign8(jen.Uintptr()))), nil
 			}
-			return one(assign(name, allocAlign8(t))), nil
+			return stmt(assign(name, allocAlign8(t))), nil
 		}
 		nElems, err := translateOp(inst.NElems, "NElems")
 		if err != nil {
 			return nil, err
 		}
 		// Dynamic array: pad length and pin first element (already slice-aligned).
-		return one(assign(name, emitPtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
+		return stmt(assign(name, emitPtr(addrOf(jen.Make(jen.Index().Add(t), infix(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")
@@ -197,18 +197,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if isI1Vector(inst.Typ) {
-			return one(vectorBin(vecBin{dest: name, op: "&&", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "&&", x: x, y: y})), nil
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return one(vectorBin(vecBin{dest: name, op: "&", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "&", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128And, libc.I256And).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128And, libc.I256And).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return one(assign(name, bin(x, "&&", y))), nil
+			return stmt(assign(name, infix(x, "&&", y))), nil
 		}
-		return one(assign(name, bin(x, "&", y))), nil
+		return stmt(assign(name, infix(x, "&", y))), nil
 
 	case *ir.InstAShr:
 		if _, ok := inst.Typ.(*types.VectorType); ok {
@@ -224,12 +224,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128AShr, libc.I256AShr).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128AShr, libc.I256AShr).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize == 8 {
-			return one(assign(name, jen.Byte().Call(bin(x, ">>", y)))), nil
+			return stmt(assign(name, jen.Byte().Call(infix(x, ">>", y)))), nil
 		}
-		return one(assign(name, bin(x, ">>", y))), nil
+		return stmt(assign(name, infix(x, ">>", y))), nil
 
 	case *ir.InstBitCast:
 		from, err := translateOp(inst.From, "source")
@@ -240,35 +240,35 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(VariableName(inst), packed)), nil
+			return stmt(assign(VariableName(inst), packed)), nil
 		}
 		if vec, err := vectorBitCast(from, inst.From.Type(), inst.To); vec != nil || err != nil {
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(VariableName(inst), vec)), nil
+			return stmt(assign(VariableName(inst), vec)), nil
 		}
 		if bits, err := scalarBitCast(from, inst.From.Type(), inst.To); bits != nil || err != nil {
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(VariableName(inst), bits)), nil
+			return stmt(assign(VariableName(inst), bits)), nil
 		}
 		if !compatiblePointerTypes(inst.From.Type(), inst.To) {
 			return nil, fmt.Errorf("%w: %v and %v", errIncompatiblePointers, inst.From.Type(), inst.To)
 		}
 		name := VariableName(inst)
 		if isTaggedPointerType(inst.To) {
-			return one(assign(name, ptrToUint(from))), nil
+			return stmt(assign(name, ptrToUint(from))), nil
 		}
 		if isTaggedPointerType(inst.From.Type()) {
 			to, err := translateType(inst.To, "type")
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(name, jen.Parens(to).Call(emitUP(from)))), nil
+			return stmt(assign(name, jen.Parens(to).Call(emitUnsafePointer(from)))), nil
 		}
-		return one(assign(name, from)), nil
+		return stmt(assign(name, from)), nil
 
 	case *ir.InstCall:
 		return translateCall(inst)
@@ -278,14 +278,14 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), x)), nil
+		return stmt(assign(VariableName(inst), x)), nil
 
 	case *ir.InstLandingPad:
 		z, err := zeroOf(inst.ResultType)
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), z.code)), nil
+		return stmt(assign(VariableName(inst), z.code)), nil
 
 	case *ir.InstExtractElement:
 		x, err := translateOp(inst.X, "vector")
@@ -296,7 +296,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), jen.Add(x).Index(index))), nil
+		return stmt(assign(VariableName(inst), jen.Add(x).Index(index))), nil
 
 	case *ir.InstExtractValue:
 		x, err := translateOp(inst.X, "aggregate")
@@ -307,7 +307,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), fromMemSlotExpr(inst.Type(), expr))), nil
+		return stmt(assign(VariableName(inst), fromMemSlotExpr(inst.Type(), expr))), nil
 
 	case *ir.InstInsertValue:
 		x, err := translateOp(inst.X, "aggregate")
@@ -328,7 +328,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}, nil
 
 	case *ir.InstFAdd:
-		return translateBinAssign(inst, llvmBin{op: "+", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "+", x: inst.X, y: inst.Y})
 
 	case *ir.InstFCmp:
 		x, err := translateOp(inst.X, "left operand")
@@ -342,39 +342,39 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		name := VariableName(inst)
 		switch inst.Pred {
 		case enum.FPredOEQ:
-			return one(assign(name, bin(x, "==", y))), nil
+			return stmt(assign(name, infix(x, "==", y))), nil
 		case enum.FPredOGE:
-			return one(assign(name, bin(x, ">=", y))), nil
+			return stmt(assign(name, infix(x, ">=", y))), nil
 		case enum.FPredOGT:
-			return one(assign(name, bin(x, ">", y))), nil
+			return stmt(assign(name, infix(x, ">", y))), nil
 		case enum.FPredOLE:
-			return one(assign(name, bin(x, "<=", y))), nil
+			return stmt(assign(name, infix(x, "<=", y))), nil
 		case enum.FPredOLT:
-			return one(assign(name, bin(x, "<", y))), nil
+			return stmt(assign(name, infix(x, "<", y))), nil
 		case enum.FPredUNE:
-			return one(assign(name, bin(x, "!=", y))), nil
+			return stmt(assign(name, infix(x, "!=", y))), nil
 		case enum.FPredORD:
-			return one(assign(name, bin(bin(x, "==", x), "&&", bin(y, "==", y)))), nil
+			return stmt(assign(name, infix(infix(x, "==", x), "&&", infix(y, "==", y)))), nil
 		case enum.FPredUNO:
-			return one(assign(name, bin(bin(x, "!=", x), "||", bin(y, "!=", y)))), nil
+			return stmt(assign(name, infix(infix(x, "!=", x), "||", infix(y, "!=", y)))), nil
 		case enum.FPredUEQ:
-			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "==", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "!=", x), "||", infix(y, "!=", y)), "||", infix(x, "==", y)))), nil
 		case enum.FPredUGT:
-			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, ">", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "!=", x), "||", infix(y, "!=", y)), "||", infix(x, ">", y)))), nil
 		case enum.FPredUGE:
-			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, ">=", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "!=", x), "||", infix(y, "!=", y)), "||", infix(x, ">=", y)))), nil
 		case enum.FPredULT:
-			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "<", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "!=", x), "||", infix(y, "!=", y)), "||", infix(x, "<", y)))), nil
 		case enum.FPredULE:
-			return one(assign(name, bin(bin(bin(x, "!=", x), "||", bin(y, "!=", y)), "||", bin(x, "<=", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "!=", x), "||", infix(y, "!=", y)), "||", infix(x, "<=", y)))), nil
 		case enum.FPredONE:
-			return one(assign(name, bin(bin(bin(x, "==", x), "&&", bin(y, "==", y)), "&&", bin(x, "!=", y)))), nil
+			return stmt(assign(name, infix(infix(infix(x, "==", x), "&&", infix(y, "==", y)), "&&", infix(x, "!=", y)))), nil
 		default:
 			return nil, fmt.Errorf("%w: %v", errUnsupportedICmpPred, inst.Pred)
 		}
 
 	case *ir.InstFDiv:
-		return translateBinAssign(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "/", x: inst.X, y: inst.Y})
 
 	case *ir.InstFRem:
 		x, err := translateOp(inst.X, "left operand")
@@ -398,17 +398,17 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if wrapF32 {
 			mod = jen.Float32().Call(mod)
 		}
-		return one(assign(VariableName(inst), mod)), nil
+		return stmt(assign(VariableName(inst), mod)), nil
 
 	case *ir.InstFMul:
-		return translateBinAssign(inst, llvmBin{op: "*", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "*", x: inst.X, y: inst.Y})
 
 	case *ir.InstFNeg:
 		x, err := translateOp(inst.X, "operand")
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), jen.Op("-").Add(x))), nil
+		return stmt(assign(VariableName(inst), jen.Op("-").Add(x))), nil
 
 	case *ir.InstFPExt, *ir.InstFPTrunc:
 		return translateConvInst(inst)
@@ -424,19 +424,19 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if it, ok := inst.To.(*types.IntType); ok && it.BitSize <= 8 && it.BitSize > 1 {
-			return one(assign(name, jen.Byte().Call(jen.Int8().Call(from)))), nil
+			return stmt(assign(name, jen.Byte().Call(jen.Int8().Call(from)))), nil
 		}
-		return one(assign(name, conv(to, from))), nil
+		return stmt(assign(name, convert(to, from))), nil
 
 	case *ir.InstFSub:
-		return translateBinAssign(inst, llvmBin{op: "-", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "-", x: inst.X, y: inst.Y})
 
 	case *ir.InstGetElementPtr:
 		result, err := GetElementPtr(inst.ElemType, inst.Src, inst.Indices)
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), result.code)), nil
+		return stmt(assign(VariableName(inst), result.code)), nil
 
 	case *ir.InstICmp:
 		if _, ok := inst.X.Type().(*types.VectorType); ok {
@@ -446,7 +446,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), cmp)), nil
+		return stmt(assign(VariableName(inst), cmp)), nil
 
 	case *ir.InstInsertElement:
 		x, err := translateOp(inst.X, "initial vector")
@@ -463,7 +463,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if _, ok := inst.X.(*constant.Undef); ok {
-			return one(jen.Id(name).Index(index).Op("=").Add(elem)), nil
+			return stmt(jen.Id(name).Index(index).Op("=").Add(elem)), nil
 		}
 		return []jen.Code{
 			assign(name, x),
@@ -479,18 +479,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), jen.Parens(to).Call(emitUP(jen.Uintptr().Call(from))))), nil
+		return stmt(assign(VariableName(inst), jen.Parens(to).Call(emitUnsafePointer(jen.Uintptr().Call(from))))), nil
 
 	case *ir.InstLoad:
 		src, err := formatExpr(inst.Src)
 		if err != nil {
 			return nil, fmt.Errorf("error translating source (%v): %w", inst.Src, err)
 		}
-		val, err := typedLoad(src, inst.Src, inst.ElemType)
+		loaded, err := typedLoad(src, inst.Src, inst.ElemType)
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), val)), nil
+		return stmt(assign(VariableName(inst), loaded)), nil
 
 	case *ir.InstLShr:
 		if _, ok := inst.Typ.(*types.VectorType); ok {
@@ -506,15 +506,15 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128LShr, libc.I256LShr).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128LShr, libc.I256LShr).Call(x, y))), nil
 		}
 		if t, ok := inst.Typ.(*types.IntType); ok && t.BitSize > 8 {
-			return one(assign(name, conv(goIntType(t.BitSize), bin(x, ">>", y)))), nil
+			return stmt(assign(name, convert(goIntType(t.BitSize), infix(x, ">>", y)))), nil
 		}
-		return one(assign(name, bin(x, ">>", y))), nil
+		return stmt(assign(name, infix(x, ">>", y))), nil
 
 	case *ir.InstMul:
-		return translateBinAssign(inst, llvmBin{op: "*", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "*", x: inst.X, y: inst.Y})
 
 	case *ir.InstOr:
 		x, err := translateOp(inst.X, "left operand")
@@ -527,18 +527,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if isI1Vector(inst.Typ) {
-			return one(vectorBin(vecBin{dest: name, op: "||", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "||", x: x, y: y})), nil
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return one(vectorBin(vecBin{dest: name, op: "|", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "|", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128Or, libc.I256Or).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128Or, libc.I256Or).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return one(assign(name, bin(x, "||", y))), nil
+			return stmt(assign(name, infix(x, "||", y))), nil
 		}
-		return one(assign(name, bin(x, "|", y))), nil
+		return stmt(assign(name, infix(x, "|", y))), nil
 
 	case *ir.InstPtrToInt:
 		from, err := translateOp(inst.From, "source")
@@ -549,13 +549,13 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), conv(to, ptrToUint(from)))), nil
+		return stmt(assign(VariableName(inst), convert(to, ptrToUint(from)))), nil
 
 	case *ir.InstSDiv:
-		return translateSignedDivRem(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
+		return translateSignedDivRem(inst, llvmBinary{op: "/", x: inst.X, y: inst.Y})
 
 	case *ir.InstUDiv:
-		return translateUnsignedDivRem(inst, llvmBin{op: "/", x: inst.X, y: inst.Y})
+		return translateUnsignedDivRem(inst, llvmBinary{op: "/", x: inst.X, y: inst.Y})
 
 	case *ir.InstSelect:
 		cond, err := translateOp(inst.Cond, "condition")
@@ -572,7 +572,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if _, ok := inst.Cond.Type().(*types.VectorType); ok {
-			return one(jen.For(jen.List(jen.Id("i"), jen.Id("c")).Op(":=").Range().Add(cond)).Block(
+			return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("c")).Op(":=").Range().Add(cond)).Block(
 				jen.If(jen.Id("c")).Block(
 					jen.Id(name).Index(jen.Id("i")).Op("=").Add(valueTrue).Index(jen.Id("i")),
 				).Else().Block(
@@ -580,7 +580,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				),
 			)), nil
 		}
-		return one(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
+		return stmt(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
 
 	case *ir.InstSExt:
 		toType, ok := inst.To.(*types.IntType)
@@ -598,23 +598,23 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				if err != nil {
 					return nil, err
 				}
-				return one(assign(name, c)), nil
+				return stmt(assign(name, c)), nil
 			}
 			// i8 is byte: all-ones is 255, not untyped -1.
 			neg := jen.Lit(-1)
 			if toType.BitSize == 8 {
 				neg = jen.Lit(255)
 			}
-			return one(jen.If(from).Block(assign(name, neg)).Else().Block(assign(name, jen.Lit(0)))), nil
+			return stmt(jen.If(from).Block(assign(name, neg)).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
 		if toType.BitSize == 128 || toType.BitSize == 256 {
 			c, err := formatSExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(name, c)), nil
+			return stmt(assign(name, c)), nil
 		}
-		return one(assign(name, conv(goIntType(toType.BitSize), from))), nil
+		return stmt(assign(name, convert(goIntType(toType.BitSize), from))), nil
 
 	case *ir.InstShl:
 		if _, ok := inst.Typ.(*types.VectorType); ok {
@@ -629,9 +629,9 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", inst.Y, err)
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(VariableName(inst), wideSym(bits, libc.I128Shl, libc.I256Shl).Call(x, y))), nil
+			return stmt(assign(VariableName(inst), wideSym(bits, libc.I128Shl, libc.I256Shl).Call(x, y))), nil
 		}
-		return one(assign(VariableName(inst), bin(x, "<<", y))), nil
+		return stmt(assign(VariableName(inst), infix(x, "<<", y))), nil
 
 	case *ir.InstShuffleVector:
 		x, err := translateOp(inst.X, "left operand")
@@ -648,7 +648,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		length := int64(inst.Typ.Len)
 		name := VariableName(inst)
-		return one(jen.For(jen.List(jen.Id("i"), jen.Id("m")).Op(":=").Range().Add(mask)).Block(
+		return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("m")).Op(":=").Range().Add(mask)).Block(
 			jen.If(jen.Id("m").Op("<").Lit(int(length))).Block(
 				jen.Id(name).Index(jen.Id("i")).Op("=").Add(x).Index(jen.Id("m")),
 			).Else().Block(
@@ -667,7 +667,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			if bits == 256 {
 				limb = limb.Dot("Lo")
 			}
-			return one(assign(VariableName(inst), jen.Float64().Call(jen.Int64().Call(limb)))), nil
+			return stmt(assign(VariableName(inst), jen.Float64().Call(jen.Int64().Call(limb)))), nil
 		}
 		from, err := FormatSigned(inst.From)
 		if err != nil {
@@ -677,13 +677,13 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), conv(to, from))), nil
+		return stmt(assign(VariableName(inst), convert(to, from))), nil
 
 	case *ir.InstSRem:
-		return translateSignedDivRem(inst, llvmBin{op: "%", x: inst.X, y: inst.Y})
+		return translateSignedDivRem(inst, llvmBinary{op: "%", x: inst.X, y: inst.Y})
 
 	case *ir.InstURem:
-		return translateUnsignedDivRem(inst, llvmBin{op: "%", x: inst.X, y: inst.Y})
+		return translateUnsignedDivRem(inst, llvmBinary{op: "%", x: inst.X, y: inst.Y})
 
 	case *ir.InstStore:
 		dest, err := formatExpr(inst.Dst)
@@ -694,14 +694,14 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		st, err := typedStore(storeDst{dst: dest, val: inst.Dst, elem: inst.Src.Type()}, src)
+		st, err := typedStore(storeDest{dst: dest, val: inst.Dst, elem: inst.Src.Type()}, src)
 		if err != nil {
 			return nil, err
 		}
-		return one(st), nil
+		return stmt(st), nil
 
 	case *ir.InstSub:
-		return translateBinAssign(inst, llvmBin{op: "-", x: inst.X, y: inst.Y})
+		return translateBinAssign(inst, llvmBinary{op: "-", x: inst.X, y: inst.Y})
 
 	case *ir.InstTrunc:
 		if vt, ok := inst.To.(*types.VectorType); ok {
@@ -718,7 +718,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				return nil, err
 			}
 			name := VariableName(inst)
-			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+			return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
 				jen.Id(name).Index(jen.Id("i")).Op("=").Add(to).Call(jen.Id("v")),
 			)), nil
 		}
@@ -726,7 +726,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), c)), nil
+		return stmt(assign(VariableName(inst), c)), nil
 
 	case *ir.InstUIToFP:
 		if bits, ok := wideBits(inst.From.Type()); ok {
@@ -738,7 +738,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			if bits == 256 {
 				limb = limb.Dot("Lo")
 			}
-			return one(assign(VariableName(inst), jen.Float64().Call(limb))), nil
+			return stmt(assign(VariableName(inst), jen.Float64().Call(limb))), nil
 		}
 		from, err := FormatUnsigned(inst.From)
 		if err != nil {
@@ -748,7 +748,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), conv(to, from))), nil
+		return stmt(assign(VariableName(inst), convert(to, from))), nil
 
 	case *ir.InstXor:
 		x, err := translateOp(inst.X, "left operand")
@@ -761,18 +761,18 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if isI1Vector(inst.Typ) {
-			return one(vectorBin(vecBin{dest: name, op: "!=", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "!=", x: x, y: y})), nil
 		}
 		if _, ok := inst.Typ.(*types.VectorType); ok {
-			return one(vectorBin(vecBin{dest: name, op: "^", x: x, y: y})), nil
+			return stmt(vectorBin(vectorBinary{dest: name, op: "^", x: x, y: y})), nil
 		}
 		if bits, ok := wideBits(inst.Typ); ok {
-			return one(assign(name, wideSym(bits, libc.I128Xor, libc.I256Xor).Call(x, y))), nil
+			return stmt(assign(name, wideSym(bits, libc.I128Xor, libc.I256Xor).Call(x, y))), nil
 		}
 		if intType, ok := inst.Typ.(*types.IntType); ok && intType.BitSize == 1 {
-			return one(assign(name, bin(x, "!=", y))), nil
+			return stmt(assign(name, infix(x, "!=", y))), nil
 		}
-		return one(assign(name, bin(x, "^", y))), nil
+		return stmt(assign(name, infix(x, "^", y))), nil
 
 	case *ir.InstZExt:
 		if vt, ok := inst.To.(*types.VectorType); ok {
@@ -794,12 +794,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			name := VariableName(inst)
 			if fromType.BitSize == 1 {
-				return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+				return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
 					jen.Id(name).Index(jen.Id("i")).Op("=").Add(boolToInt(jen.Id("v"), toType.BitSize, false)),
 				)), nil
 			}
 			tw, fw := goIntBits(toType.BitSize), goIntBits(fromType.BitSize)
-			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+			return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
 				jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(tw)).Call(
 					goUintType(tw).Call(goUintType(fw).Call(jen.Id("v"))),
 				),
@@ -820,26 +820,26 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				if err != nil {
 					return nil, err
 				}
-				return one(assign(name, c)), nil
+				return stmt(assign(name, c)), nil
 			}
-			return one(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
+			return stmt(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
 		if toType.BitSize == 128 || toType.BitSize == 256 {
 			c, err := formatZExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err
 			}
-			return one(assign(name, c)), nil
+			return stmt(assign(name, c)), nil
 		}
 		w := goIntBits(toType.BitSize)
-		return one(assign(name, conv(goIntType(w), conv(goUintType(w), from)))), nil
+		return stmt(assign(name, convert(goIntType(w), convert(goUintType(w), from)))), nil
 
 	default:
 		return nil, fmt.Errorf("%w: %T", errUnsupportedInstruction, inst)
 	}
 }
 
-type llvmBin struct {
+type llvmBinary struct {
 	op   string
 	x, y value.Value
 }
@@ -904,8 +904,8 @@ func translateVectorICmp(inst *ir.InstICmp) ([]jen.Code, error) {
 		}
 	}
 	name := VariableName(inst)
-	return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(x)).Block(
-		jen.Id(name).Index(jen.Id("i")).Op("=").Add(bin(xv, op, yv)),
+	return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(x)).Block(
+		jen.Id(name).Index(jen.Id("i")).Op("=").Add(infix(xv, op, yv)),
 	)), nil
 }
 
@@ -936,13 +936,13 @@ func icmpPredOp(pred enum.IPred) (op string, signed, unsigned bool, err error) {
 	}
 }
 
-type i128bin struct {
+type i128Binary struct {
 	name, op string
 	x, y     value.Value
 	ashr     bool
 }
 
-func translateI128Bin(b i128bin) ([]jen.Code, bool, error) {
+func translateI128Bin(b i128Binary) ([]jen.Code, bool, error) {
 	bits, ok := wideBits(b.x.Type())
 	if !ok {
 		bits, ok = wideBits(b.y.Type())
@@ -962,10 +962,10 @@ func translateI128Bin(b i128bin) ([]jen.Code, bool, error) {
 	if err != nil {
 		return nil, true, err
 	}
-	return one(assign(b.name, fn.Call(xv, yv))), true, nil
+	return stmt(assign(b.name, fn.Call(xv, yv))), true, nil
 }
 
-func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
+func translateBinAssign(inst value.Named, b llvmBinary) ([]jen.Code, error) {
 	if _, ok := b.x.Type().(*types.VectorType); ok {
 		xv, err := translateOp(b.x, "left operand")
 		if err != nil {
@@ -975,9 +975,9 @@ func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
+		return stmt(vectorBin(vectorBinary{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
 	}
-	if stmts, ok, err := translateI128Bin(i128bin{name: VariableName(inst), op: b.op, x: b.x, y: b.y}); ok {
+	if stmts, ok, err := translateI128Bin(i128Binary{name: VariableName(inst), op: b.op, x: b.x, y: b.y}); ok {
 		return stmts, err
 	}
 	xv, err := translateOp(b.x, "left operand")
@@ -988,7 +988,7 @@ func translateBinAssign(inst value.Named, b llvmBin) ([]jen.Code, error) {
 	if err != nil {
 		return nil, err
 	}
-	return one(assign(VariableName(inst), bin(xv, b.op, yv))), nil
+	return stmt(assign(VariableName(inst), infix(xv, b.op, yv))), nil
 }
 
 // translateVectorShift lowers shl/lshr/ashr on <N x iK>. logical selects
@@ -1017,11 +1017,11 @@ func translateVectorShift(inst value.Named, op string, logical bool) ([]jen.Code
 	name := VariableName(inst)
 	vt, ok := typ.(*types.VectorType)
 	if !ok {
-		return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
+		return stmt(vectorBin(vectorBinary{dest: name, op: op, x: xv, y: yv})), nil
 	}
 	it, ok := vt.ElemType.(*types.IntType)
 	if !ok {
-		return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
+		return stmt(vectorBin(vectorBinary{dest: name, op: op, x: xv, y: yv})), nil
 	}
 	// lshr on Go signed ints must cast through unsigned per lane.
 	// Fresh type stmts each Call — reusing one *jen.Statement corrupts emit.
@@ -1029,21 +1029,21 @@ func translateVectorShift(inst value.Named, op string, logical bool) ([]jen.Code
 		lane := func(v jen.Code) *jen.Statement {
 			return goUintType(it.BitSize).Call(v)
 		}
-		return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+		return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
 			jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(it.BitSize)).Call(
-				bin(lane(jen.Id("v")), ">>", lane(jen.Add(yv).Index(jen.Id("i")))),
+				infix(lane(jen.Id("v")), ">>", lane(jen.Add(yv).Index(jen.Id("i")))),
 			),
 		)), nil
 	}
 	// ashr i8: lanes are byte; shift as int8 then back.
 	if !logical && op == ">>" && it.BitSize == 8 {
-		return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+		return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
 			jen.Id(name).Index(jen.Id("i")).Op("=").Add(jen.Byte().Call(
-				bin(jen.Int8().Call(jen.Id("v")), ">>", jen.Add(yv).Index(jen.Id("i"))),
+				infix(jen.Int8().Call(jen.Id("v")), ">>", jen.Add(yv).Index(jen.Id("i"))),
 			)),
 		)), nil
 	}
-	return one(vectorBin(vecBin{dest: name, op: op, x: xv, y: yv})), nil
+	return stmt(vectorBin(vectorBinary{dest: name, op: op, x: xv, y: yv})), nil
 }
 
 func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
@@ -1066,10 +1066,10 @@ func translateConvInst(inst ir.Instruction) ([]jen.Code, error) {
 	if err != nil {
 		return nil, err
 	}
-	return one(assign(VariableName(named), conv(to, from))), nil
+	return stmt(assign(VariableName(named), convert(to, from))), nil
 }
 
-func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+func translateSignedDivRem(inst value.Named, b llvmBinary) ([]jen.Code, error) {
 	if _, ok := b.x.Type().(*types.VectorType); ok {
 		xv, err := FormatSigned(b.x)
 		if err != nil {
@@ -1079,7 +1079,7 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error translating right operand (%v): %w", b.y, err)
 		}
-		return one(vectorBin(vecBin{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
+		return stmt(vectorBin(vectorBinary{dest: VariableName(inst), op: b.op, x: xv, y: yv})), nil
 	}
 	if bits, ok := wideBits(inst.Type()); ok {
 		fn := wideSym(bits, libc.I128SDiv, libc.I256SDiv)
@@ -1094,7 +1094,7 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), fn.Call(xv, yv))), nil
+		return stmt(assign(VariableName(inst), fn.Call(xv, yv))), nil
 	}
 	xv, err := FormatSigned(b.x)
 	if err != nil {
@@ -1106,12 +1106,12 @@ func translateSignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 	}
 	name := VariableName(inst)
 	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize == 8 {
-		return one(assign(name, jen.Byte().Call(bin(xv, b.op, yv)))), nil
+		return stmt(assign(name, jen.Byte().Call(infix(xv, b.op, yv)))), nil
 	}
-	return one(assign(name, bin(xv, b.op, yv))), nil
+	return stmt(assign(name, infix(xv, b.op, yv))), nil
 }
 
-func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
+func translateUnsignedDivRem(inst value.Named, b llvmBinary) ([]jen.Code, error) {
 	if _, ok := b.x.Type().(*types.VectorType); ok {
 		xv, err := FormatUnsigned(b.x)
 		if err != nil {
@@ -1126,14 +1126,14 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		name := VariableName(inst)
 		if vt, ok := b.x.Type().(*types.VectorType); ok {
 			if it, ok := vt.ElemType.(*types.IntType); ok && it.BitSize > 8 {
-				return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
+				return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(xv)).Block(
 					jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(it.BitSize)).Call(
-						bin(goUintType(it.BitSize).Call(jen.Id("v")), b.op, goUintType(it.BitSize).Call(jen.Add(yv).Index(jen.Id("i")))),
+						infix(goUintType(it.BitSize).Call(jen.Id("v")), b.op, goUintType(it.BitSize).Call(jen.Add(yv).Index(jen.Id("i")))),
 					),
 				)), nil
 			}
 		}
-		return one(vectorBin(vecBin{dest: name, op: b.op, x: xv, y: yv})), nil
+		return stmt(vectorBin(vectorBinary{dest: name, op: b.op, x: xv, y: yv})), nil
 	}
 	if bits, ok := wideBits(inst.Type()); ok {
 		fn := wideSym(bits, libc.I128UDiv, libc.I256UDiv)
@@ -1148,7 +1148,7 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return one(assign(VariableName(inst), fn.Call(xv, yv))), nil
+		return stmt(assign(VariableName(inst), fn.Call(xv, yv))), nil
 	}
 	xv, err := FormatUnsigned(b.x)
 	if err != nil {
@@ -1160,12 +1160,12 @@ func translateUnsignedDivRem(inst value.Named, b llvmBin) ([]jen.Code, error) {
 	}
 	name := VariableName(inst)
 	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize == 8 {
-		return one(assign(name, jen.Byte().Call(bin(xv, b.op, yv)))), nil
+		return stmt(assign(name, jen.Byte().Call(infix(xv, b.op, yv)))), nil
 	}
 	if intType, ok := inst.Type().(*types.IntType); ok && intType.BitSize > 8 {
-		return one(assign(name, conv(goIntType(intType.BitSize), bin(xv, b.op, yv)))), nil
+		return stmt(assign(name, convert(goIntType(intType.BitSize), infix(xv, b.op, yv)))), nil
 	}
-	return one(assign(name, bin(xv, b.op, yv))), nil
+	return stmt(assign(name, infix(xv, b.op, yv))), nil
 }
 
 func asBytePtr(x jen.Code) *jen.Statement {
@@ -1176,14 +1176,14 @@ func asFilePtr(x jen.Code) *jen.Statement {
 	return emitAs(Qual[os.File](), x)
 }
 
-type libcArg struct {
+type libcArgument struct {
 	name string
 	i    int
 	a    value.Value
 	got  jen.Code
 }
 
-func libcCallArg(arg libcArg) *jen.Statement {
+func libcCallArg(arg libcArgument) *jen.Statement {
 	if _, ok := arg.a.Type().(*types.PointerType); !ok {
 		if s, ok := arg.got.(*jen.Statement); ok {
 			return s
@@ -1191,7 +1191,7 @@ func libcCallArg(arg libcArg) *jen.Statement {
 		return jen.Add(arg.got)
 	}
 	if isTaggedPointerType(arg.a.Type()) {
-		arg.got = emitUP(arg.got)
+		arg.got = emitUnsafePointer(arg.got)
 	}
 	switch arg.name {
 	case "fprintf":
@@ -1235,50 +1235,50 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 	name := VariableName(inst)
 	// usub.sat / uadd.sat via libc (no mid-function vars — goto-safe).
 	if strings.HasPrefix(llvmName, "llvm_usub_sat_") && len(args) == 2 {
-		return one(assign(name, convFromU64(llvmName, Sym(libc.USubSatU64).Call(
+		return stmt(assign(name, convFromU64(llvmName, Sym(libc.USubSatU64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Uint64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_uadd_sat_") && len(args) == 2 {
-		return one(assign(name, convFromU64(llvmName, Sym(libc.UAddSatU64).Call(
+		return stmt(assign(name, convFromU64(llvmName, Sym(libc.UAddSatU64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Uint64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_ctlz_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.LeadingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.LeadingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_cttz_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.TrailingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.TrailingZeros64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_ctpop_") && len(args) >= 1 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.OnesCount64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.OnesCount64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_abs_") && len(args) >= 1 {
 		if strings.HasSuffix(llvmName, "_i128") || strings.Contains(llvmName, "_i128") {
 			// sign from high limb; abs via conditional sub from 0
-			return one(assign(name, jen.Add(args[0]))), true // identity if non-neg common path
+			return stmt(assign(name, jen.Add(args[0]))), true // identity if non-neg common path
 		}
-		return one(assign(name, convFromU64(llvmName, Sym(libc.AbsI64).Call(jen.Int64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(libc.AbsI64).Call(jen.Int64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_bitreverse_") && len(args) == 1 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.Reverse64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.Reverse64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_fshl_") && len(args) == 3 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.RotateLeft64).Call(
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.RotateLeft64).Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Int().Call(jen.Add(args[2])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_fshr_") && len(args) == 3 {
-		return one(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "RotateRight64").Call(
+		return stmt(assign(name, convFromU64(llvmName, jen.Qual("math/bits", "RotateRight64").Call(
 			jen.Uint64().Call(jen.Add(args[0])),
 			jen.Int().Call(jen.Add(args[2])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_bswap_") && len(args) == 1 {
-		return one(assign(name, convFromU64(llvmName, Sym(bits.ReverseBytes64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
+		return stmt(assign(name, convFromU64(llvmName, Sym(bits.ReverseBytes64).Call(jen.Uint64().Call(jen.Add(args[0])))))), true
 	}
 	if (strings.HasPrefix(llvmName, "llvm_umax_") || strings.HasPrefix(llvmName, "llvm_umin_") ||
 		strings.HasPrefix(llvmName, "llvm_smax_") || strings.HasPrefix(llvmName, "llvm_smin_")) && len(args) == 2 {
@@ -1293,9 +1293,9 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 			cond := Sym(lt).Call(jen.Add(args[0]), jen.Add(args[1]))
 			// min: if a<b then a else b; max: if a<b then b else a
 			if isMax {
-				return one(jen.If(cond).Block(assign(name, jen.Add(args[1]))).Else().Block(assign(name, jen.Add(args[0])))), true
+				return stmt(jen.If(cond).Block(assign(name, jen.Add(args[1]))).Else().Block(assign(name, jen.Add(args[0])))), true
 			}
-			return one(jen.If(cond).Block(assign(name, jen.Add(args[0]))).Else().Block(assign(name, jen.Add(args[1])))), true
+			return stmt(jen.If(cond).Block(assign(name, jen.Add(args[0]))).Else().Block(assign(name, jen.Add(args[1])))), true
 		}
 		fn := any(libc.UMaxU64)
 		switch {
@@ -1306,43 +1306,43 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		case strings.Contains(llvmName, "smin"):
 			fn = libc.SMinI64
 		}
-		return one(assign(name, convFromU64(llvmName, Sym(fn).Call(
+		return stmt(assign(name, convFromU64(llvmName, Sym(fn).Call(
 			jen.Int64().Call(jen.Add(args[0])), jen.Int64().Call(jen.Add(args[1])),
 		)))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_floor_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Floor).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Floor).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_trunc_f") && len(args) == 1 {
 		e := Sym(math.Trunc).Call(jen.Float64().Call(jen.Add(args[0])))
 		if strings.HasSuffix(llvmName, "f32") {
 			e = jen.Float32().Call(e)
 		}
-		return one(assign(name, e)), true
+		return stmt(assign(name, e)), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_round_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Round).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Round).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_fabs_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Abs).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Abs).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_sqrt_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Sqrt).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Sqrt).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_sin_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Sin).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Sin).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_cos_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Cos).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Cos).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_exp_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Exp).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Exp).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_log10_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Log10).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Log10).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_log_") && len(args) == 1 {
-		return one(assign(name, Sym(math.Log).Call(jen.Float64().Call(jen.Add(args[0]))))), true
+		return stmt(assign(name, Sym(math.Log).Call(jen.Float64().Call(jen.Add(args[0]))))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_pow") && len(args) == 2 {
 		e := Sym(math.Pow).Call(
@@ -1352,21 +1352,21 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		if strings.Contains(llvmName, "f32") {
 			e = jen.Float32().Call(e)
 		}
-		return one(assign(name, e)), true
+		return stmt(assign(name, e)), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_copysign_") && len(args) == 2 {
 		e := Sym(math.Copysign).Call(
 			jen.Float64().Call(jen.Add(args[0])),
 			jen.Float64().Call(jen.Add(args[1])),
 		)
-		return one(assign(name, castToResult(inst, e))), true
+		return stmt(assign(name, castToResult(inst, e))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_maximum") && len(args) == 2 {
 		e := Sym(libc.MaximumNumF64).Call(
 			jen.Float64().Call(jen.Add(args[0])),
 			jen.Float64().Call(jen.Add(args[1])),
 		)
-		return one(assign(name, castToResult(inst, e))), true
+		return stmt(assign(name, castToResult(inst, e))), true
 	}
 	// with.overflow — {a op b, false}; flag not exact for all widths.
 	if strings.Contains(llvmName, "_with_overflow_") && len(args) == 2 {
@@ -1391,7 +1391,7 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 			default:
 				return nil, false
 			}
-			return one(assign(name, jen.Add(ret).Values(
+			return stmt(assign(name, jen.Add(ret).Values(
 				fn.Call(jen.Add(args[0]), jen.Add(args[1])),
 				jen.False(),
 			))), true
@@ -1407,7 +1407,7 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		default:
 			return nil, false
 		}
-		return one(assign(name, jen.Add(ret).Values(
+		return stmt(assign(name, jen.Add(ret).Values(
 			jen.Add(args[0]).Op(op).Add(args[1]),
 			jen.False(),
 		))), true
@@ -1515,7 +1515,7 @@ func llvmCallHandled(name string) bool {
 
 func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	if ia, ok := inst.Callee.(*ir.InlineAsm); ok {
-		return one(Sym(libc.InlineAsm).Call(jen.Lit(ia.Asm), jen.Lit(ia.Constraint))), nil
+		return stmt(Sym(libc.InlineAsm).Call(jen.Lit(ia.Asm), jen.Lit(ia.Constraint))), nil
 	}
 	llvmName := calleeLLVMName(inst.Callee)
 	switch llvmName {
@@ -1551,11 +1551,11 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		typedPtr = true
 	case "leaven_va_start":
 		if len(args) == 1 {
-			return one(deref(args[0]).Op("=").Add(emitAs(Qual[byte](), emitPtr(addrOf(jen.Id("varargs")))))), nil
+			return stmt(deref(args[0]).Op("=").Add(emitAs(Qual[byte](), emitPtr(addrOf(jen.Id("varargs")))))), nil
 		}
 	case "llvm_va_start":
 		if len(args) == 1 {
-			return one(Sym(libc.Store[unsafe.Pointer]).Types(Qual[unsafe.Pointer]()).Call(
+			return stmt(Sym(libc.Store[unsafe.Pointer]).Types(Qual[unsafe.Pointer]()).Call(
 				args[0], jen.Lit(8), emitPtr(addrOf(jen.Id("varargs"))),
 			)), nil
 		}
@@ -1563,94 +1563,94 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		return nil, nil
 	case "vsnprintf":
 		if len(args) == 4 {
-			return one(assign(VariableName(inst), Sym(libc.Vsnprintf).Call(
+			return stmt(assign(VariableName(inst), Sym(libc.Vsnprintf).Call(
 				asBytePtr(args[0]), args[1], asBytePtr(args[2]),
 				emitAs(Qual[byte](), args[3]),
 			))), nil
 		}
 	case "ldexp":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(math.Ldexp).Call(args[0], jen.Int().Call(args[1])))), nil
+			return stmt(assign(VariableName(inst), Sym(math.Ldexp).Call(args[0], jen.Int().Call(args[1])))), nil
 		}
 	case "llvm_fabs_f32":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), jen.Float32().Call(Sym(math.Abs).Call(jen.Float64().Call(args[0]))))), nil
+			return stmt(assign(VariableName(inst), jen.Float32().Call(Sym(math.Abs).Call(jen.Float64().Call(args[0]))))), nil
 		}
 	case "llvm_fmuladd_f64", "llvm_fmuladd_f32":
 		if len(args) == 3 {
-			return one(assign(VariableName(inst), bin(bin(args[0], "*", args[1]), "+", args[2]))), nil
+			return stmt(assign(VariableName(inst), infix(infix(args[0], "*", args[1]), "+", args[2]))), nil
 		}
 	case "llvm_memcpy_p0i8_p0i8_i64", "llvm_memmove_p0i8_p0i8_i64",
 		"llvm_memcpy_p0_p0_i64", "llvm_memmove_p0_p0_i64":
-		return one(Sym(libc.Memmove).Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
+		return stmt(Sym(libc.Memmove).Call(asBytePtr(args[0]), asBytePtr(args[1]), args[2])), nil
 	case "llvm_memset_p0i8_i64", "llvm_memset_p0_i64":
-		return one(Sym(libc.Memset).Call(asBytePtr(args[0]), args[1], args[2])), nil
+		return stmt(Sym(libc.Memset).Call(asBytePtr(args[0]), args[1], args[2])), nil
 	case "llvm_abs_i32":
 		if len(args) >= 1 {
-			return one(assign(VariableName(inst), Sym(libc.AbsI32).Call(args[0]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.AbsI32).Call(args[0]))), nil
 		}
 	case "llvm_sadd_with_overflow_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.SAddWithOverflowI32).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.SAddWithOverflowI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umax_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.UMaxU64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.UMaxU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umin_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.UMinU64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.UMinU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umax_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.UMaxU32).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.UMaxU32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_umin_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.UMinU32).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.UMinU32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smax_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.SMaxI64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.SMaxI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smin_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.SMinI64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.SMinI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smax_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.SMaxI32).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.SMaxI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_smin_i32":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.SMinI32).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.SMinI32).Call(args[0], args[1]))), nil
 		}
 	case "llvm_trap":
-		return one(Sym(libc.Abort).Call()), nil
+		return stmt(Sym(libc.Abort).Call()), nil
 	case "llvm_ceil_f64":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), Sym(math.Ceil).Call(args[0]))), nil
+			return stmt(assign(VariableName(inst), Sym(math.Ceil).Call(args[0]))), nil
 		}
 	case "llvm_vector_reduce_add_v4i32":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), Sym(libc.VecReduceAddV4I32).Call(args[0]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.VecReduceAddV4I32).Call(args[0]))), nil
 		}
 	case "llvm_load_relative_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.LoadRelativeI64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.LoadRelativeI64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_ctpop_i64":
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), Sym(bits.OnesCount64).Call(jen.Uint64().Call(args[0])))), nil
+			return stmt(assign(VariableName(inst), Sym(bits.OnesCount64).Call(jen.Uint64().Call(args[0])))), nil
 		}
 	case "llvm_umul_with_overflow_i64":
 		if len(args) == 2 {
-			return one(assign(VariableName(inst), Sym(libc.UMulWithOverflowU64).Call(args[0], args[1]))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.UMulWithOverflowU64).Call(args[0], args[1]))), nil
 		}
 	case "llvm_objectsize_i64_p0i8":
-		return one(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
+		return stmt(assign(VariableName(inst), jen.Op("-").Lit(1))), nil
 	case "llvm_stacksave":
-		return one(assign(VariableName(inst), jen.Nil())), nil
+		return stmt(assign(VariableName(inst), jen.Nil())), nil
 	}
 	// llvm.*.sat / bitop / math patterns used heavily by rustc Release IR.
 	if stmts, ok := translateLLVMPattern(llvmName, inst, args); ok {
@@ -1688,12 +1688,12 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	// llvm.threadlocal.address — TLS base is the global address in our model.
 	if strings.HasPrefix(llvmName, "llvm_threadlocal_address") {
 		if len(args) == 1 {
-			return one(assign(VariableName(inst), jen.Add(args[0]))), nil
+			return stmt(assign(VariableName(inst), jen.Add(args[0]))), nil
 		}
 	}
 	// llvm.is.constant.* — runtime value is never a compile-time constant.
 	if strings.HasPrefix(llvmName, "llvm_is_constant_") {
-		return one(assign(VariableName(inst), jen.False())), nil
+		return stmt(assign(VariableName(inst), jen.False())), nil
 	}
 	// llvm.ucmp / llvm.scmp → i8 {-1,0,1}. Go byte holds 255/0/1.
 	if strings.HasPrefix(llvmName, "llvm_ucmp_") || strings.HasPrefix(llvmName, "llvm_scmp_") {
@@ -1754,7 +1754,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		if ref, ok := libraryFunctions[llvmName]; ok {
 			callee = ref.code()
 			for i, a := range inst.Args {
-				args[i] = libcCallArg(libcArg{name: llvmName, i: i, a: a, got: args[i]})
+				args[i] = libcCallArg(libcArgument{name: llvmName, i: i, a: a, got: args[i]})
 			}
 			typedPtr = libcReturnsTypedPtr(llvmName)
 		} else if cxxNoopDtor(llvmName) {
@@ -1770,33 +1770,33 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 		} else if strings.Contains(llvmName, "throw_bad_cast") {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
-			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
+			return stmt(jen.Panic(jen.Lit("std::bad_cast"))), nil
 		} else if strings.Contains(llvmName, "panicking") ||
 			strings.Contains(llvmName, "handle_error") ||
 			strings.Contains(llvmName, "throw_logic_error") ||
 			strings.Contains(llvmName, "throw_length_error") ||
 			strings.Contains(llvmName, "throw_bad_alloc") ||
 			strings.Contains(llvmName, "throw_bad_array") {
-			return one(jen.Panic(jen.Lit("runtime error"))), nil
+			return stmt(jen.Panic(jen.Lit("runtime error"))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
-			return one(jen.Panic(jen.Lit("allocation error"))), nil
+			return stmt(jen.Panic(jen.Lit("allocation error"))), nil
 		} else if isRustAlloc(llvmName) {
 			fn := any(libc.RustAlloc)
 			if strings.Contains(llvmName, "zeroed") {
 				fn = libc.RustAllocZeroed
 			}
-			return one(assign(VariableName(inst), Sym(fn).Call(args...))), nil
+			return stmt(assign(VariableName(inst), Sym(fn).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_dealloc") {
-			return one(Sym(libc.RustDealloc).Call(args...)), nil
+			return stmt(Sym(libc.RustDealloc).Call(args...)), nil
 		} else if strings.Contains(llvmName, "__rust_realloc") {
-			return one(assign(VariableName(inst), Sym(libc.RustRealloc).Call(args...))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.RustRealloc).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_no_alloc_shim") {
 			return nil, nil
 		} else if llvmName == "_Znwm" || llvmName == "_Znam" {
-			return one(assign(VariableName(inst), Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), nil
 		} else if strings.HasPrefix(llvmName, "_Zdl") || strings.HasPrefix(llvmName, "_Zda") {
-			return one(Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))), nil
+			return stmt(Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))), nil
 		} else if _, ok := inst.Callee.(*ir.Func); ok {
 			callee = jen.Id(VariableName(inst.Callee.(value.Named)))
 			if c, ok := namedRef(llvmName); ok {
@@ -1825,18 +1825,18 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]jen.Code, error) {
 	dest := inst.Type()
 	if types.Equal(dest, types.Void) {
-		return one(callExpr), nil
+		return stmt(callExpr), nil
 	}
 	if isTaggedPointerType(dest) {
 		if typedPtr {
-			return one(assign(VariableName(inst), emitAddr(callExpr))), nil
+			return stmt(assign(VariableName(inst), emitAddr(callExpr))), nil
 		}
-		return one(assign(VariableName(inst), ptrToUint(callExpr))), nil
+		return stmt(assign(VariableName(inst), ptrToUint(callExpr))), nil
 	}
 	if _, ok := dest.(*types.PointerType); ok && typedPtr {
 		callExpr = emitPtr(callExpr)
 	}
-	return one(assign(VariableName(inst), callExpr)), nil
+	return stmt(assign(VariableName(inst), callExpr)), nil
 }
 
 func libcReturnsTypedPtr(name string) bool {
@@ -2215,7 +2215,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 			os = asBytePtr(args[0])
 		}
 		if len(args) > 1 {
-			p = emitUP(args[1])
+			p = emitUnsafePointer(args[1])
 		}
 		return fn, []jen.Code{os, p}, true, true
 	case cxxIOInsertBool:

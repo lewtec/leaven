@@ -263,7 +263,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if c, ok := namedRef(name); ok {
 			fn = c
 		}
-		return val(fnPtrBitcast(fn)), nil
+		return asExpr(fnPtrBitcast(fn)), nil
 
 	case *ir.Alias:
 		if v.Aliasee == nil {
@@ -282,7 +282,7 @@ func formatExpr(v value.Value) (expr, error) {
 			if c, ok := namedRef(name); ok {
 				fn = c
 			}
-			return val(fnPtrBitcast(fn)), nil
+			return asExpr(fnPtrBitcast(fn)), nil
 		}
 		if ref, ok := libraryGlobals[name]; ok {
 			return addrExpr(ref.code()), nil
@@ -310,7 +310,7 @@ func formatExpr(v value.Value) (expr, error) {
 			}
 			elems[i] = e
 		}
-		return val(formatComposite(t, elems)), nil
+		return asExpr(formatComposite(t, elems)), nil
 
 	case *constant.CharArray:
 		t, err := TypeSpec(v.Typ)
@@ -321,7 +321,7 @@ func formatExpr(v value.Value) (expr, error) {
 		for i, c := range v.X {
 			elems[i] = litUntyped(int64(c))
 		}
-		return val(formatComposite(t, elems)), nil
+		return asExpr(formatComposite(t, elems)), nil
 
 	case *constant.ExprBitCast:
 		from, err := FormatValue(v.From)
@@ -332,32 +332,32 @@ func formatExpr(v value.Value) (expr, error) {
 			if err != nil {
 				return expr{}, err
 			}
-			return val(packed), nil
+			return asExpr(packed), nil
 		}
 		if vec, err := vectorBitCast(from, v.From.Type(), v.To); vec != nil || err != nil {
 			if err != nil {
 				return expr{}, err
 			}
-			return val(vec), nil
+			return asExpr(vec), nil
 		}
 		if bits, err := scalarBitCast(from, v.From.Type(), v.To); bits != nil || err != nil {
 			if err != nil {
 				return expr{}, err
 			}
-			return val(bits), nil
+			return asExpr(bits), nil
 		}
 		if isTaggedPointerType(v.To) {
-			return val(ptrToUint(from)), nil
+			return asExpr(ptrToUint(from)), nil
 		}
 		if isTaggedPointerType(v.From.Type()) {
 			to, err := TypeSpec(v.To)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 			}
-			return val(jen.Parens(to).Call(emitUP(from))), nil
+			return asExpr(jen.Parens(to).Call(emitUnsafePointer(from))), nil
 		}
 		// Pointer values are already unsafe.Pointer.
-		return val(from), nil
+		return asExpr(from), nil
 
 	case *constant.ExprIntToPtr:
 		// Unsigned bit pattern: uintptr(negative int64) is a Go constant overflow.
@@ -369,7 +369,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(jen.Parens(to).Call(emitUP(jen.Uintptr().Call(from)))), nil
+		return asExpr(jen.Parens(to).Call(emitUnsafePointer(jen.Uintptr().Call(from)))), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)
@@ -380,7 +380,7 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return val(conv(to, ptrToUint(from))), nil
+		return asExpr(convert(to, ptrToUint(from))), nil
 
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
@@ -394,28 +394,28 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, err
 		}
-		return val(c), nil
+		return asExpr(c), nil
 
 	case *constant.ExprZExt:
 		c, err := formatZExt(v.From, v.To)
 		if err != nil {
 			return expr{}, err
 		}
-		return val(c), nil
+		return asExpr(c), nil
 
 	case *constant.ExprSExt:
 		c, err := formatSExt(v.From, v.To)
 		if err != nil {
 			return expr{}, err
 		}
-		return val(c), nil
+		return asExpr(c), nil
 
 	case *constant.ExprTrunc:
 		c, err := formatTrunc(v.From, v.To)
 		if err != nil {
 			return expr{}, err
 		}
-		return val(c), nil
+		return asExpr(c), nil
 
 	case *constant.ExprAdd:
 		return formatBinConst("+", v.X, v.Y)
@@ -455,17 +455,17 @@ func formatExpr(v value.Value) (expr, error) {
 		if c != nil && (result == "+Inf" || result == "-Inf" || result == "NaN") && v.Typ.Kind == types.FloatKindFloat {
 			c = jen.Float32().Call(c)
 		}
-		return val(c), nil
+		return asExpr(c), nil
 
 	case *constant.Index:
 		return formatExpr(v.Constant)
 
 	case *constant.Int:
 		if v.Typ.BitSize == 128 {
-			return val(i128Lit(v.X)), nil
+			return asExpr(i128Lit(v.X)), nil
 		}
 		if v.Typ.BitSize == 256 {
-			return val(i256Lit(v.X)), nil
+			return asExpr(i256Lit(v.X)), nil
 		}
 		if v.Typ.BitSize > 64 {
 			return expr{}, fmt.Errorf("%w: i%d constant %v", errUnsupportedIntWidth, v.Typ.BitSize, v.X)
@@ -489,28 +489,28 @@ func formatExpr(v value.Value) (expr, error) {
 
 		if v.Typ.BitSize == 1 {
 			if n != 0 {
-				return val(jen.True()), nil
+				return asExpr(jen.True()), nil
 			}
-			return val(jen.False()), nil
+			return asExpr(jen.False()), nil
 		}
 		switch goIntBits(v.Typ.BitSize) {
 		case 8:
-			return val(litUntyped(int64(byte(n)))), nil
+			return asExpr(litUntyped(int64(byte(n)))), nil
 		case 16, 32:
-			return val(litUntyped(n)), nil
+			return asExpr(litUntyped(n)), nil
 		case 64:
 			// Typed so large bit patterns never appear as untyped ints.
-			return val(jen.Lit(n)), nil
+			return asExpr(jen.Lit(n)), nil
 		default:
-			return val(litUntyped(n)), nil
+			return asExpr(litUntyped(n)), nil
 		}
 
 	case *constant.Null:
 		// Tagged union pointers are uintptr; use 0 not nil.
 		if isTaggedPointerType(v.Typ) {
-			return val(jen.Lit(0)), nil
+			return asExpr(jen.Lit(0)), nil
 		}
-		return val(jen.Nil()), nil
+		return asExpr(jen.Nil()), nil
 
 	case *constant.Struct:
 		t, err := TypeSpec(v.Typ)
@@ -525,7 +525,7 @@ func formatExpr(v value.Value) (expr, error) {
 			}
 			elems[i] = e
 		}
-		return val(formatComposite(t, elems)), nil
+		return asExpr(formatComposite(t, elems)), nil
 
 	case *constant.Undef:
 		return zeroOf(v.Typ)
@@ -545,17 +545,17 @@ func formatExpr(v value.Value) (expr, error) {
 			}
 			elems[i] = e
 		}
-		return val(formatComposite(t, elems)), nil
+		return asExpr(formatComposite(t, elems)), nil
 
 	case *constant.ZeroInitializer:
 		if it, ok := v.Typ.(*types.IntType); ok && it.BitSize == 1 {
-			return val(jen.False()), nil
+			return asExpr(jen.False()), nil
 		}
 		t, err := TypeSpec(v.Typ)
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
-		return val(jen.Add(t).Values()), nil
+		return asExpr(jen.Add(t).Values()), nil
 
 	default:
 		return expr{}, fmt.Errorf("%w: %T", errUnsupportedValueType, v)
@@ -569,25 +569,25 @@ func zeroOf(typ types.Type) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", typ, err)
 		}
-		return val(jen.Add(ts).Values()), nil
+		return asExpr(jen.Add(ts).Values()), nil
 	case *types.IntType:
 		if t.BitSize == 1 {
-			return val(jen.False()), nil
+			return asExpr(jen.False()), nil
 		}
 		if t.BitSize == 128 {
-			return val(Qual[libc.I128]().Values()), nil
+			return asExpr(Qual[libc.I128]().Values()), nil
 		}
 		if t.BitSize == 256 {
-			return val(Qual[libc.I256]().Values()), nil
+			return asExpr(Qual[libc.I256]().Values()), nil
 		}
-		return val(jen.Lit(0)), nil
+		return asExpr(jen.Lit(0)), nil
 	case *types.FloatType:
-		return val(jen.Lit(0)), nil
+		return asExpr(jen.Lit(0)), nil
 	case *types.PointerType:
 		if isTaggedPointerType(t) {
-			return val(jen.Lit(0)), nil
+			return asExpr(jen.Lit(0)), nil
 		}
-		return val(jen.Nil()), nil
+		return asExpr(jen.Nil()), nil
 	default:
 		return expr{}, fmt.Errorf("%w: %v", errUnsupportedUndefType, typ)
 	}
@@ -740,7 +740,7 @@ func formatICmp(pred enum.IPred, xVal, yVal value.Value) (*jen.Statement, error)
 	if err != nil {
 		return nil, fmt.Errorf("error translating right operand (%v): %w", yVal, err)
 	}
-	return bin(x, op, y), nil
+	return infix(x, op, y), nil
 }
 
 // formatZExt is the expression form of zext (usable in constant expressions).
@@ -782,7 +782,7 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 			jen.False(): jen.Lit(0),
 		}).Index(src), nil
 	}
-	return conv(goIntType(w), conv(goUintType(w), src)), nil
+	return convert(goIntType(w), convert(goUintType(w), src)), nil
 }
 
 // formatSExt is the expression form of sext.
@@ -820,7 +820,7 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		// Go has no int32(bool). sext i1: true → -1.
 		return boolToInt(src, toType.BitSize, true), nil
 	}
-	return conv(goIntType(toType.BitSize), src), nil
+	return convert(goIntType(toType.BitSize), src), nil
 }
 
 // boolToInt is zext/sext of i1. signed: true→-1; unsigned: true→1.
@@ -957,9 +957,9 @@ func formatBinConst(op string, x, y constant.Constant) (expr, error) {
 		if !ok {
 			return expr{}, fmt.Errorf("%w: i%d %s", errUnsupportedInstruction, bits, op)
 		}
-		return val(fn.Call(l, r)), nil
+		return asExpr(fn.Call(l, r)), nil
 	}
-	return val(jen.Parens(bin(l, op, r))), nil
+	return asExpr(jen.Parens(infix(l, op, r))), nil
 }
 
 // formatTrunc is the expression form of trunc.
@@ -975,7 +975,7 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 	if isI128(from.Type()) {
 		it, ok := to.(*types.IntType)
 		if !ok {
-			return conv(toSpec, src), nil
+			return convert(toSpec, src), nil
 		}
 		switch {
 		case it.BitSize == 1:
@@ -993,7 +993,7 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 	if isI256(from.Type()) {
 		it, ok := to.(*types.IntType)
 		if !ok {
-			return conv(toSpec, src), nil
+			return convert(toSpec, src), nil
 		}
 		switch {
 		case it.BitSize == 1:
@@ -1011,12 +1011,12 @@ func formatTrunc(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize == 1 {
-		return jen.Parens(bin(src, "&", jen.Lit(1))).Op("!=").Lit(0), nil
+		return jen.Parens(infix(src, "&", jen.Lit(1))).Op("!=").Lit(0), nil
 	}
 	if intType, ok := to.(*types.IntType); ok && intType.BitSize < 8 {
-		return jen.Byte().Call(bin(src, "&", litUntyped(int64(255>>(8-intType.BitSize))))), nil
+		return jen.Byte().Call(infix(src, "&", litUntyped(int64(255>>(8-intType.BitSize))))), nil
 	}
-	return conv(toSpec, src), nil
+	return convert(toSpec, src), nil
 }
 
 // FormatSigned is like FormatValue, except that it converts "byte" to "int8".
@@ -1108,7 +1108,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 			return result, nil
 		}
 		if t.BitSize > 8 {
-			return conv(goUintType(t.BitSize), result), nil
+			return convert(goUintType(t.BitSize), result), nil
 		}
 	case *types.PointerType:
 		return ptrToUint(result), nil

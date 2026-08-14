@@ -127,7 +127,7 @@ func typeDefinitionIgnoringTagged(t types.Type) (*jen.Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		return ptrTyp(elem), nil
+		return pointerType(elem), nil
 	default:
 		return TypeDefinition(t)
 	}

@@ -83,15 +83,15 @@ func assign(name string, rhs jen.Code) *jen.Statement {
 	return jen.Id(name).Op("=").Add(rhs)
 }
 
-func bin(lhs jen.Code, op string, rhs jen.Code) *jen.Statement {
+func infix(lhs jen.Code, op string, rhs jen.Code) *jen.Statement {
 	return jen.Add(lhs).Op(op).Add(rhs)
 }
 
-func conv(typ, expr jen.Code) *jen.Statement {
+func convert(typ, expr jen.Code) *jen.Statement {
 	return jen.Add(typ).Call(expr)
 }
 
-func ptrTyp(t jen.Code) *jen.Statement {
+func pointerType(t jen.Code) *jen.Statement {
 	return jen.Op("*").Add(t)
 }
 
@@ -199,15 +199,15 @@ func emitAddPtr(t, p, i jen.Code) *jen.Statement {
 	return symAddPtr.Types(t).Call(p, i)
 }
 
-// emitUP is unsafe.Pointer(x) for integer bit patterns (inttoptr),
+// emitUnsafePointer is unsafe.Pointer(x) for integer bit patterns (inttoptr),
 // not a Go *T. Use emitPtr when x is already a pointer.
-func emitUP(x jen.Code) *jen.Statement {
+func emitUnsafePointer(x jen.Code) *jen.Statement {
 	return Qual[unsafe.Pointer]().Call(x)
 }
 
-// ptrToUint is uintptr(unsafe.Pointer(p)). emitUP so untyped nil is valid.
+// ptrToUint is uintptr(unsafe.Pointer(p)). emitUnsafePointer so untyped nil is valid.
 func ptrToUint(p jen.Code) *jen.Statement {
-	return jen.Uintptr().Call(emitUP(p))
+	return jen.Uintptr().Call(emitUnsafePointer(p))
 }
 
 func goIntType(bits uint64) *jen.Statement  { return goBitsType(bits, false) }
@@ -282,12 +282,12 @@ func litUint64(n uint64) *jen.Statement {
 	return jen.Uint64().Call(jen.Op(fmt.Sprintf("%d", n)))
 }
 
-type vecBin struct {
+type vectorBinary struct {
 	dest, op string
 	x, y     jen.Code
 }
 
-func vectorBin(v vecBin) *jen.Statement {
+func vectorBin(v vectorBinary) *jen.Statement {
 	return jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(v.x)).Block(
 		jen.Id(v.dest).Index(jen.Id("i")).Op("=").Id("v").Op(v.op).Add(v.y).Index(jen.Id("i")),
 	)
@@ -348,7 +348,7 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 		if !ok {
 			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
 		}
-		return conv(goIntType(it.BitSize), Sym(fn).Call(src)), nil
+		return convert(goIntType(it.BitSize), Sym(fn).Call(src)), nil
 	}
 	if n, ok := i1VectorLen(to); ok {
 		it, ok := from.(*types.IntType)
@@ -359,7 +359,7 @@ func i1VectorBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, e
 		if !ok {
 			return nil, fmt.Errorf("%w: <%d x i1>", errUnsupportedIntWidth, n)
 		}
-		return Sym(fn).Call(conv(goIntType(it.BitSize), src)), nil
+		return Sym(fn).Call(convert(goIntType(it.BitSize), src)), nil
 	}
 	return nil, nil
 }
@@ -407,9 +407,9 @@ func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, err
 	case fromF != nil && toI != nil:
 		switch bits {
 		case 32:
-			return conv(goIntType(32), Sym(math.Float32bits).Call(src)), nil
+			return convert(goIntType(32), Sym(math.Float32bits).Call(src)), nil
 		case 64:
-			return conv(goIntType(64), Sym(math.Float64bits).Call(src)), nil
+			return convert(goIntType(64), Sym(math.Float64bits).Call(src)), nil
 		default:
 			return nil, fmt.Errorf("%w: %v and %v", errUnsupportedFloatType, from, to)
 		}
@@ -427,11 +427,11 @@ func scalarBitCast(src *jen.Statement, from, to types.Type) (*jen.Statement, err
 		if err != nil {
 			return nil, err
 		}
-		return conv(dst, src), nil
+		return convert(dst, src), nil
 	}
 }
 
-func one(s *jen.Statement) []jen.Code {
+func stmt(s *jen.Statement) []jen.Code {
 	if s == nil {
 		return nil
 	}
@@ -453,7 +453,7 @@ type expr struct {
 	base *jen.Statement
 }
 
-func val(c *jen.Statement) expr {
+func asExpr(c *jen.Statement) expr {
 	return expr{code: c}
 }
 
