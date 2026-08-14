@@ -134,7 +134,7 @@ void init()
     vz[4] = -9.51592254519715870e-05 * days_per_year;
     mass[4] = 5.15138902046611451e-05 * solar_mass;
 }
-int test_main()
+int main()
 {
     int n = 5000000;
     init();

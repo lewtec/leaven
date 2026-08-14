@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "func main",
+        "libc.Malloc",
+        "libc.Free",
+        "libc.Printf"
+      ],
+      "not_contains": [
+        "test_main"
+      ]
+    }
+  ]
+}

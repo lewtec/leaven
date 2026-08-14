@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "package p",
+        "func main",
+        "libc.Puts"
+      ],
+      "not_contains": [
+        "test_main"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [
+      "Hello, world"
+    ]
+  }
+}

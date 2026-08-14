@@ -70,7 +70,7 @@ void tk(int n)
    }
 }
 
-int test_main()
+int main()
 {
    int i;
 
