@@ -13,9 +13,38 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: "386"
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+          - runner: windows-11-arm
+            goos: windows
+            goarch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -26,10 +55,13 @@ jobs:
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 
       - name: IR fixtures
+        shell: bash
         run: mise run test
 
       - name: Csmith smoke (seed=1)
+        shell: bash
         run: mise run test:csmith
 
       - name: Assimilate csmith + rhai
+        shell: bash
         run: mise run test:assimilate
