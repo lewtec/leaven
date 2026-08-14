@@ -95,3 +95,18 @@ func TestRbTreeInorderTwo(t *testing.T) {
 		t.Fatalf("inc b")
 	}
 }
+
+func TestRbTreeBeginBitwiseEmptyCopy(t *testing.T) {
+	var src, dst struct {
+		_   [rbTreeImplHeaderOff]byte
+		hdr rbNode
+	}
+	RbTreeInit(As[byte](Ptr(&src)))
+	dst = src
+	got := RbTreeBegin(As[byte](Ptr(&dst)))
+	want := rbByte(&dst.hdr)
+	if got != want {
+		t.Fatalf("begin after bitwise empty copy = %p, want dest header %p (src header %p)",
+			got, want, rbByte(&src.hdr))
+	}
+}

@@ -2050,6 +2050,8 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 		return Sym(libc.RbTreeInsertAndRebalance).code(), cxxTreeInsert, true
 	case strings.Contains(name, "_Rb_tree_rebalance_for_erase"):
 		return Sym(libc.RbTreeRebalanceForErase).code(), cxxTreeErase, true
+	case isRbTreeBegin(name):
+		return Sym(libc.RbTreeBegin).code(), cxxTreeWalk, true
 	case isRbTreeDefaultCtor(name):
 		return Sym(libc.RbTreeInit).code(), cxxTreeInit, true
 	default:
@@ -2059,6 +2061,13 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 
 func isRbTreeDefaultCtor(name string) bool {
 	if !strings.HasSuffix(name, "C1Ev") && !strings.HasSuffix(name, "C2Ev") {
+		return false
+	}
+	return strings.Contains(name, "St8_Rb_tree") || strings.Contains(name, "St3mapI")
+}
+
+func isRbTreeBegin(name string) bool {
+	if !strings.Contains(name, "5beginEv") {
 		return false
 	}
 	return strings.Contains(name, "St8_Rb_tree") || strings.Contains(name, "St3mapI")

@@ -109,11 +109,42 @@ func RbTreeInit(tree *byte) {
 	Store[uint64](Ptr(header), rbCountOff, 0)
 }
 
+// rbEmptyHeader reports a libstdc++ empty-tree header: parent nil, left
+// and right self-ref. A bitwise copy of an empty map leaves dest.left
+// pointing at the source header; begin() must not walk that as a value.
+func rbEmptyHeader(n *rbNode) bool {
+	return n != nil && n.parent == nil && n.left == n && n.right == n
+}
+
+// RbTreeBegin is std::map / _Rb_tree::begin. Returns the leftmost node,
+// or the header when the tree is empty — including after a bitwise copy
+// of an empty map (left still names the source header).
+func RbTreeBegin(tree *byte) *byte {
+	if tree == nil {
+		return nil
+	}
+	header := As[byte](Off(Ptr(tree), rbTreeImplHeaderOff))
+	h := rb(header)
+	if h == nil || h.left == nil || h.left == h {
+		return header
+	}
+	if rbEmptyHeader(h.left) {
+		return header
+	}
+	return rbByte(h.left)
+}
+
 // RbTreeInsertAndRebalance is std::_Rb_tree_insert_and_rebalance
 // (gcc libstdc++-v3/src/c++98/tree.cc).
 func RbTreeInsertAndRebalance(insertLeft bool, x, p, header *byte) {
 	if x == nil || p == nil || header == nil {
 		return
+	}
+	// Bitwise-copied empty map: leftmost still names the source header.
+	if hn := rb(header); hn != nil && hn.left != nil && hn.left != hn && rbEmptyHeader(hn.left) {
+		hn.left = hn
+		hn.right = hn
+		hn.parent = nil
 	}
 	xn, pn, h := rb(x), rb(p), rb(header)
 	xn.parent = pn

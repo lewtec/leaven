@@ -69,6 +69,9 @@ func TestCxxTreeCall(t *testing.T) {
 	if _, a, ret, ok := cxxTreeCall("_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_", nil); !ok || ret || len(a) != 4 {
 		t.Fatalf("insert %v %d", ret, len(a))
 	}
+	if _, a, ret, ok := cxxTreeCall("_ZNKSt3mapIPK1VjSt4lessIS2_ESaISt4pairIKS2_jEEE5beginEv", nil); !ok || !ret || len(a) != 1 {
+		t.Fatalf("map begin %v %d", ret, len(a))
+	}
 }
 
 func TestCxxIOCallLocaleCtor(t *testing.T) {
