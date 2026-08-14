@@ -303,7 +303,9 @@ func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*j
 	// Named scalar ptr cell (global/alloca) is unsafe.Pointer. Overlay
 	// and aggregate slots are uint64.
 	scalarCell := dst.base != nil && wholeVarAccess(dstVal, elem) && isScalarPtrObject(dstVal)
-	if isMemPtr(elem) && !scalarCell {
+	if isTaggedPointerType(elem) {
+		src = ptrToUint(src)
+	} else if isMemPtr(elem) && !scalarCell {
 		src = asMemSlotCode(elem, src)
 	}
 	if dst.base != nil && wholeVarAccess(dstVal, elem) {

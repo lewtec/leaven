@@ -233,14 +233,13 @@ func formatMemSlot(c value.Value) (jen.Code, error) {
 	if err != nil {
 		return nil, err
 	}
-	pt, ok := c.Type().(*types.PointerType)
-	if !ok || isTaggedPointerType(pt) {
-		return e, nil
+	if isMemPtr(c.Type()) {
+		return Sym(libc.PtrBits).Call(e), nil
 	}
-	if _, isNull := c.(*constant.Null); isNull {
-		return jen.Lit(0), nil
+	if isTaggedPointerType(c.Type()) {
+		return ptrToUint(e), nil
 	}
-	return jen.Uint64().Call(jen.Uintptr().Call(e)), nil
+	return e, nil
 }
 
 func fnPtrBitcast(from *jen.Statement) *jen.Statement {

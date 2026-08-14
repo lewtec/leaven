@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.PtrBits",
+        "libc.PtrFromBits"
+      ],
+      "not_contains": [
+        "uintptr(nil)"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
