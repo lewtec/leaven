@@ -259,15 +259,8 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			}
 			emitted += fs
 		}
-		if !t.Packed {
-			sz, err := llvmTypeSize(t)
-			if err != nil {
-				return nil, err
-			}
-			if gap := sz - emitted; gap > 0 {
-				fields = append(fields, jen.Id(fmt.Sprintf("_pad%d", sz)).Index(jen.Lit(int(gap))).Byte())
-			}
-		}
+		// No tail pad: libc overflow helpers return {T, bool} without one,
+		// and Go already aligns {int64, bool} to 16 on amd64.
 		if len(fields) == 0 {
 			return jen.Struct(), nil
 		}

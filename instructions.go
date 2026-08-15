@@ -1843,8 +1843,12 @@ func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]je
 		if _, ok := dest.(*types.PointerType); ok {
 			callExpr = emitPtr(callExpr)
 		} else if _, ok := dest.(*types.IntType); ok {
-			// Mem-slot / ptrtoint dest: *T overlay result stored as i64 bits.
-			callExpr = Sym(libc.PtrBits).Call(emitPtr(callExpr))
+			// Mem-slot / ptrtoint dest is i64; PtrBits is uint64.
+			to, err := TypeSpec(dest)
+			if err != nil {
+				return nil, err
+			}
+			callExpr = convert(to, Sym(libc.PtrBits).Call(emitPtr(callExpr)))
 		}
 	}
 	return stmt(assign(VariableName(inst), callExpr)), nil
