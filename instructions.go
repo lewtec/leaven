@@ -107,7 +107,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			jen.If(jen.Op("!").Id(okName)).Block(
 				jen.Id(oldName).Op("=").Add(atomicLoadFunc(inst.Cmp.Type()).Call(p)),
 			),
-			assign(name, jen.Add(ret).Values(asMemSlotExpr(inst.Cmp.Type(), jen.Id(oldName)), jen.Id(okName))),
+			assign(name, jen.Add(ret).Add(structFieldValues([]jen.Code{
+				asMemSlotExpr(inst.Cmp.Type(), jen.Id(oldName)),
+				jen.Id(okName),
+			}))),
 		}, nil
 
 	case *ir.InstAtomicRMW:
@@ -153,9 +156,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 
 	case *ir.InstAlloca:
-		t, err := translateType(inst.ElemType, "type")
+		// LLVM ptr slots are uint64 (8 bytes). TypeSpec(ptr) is
+		// unsafe.Pointer (4 on 386); stores write PtrBits through
+		// *As[uint64] and would smash the heap.
+		t, err := memSlotType(inst.ElemType)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error translating type: %w", err)
 		}
 		name := VariableName(inst)
 		// Force align ≥8 so pointers never have LSB set (Rust niches / tagged
@@ -1391,10 +1397,10 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 			default:
 				return nil, false
 			}
-			return stmt(assign(name, jen.Add(ret).Values(
+			return stmt(assign(name, jen.Add(ret).Add(structFieldValues([]jen.Code{
 				fn.Call(jen.Add(args[0]), jen.Add(args[1])),
 				jen.False(),
-			))), true
+			})))), true
 		}
 		var op string
 		switch {
@@ -1407,10 +1413,10 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		default:
 			return nil, false
 		}
-		return stmt(assign(name, jen.Add(ret).Values(
+		return stmt(assign(name, jen.Add(ret).Add(structFieldValues([]jen.Code{
 			jen.Add(args[0]).Op(op).Add(args[1]),
 			jen.False(),
-		))), true
+		})))), true
 	}
 	return nil, false
 }
@@ -1833,8 +1839,13 @@ func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]je
 		}
 		return stmt(assign(VariableName(inst), ptrToUint(callExpr))), nil
 	}
-	if _, ok := dest.(*types.PointerType); ok && typedPtr {
-		callExpr = emitPtr(callExpr)
+	if typedPtr {
+		if _, ok := dest.(*types.PointerType); ok {
+			callExpr = emitPtr(callExpr)
+		} else if _, ok := dest.(*types.IntType); ok {
+			// Mem-slot / ptrtoint dest: *T overlay result stored as i64 bits.
+			callExpr = Sym(libc.PtrBits).Call(emitPtr(callExpr))
+		}
 	}
 	return stmt(assign(VariableName(inst), callExpr)), nil
 }

@@ -5,7 +5,7 @@
       "package": "main",
       "contains": [
         "type anon_1 struct",
-        "var g anon_1 = anon_1{1, 2}",
+        "var g anon_1 = anon_1{",
         "func get() byte",
         "v0 = g.F0"
       ],

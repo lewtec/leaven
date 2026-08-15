@@ -6,7 +6,8 @@ package libc
 //   _M_left   ptr @16
 //   _M_right  ptr @24
 // From gcc libstdc++-v3/src/c++98/tree.cc.
-// Links are *rbNode (same size as void*) so the overlay stays ABI-correct.
+// Links are uint64 (LLVM ptr / x86_64 slot), not Go *rbNode: native
+// pointers are 4 bytes on 386 and GEP *8 then lands in the wrong field.
 
 const (
 	rbColorOff  = 0
@@ -19,11 +20,23 @@ const (
 )
 
 type rbNode struct {
-	color  int32
-	_      int32
-	parent *rbNode
-	left   *rbNode
-	right  *rbNode
+	color               int32
+	_                   int32
+	parent, left, right uint64
+}
+
+func rbPtr(u uint64) *rbNode {
+	if u == 0 {
+		return nil
+	}
+	return As[rbNode](PtrFromBits(u))
+}
+
+func rbBits(n *rbNode) uint64 {
+	if n == nil {
+		return 0
+	}
+	return PtrBits(Ptr(n))
 }
 
 func rb(p *byte) *rbNode {
@@ -46,20 +59,21 @@ func RbTreeDecrement(x *byte) *byte {
 	if n == nil {
 		return nil
 	}
-	if n.color == rbRed && n.parent != nil && n.parent.parent == n {
-		return rbByte(n.right)
+	p := rbPtr(n.parent)
+	if n.color == rbRed && p != nil && p.parent == rbBits(n) {
+		return rbByte(rbPtr(n.right))
 	}
-	if n.left != nil {
-		y := n.left
-		for y.right != nil {
-			y = y.right
+	if n.left != 0 {
+		y := rbPtr(n.left)
+		for y.right != 0 {
+			y = rbPtr(y.right)
 		}
 		return rbByte(y)
 	}
-	y := n.parent
-	for y != nil && n == y.left {
+	y := p
+	for y != nil && rbBits(n) == y.left {
 		n = y
-		y = y.parent
+		y = rbPtr(y.parent)
 	}
 	return rbByte(y)
 }
@@ -70,19 +84,19 @@ func RbTreeIncrement(x *byte) *byte {
 	if n == nil {
 		return nil
 	}
-	if n.right != nil {
-		n = n.right
-		for n.left != nil {
-			n = n.left
+	if n.right != 0 {
+		n = rbPtr(n.right)
+		for n.left != 0 {
+			n = rbPtr(n.left)
 		}
 		return rbByte(n)
 	}
-	y := n.parent
-	for y != nil && n == y.right {
+	y := rbPtr(n.parent)
+	for y != nil && rbBits(n) == y.right {
 		n = y
-		y = y.parent
+		y = rbPtr(y.parent)
 	}
-	if y != nil && n.right != y {
+	if y != nil && n.right != rbBits(y) {
 		n = y
 	}
 	return rbByte(n)
@@ -103,9 +117,10 @@ func RbTreeInit(tree *byte) {
 	header := As[byte](Off(Ptr(tree), rbTreeImplHeaderOff))
 	n := rb(header)
 	n.color = rbRed
-	n.parent = nil
-	n.left = n
-	n.right = n
+	self := rbBits(n)
+	n.parent = 0
+	n.left = self
+	n.right = self
 	Store[uint64](Ptr(header), rbCountOff, 0)
 }
 
@@ -113,7 +128,11 @@ func RbTreeInit(tree *byte) {
 // and right self-ref. A bitwise copy of an empty map leaves dest.left
 // pointing at the source header; begin() must not walk that as a value.
 func rbEmptyHeader(n *rbNode) bool {
-	return n != nil && n.parent == nil && n.left == n && n.right == n
+	if n == nil {
+		return false
+	}
+	self := rbBits(n)
+	return n.parent == 0 && n.left == self && n.right == self
 }
 
 // RbTreeBegin is std::map / _Rb_tree::begin. Returns the leftmost node,
@@ -125,13 +144,13 @@ func RbTreeBegin(tree *byte) *byte {
 	}
 	header := As[byte](Off(Ptr(tree), rbTreeImplHeaderOff))
 	h := rb(header)
-	if h == nil || h.left == nil || h.left == h {
+	if h == nil || h.left == 0 || h.left == rbBits(h) {
 		return header
 	}
-	if rbEmptyHeader(h.left) {
+	if rbEmptyHeader(rbPtr(h.left)) {
 		return header
 	}
-	return rbByte(h.left)
+	return rbByte(rbPtr(h.left))
 }
 
 // RbTreeInsertAndRebalance is std::_Rb_tree_insert_and_rebalance
@@ -141,113 +160,115 @@ func RbTreeInsertAndRebalance(insertLeft bool, x, p, header *byte) {
 		return
 	}
 	// Bitwise-copied empty map: leftmost still names the source header.
-	if hn := rb(header); hn != nil && hn.left != nil && hn.left != hn && rbEmptyHeader(hn.left) {
-		hn.left = hn
-		hn.right = hn
-		hn.parent = nil
+	if hn := rb(header); hn != nil && hn.left != 0 && hn.left != rbBits(hn) && rbEmptyHeader(rbPtr(hn.left)) {
+		self := rbBits(hn)
+		hn.left = self
+		hn.right = self
+		hn.parent = 0
 	}
 	xn, pn, h := rb(x), rb(p), rb(header)
-	xn.parent = pn
-	xn.left = nil
-	xn.right = nil
+	xb, pb := rbBits(xn), rbBits(pn)
+	xn.parent = pb
+	xn.left = 0
+	xn.right = 0
 	xn.color = rbRed
 	xp := xn
 	if insertLeft {
-		pn.left = xp
+		pn.left = xb
 		if p == header {
-			h.parent = xp
-			h.right = xp
-		} else if pn == h.left {
-			h.left = xp
+			h.parent = xb
+			h.right = xb
+		} else if pb == h.left {
+			h.left = xb
 		}
 	} else {
-		pn.right = xp
-		if pn == h.right {
-			h.right = xp
+		pn.right = xb
+		if pb == h.right {
+			h.right = xb
 		}
 	}
-	for xp != h.parent && xn.parent != nil && xn.parent.color == rbRed {
-		xpp := xn.parent.parent
+	for rbBits(xp) != h.parent && xn.parent != 0 && rbPtr(xn.parent).color == rbRed {
+		xpp := rbPtr(rbPtr(xn.parent).parent)
 		if xpp == nil {
 			break
 		}
 		if xn.parent == xpp.left {
-			y := xpp.right
+			y := rbPtr(xpp.right)
 			if y != nil && y.color == rbRed {
-				xn.parent.color = rbBlack
+				rbPtr(xn.parent).color = rbBlack
 				y.color = rbBlack
 				xpp.color = rbRed
 				xn = xpp
 				xp = xn
 				continue
 			}
-			if xp == xn.parent.right {
-				xn = xn.parent
+			if rbBits(xp) == rbPtr(xn.parent).right {
+				xn = rbPtr(xn.parent)
 				xp = xn
 				rbRotateLeft(xn, h)
 			}
-			xn.parent.color = rbBlack
+			rbPtr(xn.parent).color = rbBlack
 			xpp.color = rbRed
 			rbRotateRight(xpp, h)
 		} else {
-			y := xpp.left
+			y := rbPtr(xpp.left)
 			if y != nil && y.color == rbRed {
-				xn.parent.color = rbBlack
+				rbPtr(xn.parent).color = rbBlack
 				y.color = rbBlack
 				xpp.color = rbRed
 				xn = xpp
 				xp = xn
 				continue
 			}
-			if xp == xn.parent.left {
-				xn = xn.parent
+			if rbBits(xp) == rbPtr(xn.parent).left {
+				xn = rbPtr(xn.parent)
 				xp = xn
 				rbRotateRight(xn, h)
 			}
-			xn.parent.color = rbBlack
+			rbPtr(xn.parent).color = rbBlack
 			xpp.color = rbRed
 			rbRotateLeft(xpp, h)
 		}
 	}
-	if h.parent != nil {
-		h.parent.color = rbBlack
+	if hp := rbPtr(h.parent); hp != nil {
+		hp.color = rbBlack
 	}
 }
 
 func rbRotateLeft(x, header *rbNode) {
-	y := x.right
+	y := rbPtr(x.right)
 	x.right = y.left
-	if y.left != nil {
-		y.left.parent = x
+	if y.left != 0 {
+		rbPtr(y.left).parent = rbBits(x)
 	}
 	rbAttachParent(x, y, header)
-	y.left = x
-	x.parent = y
+	y.left = rbBits(x)
+	x.parent = rbBits(y)
 }
 
 func rbRotateRight(x, header *rbNode) {
-	y := x.left
+	y := rbPtr(x.left)
 	x.left = y.right
-	if y.right != nil {
-		y.right.parent = x
+	if y.right != 0 {
+		rbPtr(y.right).parent = rbBits(x)
 	}
 	rbAttachParent(x, y, header)
-	y.right = x
-	x.parent = y
+	y.right = rbBits(x)
+	x.parent = rbBits(y)
 }
 
 // rbAttachParent puts y where x sat in the parent / header.
 func rbAttachParent(x, y, header *rbNode) {
 	y.parent = x.parent
-	if x == header.parent {
-		header.parent = y
+	if rbBits(x) == header.parent {
+		header.parent = rbBits(y)
 		return
 	}
-	p := x.parent
-	if x == p.left {
-		p.left = y
+	p := rbPtr(x.parent)
+	if rbBits(x) == p.left {
+		p.left = rbBits(y)
 	} else {
-		p.right = y
+		p.right = rbBits(y)
 	}
 }
 
@@ -262,142 +283,144 @@ func RbTreeRebalanceForErase(z, header *byte) *byte {
 	y := zn
 	var x, xParent *rbNode
 
-	if zn.left == nil {
-		x = zn.right
-	} else if zn.right == nil {
-		x = zn.left
+	if zn.left == 0 {
+		x = rbPtr(zn.right)
+	} else if zn.right == 0 {
+		x = rbPtr(zn.left)
 	} else {
-		y = zn.right
-		for y.left != nil {
-			y = y.left
+		y = rbPtr(zn.right)
+		for y.left != 0 {
+			y = rbPtr(y.left)
 		}
-		x = y.right
+		x = rbPtr(y.right)
 	}
 
+	yb, zb := rbBits(y), rbBits(zn)
+	xb := rbBits(x)
 	if y != zn {
-		zn.left.parent = y
+		rbPtr(zn.left).parent = yb
 		y.left = zn.left
-		if y != zn.right {
-			xParent = y.parent
+		if yb != zn.right {
+			xParent = rbPtr(y.parent)
 			if x != nil {
 				x.parent = y.parent
 			}
-			y.parent.left = x
+			rbPtr(y.parent).left = xb
 			y.right = zn.right
-			zn.right.parent = y
+			rbPtr(zn.right).parent = yb
 		} else {
 			xParent = y
 		}
-		if h.parent == zn {
-			h.parent = y
-		} else if zn.parent.left == zn {
-			zn.parent.left = y
+		if h.parent == zb {
+			h.parent = yb
+		} else if zp := rbPtr(zn.parent); zp.left == zb {
+			zp.left = yb
 		} else {
-			zn.parent.right = y
+			zp.right = yb
 		}
 		y.parent = zn.parent
 		y.color, zn.color = zn.color, y.color
 		y = zn
 	} else {
-		xParent = y.parent
+		xParent = rbPtr(y.parent)
 		if x != nil {
 			x.parent = y.parent
 		}
-		if h.parent == zn {
-			h.parent = x
-		} else if y.parent.left == zn {
-			y.parent.left = x
+		if h.parent == zb {
+			h.parent = xb
+		} else if yp := rbPtr(y.parent); yp.left == zb {
+			yp.left = xb
 		} else {
-			y.parent.right = x
+			yp.right = xb
 		}
-		if h.left == zn {
-			if zn.right == nil {
+		if h.left == zb {
+			if zn.right == 0 {
 				h.left = zn.parent
 			} else {
-				h.left = rbMinimum(x)
+				h.left = rbBits(rbMinimum(x))
 			}
 		}
-		if h.right == zn {
-			if zn.left == nil {
+		if h.right == zb {
+			if zn.left == 0 {
 				h.right = zn.parent
 			} else {
-				h.right = rbMaximum(x)
+				h.right = rbBits(rbMaximum(x))
 			}
 		}
 	}
 
 	if y.color != rbRed {
-		for x != h.parent && (x == nil || x.color == rbBlack) {
-			if x == xParent.left {
-				w := xParent.right
+		for rbBits(x) != h.parent && (x == nil || x.color == rbBlack) {
+			if rbBits(x) == xParent.left {
+				w := rbPtr(xParent.right)
 				if w != nil && w.color == rbRed {
 					w.color = rbBlack
 					xParent.color = rbRed
 					rbRotateLeft(xParent, h)
-					w = xParent.right
+					w = rbPtr(xParent.right)
 				}
 				if w == nil {
 					x = xParent
-					xParent = x.parent
+					xParent = rbPtr(x.parent)
 					continue
 				}
-				if (w.left == nil || w.left.color == rbBlack) &&
-					(w.right == nil || w.right.color == rbBlack) {
+				if (w.left == 0 || rbPtr(w.left).color == rbBlack) &&
+					(w.right == 0 || rbPtr(w.right).color == rbBlack) {
 					w.color = rbRed
 					x = xParent
-					xParent = x.parent
+					xParent = rbPtr(x.parent)
 				} else {
-					if w.right == nil || w.right.color == rbBlack {
-						if w.left != nil {
-							w.left.color = rbBlack
+					if w.right == 0 || rbPtr(w.right).color == rbBlack {
+						if w.left != 0 {
+							rbPtr(w.left).color = rbBlack
 						}
 						w.color = rbRed
 						rbRotateRight(w, h)
-						w = xParent.right
+						w = rbPtr(xParent.right)
 					}
 					if w != nil {
 						w.color = xParent.color
 					}
 					xParent.color = rbBlack
-					if w != nil && w.right != nil {
-						w.right.color = rbBlack
+					if w != nil && w.right != 0 {
+						rbPtr(w.right).color = rbBlack
 					}
 					rbRotateLeft(xParent, h)
 					break
 				}
 			} else {
-				w := xParent.left
+				w := rbPtr(xParent.left)
 				if w != nil && w.color == rbRed {
 					w.color = rbBlack
 					xParent.color = rbRed
 					rbRotateRight(xParent, h)
-					w = xParent.left
+					w = rbPtr(xParent.left)
 				}
 				if w == nil {
 					x = xParent
-					xParent = x.parent
+					xParent = rbPtr(x.parent)
 					continue
 				}
-				if (w.right == nil || w.right.color == rbBlack) &&
-					(w.left == nil || w.left.color == rbBlack) {
+				if (w.right == 0 || rbPtr(w.right).color == rbBlack) &&
+					(w.left == 0 || rbPtr(w.left).color == rbBlack) {
 					w.color = rbRed
 					x = xParent
-					xParent = x.parent
+					xParent = rbPtr(x.parent)
 				} else {
-					if w.left == nil || w.left.color == rbBlack {
-						if w.right != nil {
-							w.right.color = rbBlack
+					if w.left == 0 || rbPtr(w.left).color == rbBlack {
+						if w.right != 0 {
+							rbPtr(w.right).color = rbBlack
 						}
 						w.color = rbRed
 						rbRotateLeft(w, h)
-						w = xParent.left
+						w = rbPtr(xParent.left)
 					}
 					if w != nil {
 						w.color = xParent.color
 					}
 					xParent.color = rbBlack
-					if w != nil && w.left != nil {
-						w.left.color = rbBlack
+					if w != nil && w.left != 0 {
+						rbPtr(w.left).color = rbBlack
 					}
 					rbRotateRight(xParent, h)
 					break
@@ -412,15 +435,15 @@ func RbTreeRebalanceForErase(z, header *byte) *byte {
 }
 
 func rbMinimum(n *rbNode) *rbNode {
-	for n != nil && n.left != nil {
-		n = n.left
+	for n != nil && n.left != 0 {
+		n = rbPtr(n.left)
 	}
 	return n
 }
 
 func rbMaximum(n *rbNode) *rbNode {
-	for n != nil && n.right != nil {
-		n = n.right
+	for n != nil && n.right != 0 {
+		n = rbPtr(n.right)
 	}
 	return n
 }

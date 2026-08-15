@@ -207,11 +207,23 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 
 	case *types.StructType:
 		var fields []jen.Code
+		var emitted int64
 		for i, field := range t.Fields {
 			// Drop LLVM ZSTs (empty structs / PhantomData). Go struct{}
 			// still takes space in arrays and shifts later fields; LLVM size is 0.
 			if isZeroSizeType(field) {
 				continue
+			}
+			if !t.Packed {
+				off, err := llvmFieldOffset(t, int64(i))
+				if err != nil {
+					return nil, err
+				}
+				if gap := off - emitted; gap > 0 {
+					// 386 aligns uint64 to 4; x86_64 IR pads i32 then ptr to 8.
+					fields = append(fields, jen.Id(fmt.Sprintf("_pad%d", off)).Index(jen.Lit(int(gap))).Byte())
+					emitted = off
+				}
 			}
 			var fieldType *jen.Statement
 			var err error
@@ -241,6 +253,20 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			}
 			// Keep LLVM field index in the name (F0, F2, …) so GEP .Fi still works.
 			fields = append(fields, jen.Id(fieldName(i)).Add(fieldType))
+			fs, err := llvmTypeSize(field)
+			if err != nil {
+				return nil, err
+			}
+			emitted += fs
+		}
+		if !t.Packed {
+			sz, err := llvmTypeSize(t)
+			if err != nil {
+				return nil, err
+			}
+			if gap := sz - emitted; gap > 0 {
+				fields = append(fields, jen.Id(fmt.Sprintf("_pad%d", sz)).Index(jen.Lit(int(gap))).Byte())
+			}
 		}
 		if len(fields) == 0 {
 			return jen.Struct(), nil

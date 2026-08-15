@@ -222,8 +222,20 @@ func compositeValues(elems []jen.Code) *jen.Statement {
 	return jen.Values(elems...)
 }
 
+func structFieldValues(elems []jen.Code) *jen.Statement {
+	d := jen.Dict{}
+	for i, e := range elems {
+		d[jen.Id(fieldName(i))] = e
+	}
+	return jen.Values(d)
+}
+
 func formatComposite(typ *jen.Statement, elems []jen.Code) *jen.Statement {
 	return jen.Add(typ).Add(compositeValues(elems))
+}
+
+func formatStruct(typ *jen.Statement, elems []jen.Code) *jen.Statement {
+	return jen.Add(typ).Add(structFieldValues(elems))
 }
 
 // formatMemSlot formats a value stored in an aggregate. LLVM ptr slots are
@@ -525,7 +537,7 @@ func formatExpr(v value.Value) (expr, error) {
 			}
 			elems[i] = e
 		}
-		return asExpr(formatComposite(t, elems)), nil
+		return asExpr(formatStruct(t, elems)), nil
 
 	case *constant.Undef:
 		return zeroOf(v.Typ)

@@ -6,8 +6,8 @@ import (
 )
 
 func TestRbNodeLayout(t *testing.T) {
-	if unsafe.Sizeof(uintptr(0)) != 8 {
-		t.Skip("rbNode overlay matches x86_64 libstdc++")
+	if unsafe.Sizeof(rbNode{}) != 32 {
+		t.Fatalf("sizeof rbNode = %d, want 32", unsafe.Sizeof(rbNode{}))
 	}
 	if unsafe.Offsetof(rbNode{}.color) != rbColorOff {
 		t.Fatalf("color")
@@ -27,11 +27,11 @@ func TestRbTreeIncDecHeader(t *testing.T) {
 	// header (end) + one black root. decrement(end) is the root.
 	var hdr, root rbNode
 	hdr.color = rbRed
-	hdr.parent = &root
-	hdr.left = &root
-	hdr.right = &root
+	hdr.parent = rbBits(&root)
+	hdr.left = rbBits(&root)
+	hdr.right = rbBits(&root)
 	root.color = 1
-	root.parent = &hdr
+	root.parent = rbBits(&hdr)
 
 	got := RbTreeDecrement(rbByte(&hdr))
 	if got != rbByte(&root) {
@@ -54,10 +54,10 @@ func TestRbTreeInsertEmpty(t *testing.T) {
 	RbTreeInit(As[byte](Ptr(&impl)))
 	hdr := &impl.hdr
 	RbTreeInsertAndRebalance(true, rbByte(&a), rbByte(hdr), rbByte(hdr))
-	if hdr.parent != &a || hdr.left != &a || hdr.right != &a {
+	if hdr.parent != rbBits(&a) || hdr.left != rbBits(&a) || hdr.right != rbBits(&a) {
 		t.Fatalf("header %+v", *hdr)
 	}
-	if a.color != rbBlack || a.parent != hdr {
+	if a.color != rbBlack || a.parent != rbBits(hdr) {
 		t.Fatalf("root %+v", a)
 	}
 	if p := RbTreeDecrement(rbByte(hdr)); p != rbByte(&a) {
@@ -76,14 +76,14 @@ func TestRbTreeInorderTwo(t *testing.T) {
 	//    a
 	var hdr, a, b rbNode
 	hdr.color = rbRed
-	hdr.parent = &b
-	hdr.left = &a
-	hdr.right = &b
+	hdr.parent = rbBits(&b)
+	hdr.left = rbBits(&a)
+	hdr.right = rbBits(&b)
 	b.color = 1
-	b.parent = &hdr
-	b.left = &a
+	b.parent = rbBits(&hdr)
+	b.left = rbBits(&a)
 	a.color = rbRed
-	a.parent = &b
+	a.parent = rbBits(&b)
 
 	if p := RbTreeIncrement(rbByte(&a)); p != rbByte(&b) {
 		t.Fatalf("inc a")
