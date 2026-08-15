@@ -49,11 +49,12 @@ func TestArgv(t *testing.T) {
 	if p == nil {
 		t.Fatal("nil argv")
 	}
-	tab := unsafe.Slice((**byte)(p), len(os.Args)+1)
-	if tab[len(os.Args)] != nil {
+	tab := unsafe.Slice((*uint64)(p), len(os.Args)+1)
+	if tab[len(os.Args)] != 0 {
 		t.Fatal("missing trailing nil")
 	}
-	if GoString(tab[0]) != os.Args[0] {
-		t.Fatalf("argv[0]=%q want %q", GoString(tab[0]), os.Args[0])
+	got := GoString(As[byte](PtrFromBits(tab[0])))
+	if got != os.Args[0] {
+		t.Fatalf("argv[0]=%q want %q", got, os.Args[0])
 	}
 }

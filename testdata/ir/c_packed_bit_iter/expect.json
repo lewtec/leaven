@@ -9,7 +9,7 @@
       ],
       "not_contains": [
         "F0 unsafe.Pointer",
-        "F0 uintptr"
+        "F0 uint64"
       ]
     }
   ],

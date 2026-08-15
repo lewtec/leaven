@@ -4,7 +4,7 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "F0 uintptr",
+        "F0 uint64",
         "func children_of(self_coerce uintptr) unsafe.Pointer",
         "libc.AddPointer",
         "func new_node_with_children",

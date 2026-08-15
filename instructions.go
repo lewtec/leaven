@@ -181,7 +181,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				return stmt(assign(name, allocAlign8(jen.Uintptr()))), nil
+				return stmt(assign(name, allocAlign8(jen.Uint64()))), nil
 			}
 			return stmt(assign(name, allocAlign8(t))), nil
 		}
@@ -481,11 +481,11 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		to, err := translateType(inst.To, "type")
-		if err != nil {
-			return nil, err
+		bits := jen.Uint64().Call(from)
+		if isTaggedPointerType(inst.To) {
+			return stmt(assign(VariableName(inst), jen.Uintptr().Call(bits))), nil
 		}
-		return stmt(assign(VariableName(inst), jen.Parens(to).Call(emitUnsafePointer(jen.Uintptr().Call(from))))), nil
+		return stmt(assign(VariableName(inst), emitUnsafePointer(jen.Uintptr().Call(bits)))), nil
 
 	case *ir.InstLoad:
 		src, err := formatExpr(inst.Src)

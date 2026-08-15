@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "libc.Realloc",
-        "F0 uintptr",
+        "F0 uint64",
         "func new_node",
         "func depends_on_column"
       ],

@@ -243,8 +243,8 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 				fieldType = jen.Uint64()
 			} else if structFieldUintptr(t, field) {
 				// This slot may hold a tagged non-pointer (union payload or
-				// packed ptr+int). Do not put it in a GC pointer field.
-				fieldType = jen.Uintptr()
+				// packed ptr+int). uint64: 8-byte IR slot, not a GC pointer.
+				fieldType = jen.Uint64()
 			} else {
 				fieldType, err = TypeSpec(field)
 			}

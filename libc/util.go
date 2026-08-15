@@ -91,17 +91,25 @@ func GoString(s *byte) string {
 	return string(Bytes(s, int(Strlen(s))))
 }
 
-// argvPin keeps Argv's C strings and the pointer table alive for main.
-var argvPin []*byte
+// argvPin keeps Argv's C strings alive for main.
+// argvSlots is the IR-width table (8-byte ptr slots, not Go *byte).
+var (
+	argvPin   []*byte
+	argvSlots []uint64
+)
 
 // Argv is C argv: pointer to a nil-terminated list of *byte (os.Args).
+// Slots are uint64 so x86_64 GEP *8 works on 386.
 func Argv() unsafe.Pointer {
 	args := os.Args
-	ptrs := make([]*byte, len(args)+1)
+	pin := make([]*byte, len(args))
+	slots := make([]uint64, len(args)+1)
 	for i, s := range args {
 		b := append([]byte(s), 0)
-		ptrs[i] = &b[0]
+		pin[i] = &b[0]
+		slots[i] = PtrBits(Ptr(&b[0]))
 	}
-	argvPin = ptrs
-	return unsafe.Pointer(&ptrs[0])
+	argvPin = pin
+	argvSlots = slots
+	return unsafe.Pointer(&slots[0])
 }

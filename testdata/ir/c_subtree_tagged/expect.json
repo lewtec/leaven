@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "type Subtree struct",
-        "F0 uintptr",
+        "F0 uint64",
         "func ts_subtree_depends_on_column(self_coerce uintptr) bool",
         "func make_inline_leaf",
         "func make_heap_node"

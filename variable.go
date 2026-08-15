@@ -377,11 +377,13 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating source (%v): %w", v.From, err)
 		}
-		to, err := TypeSpec(v.To)
-		if err != nil {
-			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
+		// uint64 first so a 64-bit bit pattern is a typed constant; a
+		// direct uintptr(0x1c…) overflows on 386.
+		bits := jen.Uint64().Call(from)
+		if isTaggedPointerType(v.To) {
+			return asExpr(jen.Uintptr().Call(bits)), nil
 		}
-		return asExpr(jen.Parens(to).Call(emitUnsafePointer(jen.Uintptr().Call(from)))), nil
+		return asExpr(emitUnsafePointer(jen.Uintptr().Call(bits))), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)
