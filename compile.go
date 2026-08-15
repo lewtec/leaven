@@ -62,6 +62,9 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		if err != nil {
 			return fmt.Errorf("error translating type (%v): %w", g.ContentType, err)
 		}
+		if isTaggedPointerType(g.ContentType) {
+			t = jen.Uint64()
+		}
 		if g.Init == nil {
 			if init := vttStandin(name, g.ContentType); init != nil {
 				f.Var().Id(name).Add(t).Op("=").Add(init)

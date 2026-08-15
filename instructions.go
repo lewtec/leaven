@@ -589,6 +589,34 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return stmt(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
 
 	case *ir.InstSExt:
+		if vt, ok := inst.To.(*types.VectorType); ok {
+			toType, ok := vt.ElemType.(*types.IntType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
+			}
+			ft, ok := inst.From.Type().(*types.VectorType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v and %v", errMismatchedZextTypes, inst.To, inst.From.Type())
+			}
+			fromType, ok := ft.ElemType.(*types.IntType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextFrom, inst.From.Type())
+			}
+			from, err := translateOp(inst.From, "source")
+			if err != nil {
+				return nil, err
+			}
+			name := VariableName(inst)
+			if fromType.BitSize == 1 {
+				return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(boolToInt(jen.Id("v"), toType.BitSize, true)),
+				)), nil
+			}
+			tw := goIntBits(toType.BitSize)
+			return stmt(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(goIntType(tw)).Call(jen.Id("v")),
+			)), nil
+		}
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
 			return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
