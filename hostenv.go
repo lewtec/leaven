@@ -45,8 +45,15 @@ func clangSysrootFlags() []string {
 	return nil
 }
 
+func lldNames(goos string) []string {
+	if goos == "darwin" {
+		return []string{"ld64.lld", "lld"}
+	}
+	return []string{"lld", "ld.lld"}
+}
+
 func lldPath() string {
-	for _, n := range []string{"ld64.lld", "lld"} {
+	for _, n := range lldNames(runtime.GOOS) {
 		if p, err := exec.LookPath(n); err == nil {
 			return p
 		}
