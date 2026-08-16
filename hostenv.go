@@ -44,3 +44,13 @@ func clangSysrootFlags() []string {
 	}
 	return nil
 }
+
+// clangNativeFlags is for linking an executable. -fno-lto skips conda
+// clang's -lto_library (Apple ld requires the name libLTO.dylib).
+func clangNativeFlags() []string {
+	flags := clangSysrootFlags()
+	if runtime.GOOS == "darwin" {
+		flags = append(flags, "-fno-lto")
+	}
+	return flags
+}

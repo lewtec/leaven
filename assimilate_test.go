@@ -40,14 +40,17 @@ func testAssimilateCsmith(t *testing.T) {
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
 	// Debug keeps -g; v22 skips #dbg_* records.
+	cflags, cxxflags := "-O0", "-O0 -fno-exceptions"
 	extra := []string{
 		"-DCMAKE_BUILD_TYPE=Debug",
-		"-DCMAKE_C_FLAGS=-O0",
-		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
+		"-DBUILD_SHARED_LIBS=OFF",
 	}
 	if sdk := darwinSDK(); sdk != "" {
+		cflags += " -fno-lto"
+		cxxflags += " -fno-lto"
 		extra = append(extra, "-DCMAKE_OSX_SYSROOT="+sdk)
 	}
+	extra = append(extra, "-DCMAKE_C_FLAGS="+cflags, "-DCMAKE_CXX_FLAGS="+cxxflags)
 	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, extra)
 	cmakeBuild(t, cmake, ninja, build, "csmith")
 
