@@ -379,7 +379,9 @@ func formatExpr(v value.Value) (expr, error) {
 		if isTaggedPointerType(v.To) {
 			return asExpr(bits), nil
 		}
-		return asExpr(emitUnsafePointer(jen.Uintptr().Call(bits))), nil
+		// PtrFromBits, not uintptr(): uintptr(uint64(C)) is still a
+		// constant and overflows 32-bit uintptr.
+		return asExpr(Sym(libc.PtrFromBits).Call(bits)), nil
 
 	case *constant.ExprPtrToInt:
 		from, err := FormatValue(v.From)

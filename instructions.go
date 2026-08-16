@@ -484,7 +484,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if isTaggedPointerType(inst.To) {
 			return stmt(assign(VariableName(inst), bits)), nil
 		}
-		return stmt(assign(VariableName(inst), emitUnsafePointer(jen.Uintptr().Call(bits)))), nil
+		return stmt(assign(VariableName(inst), Sym(libc.PtrFromBits).Call(bits))), nil
 
 	case *ir.InstLoad:
 		src, err := formatExpr(inst.Src)

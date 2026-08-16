@@ -8,7 +8,7 @@
         "unsafe",
         "func int_to_ptr(x int64) unsafe.Pointer",
         "func ptr_to_int(p unsafe.Pointer) int64",
-        "unsafe.Pointer(uintptr(",
+        "libc.PtrFromBits(",
         "uintptr(unsafe.Pointer("
       ],
       "not_contains": [
