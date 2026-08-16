@@ -8,6 +8,7 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
+	"github.com/lewtec/leaven/libc"
 )
 
 // GetElementPtr translates a getelementptr expression.
@@ -74,7 +75,7 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if err != nil {
 				return expr{}, err
 			}
-			base = emitAs(telem, emitUnsafePointer(base))
+			base = emitAs(telem, Sym(libc.PtrFromBits).Call(base))
 		} else if len(indices) > 1 {
 			// Field GEPs need a typed *T for .F0 chains.
 			base = emitAs(et, base)
@@ -264,7 +265,7 @@ func overlayMem(addr *jen.Statement, addrTy, elem types.Type) (*jen.Statement, e
 		return nil, err
 	}
 	if isTaggedPointerType(addrTy) {
-		addr = emitUnsafePointer(addr)
+		addr = Sym(libc.PtrFromBits).Call(addr)
 	}
 	return deref(emitAs(t, addr)), nil
 }
@@ -316,9 +317,7 @@ func typedStore(d storeDest, src jen.Code) (*jen.Statement, error) {
 	// Named scalar ptr cell (global/alloca) is unsafe.Pointer. Overlay
 	// and aggregate slots are uint64.
 	scalarCell := d.dst.base != nil && wholeVarAccess(d.val, d.elem) && isScalarPtrObject(d.val)
-	if isTaggedPointerType(d.elem) {
-		src = ptrToUint(src)
-	} else if isMemPtr(d.elem) && !scalarCell {
+	if isMemPtr(d.elem) && !scalarCell && !isTaggedPointerType(d.elem) {
 		src = asMemSlotCode(d.elem, src)
 	}
 	if d.dst.base != nil && wholeVarAccess(d.val, d.elem) {

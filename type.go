@@ -16,8 +16,8 @@ import (
 // taggedPointerTypes are LLVM pointer types that appear as the sole field of a
 // C union (e.g. tree-sitter Subtree = union { InlineData; HeapData * }).
 // Clang collapses those unions to { T* } in IR, but the bit pattern may be a
-// non-pointer tagged value (LSB set). In Go we emit them as uintptr so the GC
-// does not chase tags and accidental deref paths stay explicit.
+// non-pointer tagged value (LSB set). In Go we emit them as uint64 so the
+// slot is 8 bytes on 386 and rustc hash constants fit.
 var taggedPointerTypes []types.Type
 
 // collectTaggedPointerTypes finds pointer types used as the only field of a
@@ -199,7 +199,7 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 	case *types.PointerType:
 		// Tagged union pointer field: bag-of-bits, not a GC pointer.
 		if isTaggedPointerType(t) {
-			return jen.Uintptr(), nil
+			return jen.Uint64(), nil
 		}
 		// Every LLVM pointer value is unsafe.Pointer. Pointee type lives on
 		// load/store/gep, not on the pointer.

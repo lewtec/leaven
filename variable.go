@@ -249,7 +249,7 @@ func formatMemSlot(c value.Value) (jen.Code, error) {
 		return Sym(libc.PtrBits).Call(e), nil
 	}
 	if isTaggedPointerType(c.Type()) {
-		return ptrToUint(e), nil
+		return e, nil
 	}
 	return e, nil
 }
@@ -359,14 +359,10 @@ func formatExpr(v value.Value) (expr, error) {
 			return asExpr(bits), nil
 		}
 		if isTaggedPointerType(v.To) {
-			return asExpr(ptrToUint(from)), nil
+			return asExpr(Sym(libc.PtrBits).Call(from)), nil
 		}
 		if isTaggedPointerType(v.From.Type()) {
-			to, err := TypeSpec(v.To)
-			if err != nil {
-				return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
-			}
-			return asExpr(jen.Parens(to).Call(emitUnsafePointer(from))), nil
+			return asExpr(Sym(libc.PtrFromBits).Call(from)), nil
 		}
 		// Pointer values are already unsafe.Pointer.
 		return asExpr(from), nil
@@ -381,7 +377,7 @@ func formatExpr(v value.Value) (expr, error) {
 		// direct uintptr(0x1c…) overflows on 386.
 		bits := jen.Uint64().Call(from)
 		if isTaggedPointerType(v.To) {
-			return asExpr(jen.Uintptr().Call(bits)), nil
+			return asExpr(bits), nil
 		}
 		return asExpr(emitUnsafePointer(jen.Uintptr().Call(bits))), nil
 
@@ -394,7 +390,10 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.To, err)
 		}
-		return asExpr(convert(to, ptrToUint(from))), nil
+		if !isTaggedPointerType(v.From.Type()) {
+			from = ptrToUint(from)
+		}
+		return asExpr(convert(to, from)), nil
 
 	case *constant.ExprGetElementPtr:
 		indices := make([]value.Value, len(v.Indices))
@@ -1125,6 +1124,9 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 			return convert(goUintType(t.BitSize), result), nil
 		}
 	case *types.PointerType:
+		if isTaggedPointerType(t) {
+			return result, nil
+		}
 		return ptrToUint(result), nil
 	}
 

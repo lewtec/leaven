@@ -5,7 +5,7 @@
       "package": "p",
       "contains": [
         "F0 uint64",
-        "func children_of(self_coerce uintptr) unsafe.Pointer",
+        "func children_of(self_coerce uint64) unsafe.Pointer",
         "libc.AddPointer",
         "func new_node_with_children",
         "func depends_on_column"

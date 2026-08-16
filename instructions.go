@@ -92,7 +92,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		if isTaggedPointerType(inst.Ptr.Type()) {
-			ptr = emitUnsafePointer(ptr)
+			ptr = Sym(libc.PtrFromBits).Call(ptr)
 		}
 		p := emitAs(elem, ptr)
 		name := VariableName(inst)
@@ -128,7 +128,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			return nil, err
 		}
 		if isTaggedPointerType(inst.Dst.Type()) {
-			dst = emitUnsafePointer(dst)
+			dst = Sym(libc.PtrFromBits).Call(dst)
 		}
 		dst = emitAs(elem, dst)
 		switch inst.Op {
@@ -265,14 +265,13 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if isTaggedPointerType(inst.To) {
-			return stmt(assign(name, ptrToUint(from))), nil
+			if isTaggedPointerType(inst.From.Type()) {
+				return stmt(assign(name, from)), nil
+			}
+			return stmt(assign(name, Sym(libc.PtrBits).Call(from))), nil
 		}
 		if isTaggedPointerType(inst.From.Type()) {
-			to, err := translateType(inst.To, "type")
-			if err != nil {
-				return nil, err
-			}
-			return stmt(assign(name, jen.Parens(to).Call(emitUnsafePointer(from)))), nil
+			return stmt(assign(name, Sym(libc.PtrFromBits).Call(from))), nil
 		}
 		return stmt(assign(name, from)), nil
 
@@ -483,7 +482,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		bits := jen.Uint64().Call(from)
 		if isTaggedPointerType(inst.To) {
-			return stmt(assign(VariableName(inst), jen.Uintptr().Call(bits))), nil
+			return stmt(assign(VariableName(inst), bits)), nil
 		}
 		return stmt(assign(VariableName(inst), emitUnsafePointer(jen.Uintptr().Call(bits)))), nil
 
@@ -555,7 +554,10 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		return stmt(assign(VariableName(inst), convert(to, ptrToUint(from)))), nil
+		if !isTaggedPointerType(inst.From.Type()) {
+			from = ptrToUint(from)
+		}
+		return stmt(assign(VariableName(inst), convert(to, from))), nil
 
 	case *ir.InstSDiv:
 		return translateSignedDivRem(inst, llvmBinary{op: "/", x: inst.X, y: inst.Y})
@@ -1225,7 +1227,7 @@ func libcCallArg(arg libcArgument) *jen.Statement {
 		return jen.Add(arg.got)
 	}
 	if isTaggedPointerType(arg.a.Type()) {
-		arg.got = emitUnsafePointer(arg.got)
+		arg.got = Sym(libc.PtrFromBits).Call(arg.got)
 	}
 	switch arg.name {
 	case "fprintf":
@@ -1863,9 +1865,9 @@ func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]je
 	}
 	if isTaggedPointerType(dest) {
 		if typedPtr {
-			return stmt(assign(VariableName(inst), emitAddr(callExpr))), nil
+			return stmt(assign(VariableName(inst), Sym(libc.PtrBits).Call(emitPtr(callExpr)))), nil
 		}
-		return stmt(assign(VariableName(inst), ptrToUint(callExpr))), nil
+		return stmt(assign(VariableName(inst), callExpr)), nil
 	}
 	if typedPtr {
 		if _, ok := dest.(*types.PointerType); ok {
