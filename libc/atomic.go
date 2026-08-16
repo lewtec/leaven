@@ -14,6 +14,23 @@ func i8Word(addr *byte) (p *uint32, shift uint, mask uint32) {
 	return p, shift, mask
 }
 
+// AtomicAddI8 is atomicrmw add on i8. Returns the new value (like AddInt32).
+func AtomicAddI8(addr *byte, delta byte) byte {
+	if addr == nil {
+		return 0
+	}
+	p, shift, mask := i8Word(addr)
+	for {
+		oldw := atomic.LoadUint32(p)
+		oldb := byte((oldw >> shift) & 0xff)
+		newb := oldb + delta
+		neww := (oldw &^ mask) | (uint32(newb) << shift)
+		if atomic.CompareAndSwapUint32(p, oldw, neww) {
+			return newb
+		}
+	}
+}
+
 // AtomicSwapI8 is atomicrmw xchg on i8. Go has no SwapInt8; CAS the
 // aligned 32-bit word that holds the byte (same approach as LLVM on
 // targets without native 8-bit atomics).

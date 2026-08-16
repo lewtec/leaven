@@ -141,7 +141,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			if !ok {
 				return nil, fmt.Errorf("%w: atomicrmw on %v", errUnsupportedInstruction, inst.Type())
 			}
-			return one(assign(name, bin(addFn.Call(dst, jen.Op("-").Parens(x)), "+", x))), nil
+			delta := jen.Op("-").Parens(x)
+			if it, ok := inst.Type().(*types.IntType); ok && goIntBits(it.BitSize) == 8 {
+				// byte(-(int32(1))) is a Go constant overflow. ^x+1 wraps.
+				delta = jen.Op("^").Parens(jen.Byte().Call(x)).Op("+").Lit(1)
+			}
+			return one(assign(name, bin(addFn.Call(dst, delta), "+", x))), nil
 		case enum.AtomicOpXChg:
 			swapFn, ok := atomicSwapFunc(inst.Type())
 			if !ok {
@@ -583,6 +588,33 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return one(jen.If(cond).Block(assign(name, valueTrue)).Else().Block(assign(name, valueFalse))), nil
 
 	case *ir.InstSExt:
+		if vt, ok := inst.To.(*types.VectorType); ok {
+			toType, ok := vt.ElemType.(*types.IntType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextTo, inst.To)
+			}
+			ft, ok := inst.From.Type().(*types.VectorType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v and %v", errMismatchedZextTypes, inst.To, inst.From.Type())
+			}
+			fromType, ok := ft.ElemType.(*types.IntType)
+			if !ok {
+				return nil, fmt.Errorf("%w: %v", errUnsupportedZextFrom, inst.From.Type())
+			}
+			from, err := translateOp(inst.From, "source")
+			if err != nil {
+				return nil, err
+			}
+			name := VariableName(inst)
+			if fromType.BitSize == 1 {
+				return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+					jen.Id(name).Index(jen.Id("i")).Op("=").Add(boolToInt(jen.Id("v"), toType.BitSize, true)),
+				)), nil
+			}
+			return one(jen.For(jen.List(jen.Id("i"), jen.Id("v")).Op(":=").Range().Add(from)).Block(
+				jen.Id(name).Index(jen.Id("i")).Op("=").Add(conv(goIntType(toType.BitSize), jen.Id("v"))),
+			)), nil
+		}
 		toType, ok := inst.To.(*types.IntType)
 		if !ok {
 			return nil, fmt.Errorf("%w: %T", errUnsupportedZextTo, inst.To)
@@ -1854,6 +1886,8 @@ func atomicAddFunc(t types.Type) (*jen.Statement, bool) {
 		return nil, false
 	}
 	switch goIntBits(it.BitSize) {
+	case 8:
+		return Sym(libc.AtomicAddI8).code(), true
 	case 32:
 		return Sym(atomic.AddInt32).code(), true
 	case 64:

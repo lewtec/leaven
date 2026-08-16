@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.AtomicAddI8",
+        "^(byte("
+      ],
+      "not_contains": [
+        "atomicrmw on i8"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}
