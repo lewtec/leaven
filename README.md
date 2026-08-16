@@ -18,6 +18,7 @@ which will be a good starting point for incrementally re-translating it
 
 This software is incomplete and experimental.
 It does not support nearly all LLVM instructions.
+It is 64-bit only (amd64, arm64, and other 8-byte-pointer hosts).
 
 The transpiler at github.com/andybalholm/c2go produces much better results
 (but it is not as automatic).

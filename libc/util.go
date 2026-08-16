@@ -7,6 +7,9 @@ import (
 	"unsafe"
 )
 
+// LLVM IR we emit uses 8-byte pointers (x86_64 SysV / AArch64).
+var _ [unsafe.Sizeof(uintptr(0)) - 8]byte
+
 // Pointer kit (byte offset vs element index):
 //
 //	Ptr / As / Addr     (void *)p  /  (T *)p  /  (uintptr)p
