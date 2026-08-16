@@ -8,9 +8,10 @@
 # Assimilate harness: cmake+ninja+m4 for csmith; cargo (via rust) for rhai.
 cmake = "4.4.1"
 ninja = "1.13.2"
-"conda:m4" = "1.4.20"
-# Prebuilt csmith (binary + runtime headers) for -tags=csmith fuzz tests.
-"github:actions-precompiled/csmith-bin" = "csmith-2.3.0"
+# No Windows conda package.
+"conda:m4" = { version = "1.4.20", os = ["linux", "macos"] }
+# Prebuilt csmith. No macos-x64 asset in the release.
+"github:actions-precompiled/csmith-bin" = { version = "csmith-2.3.0", os = ["linux", "macos/arm64"] }
 go = "1.26.5"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
 "github:lucasew/workspaced" = "0.14.3"
