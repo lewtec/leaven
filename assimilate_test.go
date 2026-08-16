@@ -46,9 +46,11 @@ func testAssimilateCsmith(t *testing.T) {
 		"-DBUILD_SHARED_LIBS=OFF",
 	}
 	if sdk := darwinSDK(); sdk != "" {
-		cflags += " -fno-lto"
-		cxxflags += " -fno-lto"
 		extra = append(extra, "-DCMAKE_OSX_SYSROOT="+sdk)
+	}
+	if ld := lldPath(); ld != "" {
+		cflags += " -fuse-ld=" + ld
+		cxxflags += " -fuse-ld=" + ld
 	}
 	extra = append(extra, "-DCMAKE_C_FLAGS="+cflags, "-DCMAKE_CXX_FLAGS="+cxxflags)
 	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, extra)

@@ -45,24 +45,21 @@ func clangSysrootFlags() []string {
 	return nil
 }
 
-// clangNativeFlags is for linking an executable. -fno-lto skips conda
-// clang's -lto_library (Apple ld requires the name libLTO.dylib).
-func clangNativeFlags() []string {
-	flags := clangSysrootFlags()
-	if runtime.GOOS == "darwin" {
-		flags = append(flags, "-fno-lto")
-	}
-	return flags
-}
-
-// hostCCompiler is Apple clang on Darwin. conda clang-14 still passes
-// -lto_library to Apple ld even with -fno-lto.
-func hostCCompiler() string {
-	if runtime.GOOS != "darwin" {
-		return ""
-	}
-	if _, err := os.Stat("/usr/bin/clang"); err == nil {
-		return "/usr/bin/clang"
+func lldPath() string {
+	for _, n := range []string{"ld64.lld", "lld"} {
+		if p, err := exec.LookPath(n); err == nil {
+			return p
+		}
 	}
 	return ""
+}
+
+// clangNativeFlags is for linking an executable. Prefer lld so we do
+// not hit Apple ld's libLTO.dylib basename check.
+func clangNativeFlags() []string {
+	flags := clangSysrootFlags()
+	if ld := lldPath(); ld != "" {
+		flags = append(flags, "-fuse-ld="+ld)
+	}
+	return flags
 }
