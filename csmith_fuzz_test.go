@@ -273,12 +273,16 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	}
 
 	// 2. Native reference binary
-	clangNative := exec.Command(tools.clang,
+	cc := tools.clang
+	if h := hostCCompiler(); h != "" {
+		cc = h
+	}
+	clangNative := exec.Command(cc, append(clangNativeFlags(),
 		"-O0",
 		"-I"+tools.include,
 		"-o", nativeBin,
 		cFile,
-	)
+	)...)
 	if out, err := clangNative.CombinedOutput(); err != nil {
 		t.Fatalf("clang native seed=%d: %v\n%s", seed, err, out)
 	}
@@ -293,14 +297,14 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	}
 
 	// 3. Emit LLVM IR
-	clangLL := exec.Command(tools.clang,
+	clangLL := exec.Command(tools.clang, append(clangSysrootFlags(),
 		"-O0",
 		"-S", "-emit-llvm",
 		"-fno-discard-value-names",
 		"-I"+tools.include,
 		"-o", llFile,
 		cFile,
-	)
+	)...)
 	if out, err := clangLL.CombinedOutput(); err != nil {
 		t.Fatalf("clang -emit-llvm seed=%d: %v\n%s", seed, err, out)
 	}

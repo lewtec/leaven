@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,9 @@ func TestAssimilate(t *testing.T) {
 }
 
 func testAssimilateCsmith(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("conda m4 is not packaged for Windows")
+	}
 	root := requireProject(t, "csmith", "src/RandomProgramGenerator.cpp")
 	clang := miseWhich(t, "clang", "conda:clang@22.1.8")
 	clangxx := miseWhich(t, "clang++", "conda:clangxx@22.1.8")
@@ -36,11 +40,18 @@ func testAssimilateCsmith(t *testing.T) {
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
 	// Debug keeps -g; v22 skips #dbg_* records.
-	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, []string{
+	cflags, cxxflags := "-O0", "-O0 -fno-exceptions"
+	extra := []string{
 		"-DCMAKE_BUILD_TYPE=Debug",
-		"-DCMAKE_C_FLAGS=-O0",
-		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
-	})
+		"-DBUILD_SHARED_LIBS=OFF",
+	}
+	if sdk := darwinSDK(); sdk != "" {
+		cflags += " -fno-lto"
+		cxxflags += " -fno-lto"
+		extra = append(extra, "-DCMAKE_OSX_SYSROOT="+sdk)
+	}
+	extra = append(extra, "-DCMAKE_C_FLAGS="+cflags, "-DCMAKE_CXX_FLAGS="+cxxflags)
+	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, extra)
 	cmakeBuild(t, cmake, ninja, build, "csmith")
 
 	native := filepath.Join(build, "src", "csmith")
@@ -68,11 +79,14 @@ func testAssimilateRhai(t *testing.T) {
 	root := requireProject(t, "rhai", "Cargo.toml")
 	clang, sysroot, libdir := clang22LinkEnv(t)
 	clangxx := filepath.Join(filepath.Dir(clang), "clang++")
+	rustflags := "-C debuginfo=0 -C linker=" + clang + " -C link-arg=-L" + libdir
+	if sysroot != "" {
+		rustflags += " -C link-arg=--sysroot=" + sysroot
+	}
 	env := append(os.Environ(),
 		"CC="+clang,
 		"CXX="+clangxx,
-		"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="+clang,
-		"RUSTFLAGS=-C debuginfo=0 -C linker="+clang+" -C link-arg=--sysroot="+sysroot+" -C link-arg=-L"+libdir,
+		"RUSTFLAGS="+rustflags,
 	)
 
 	build := exec.Command("mise", "exec", "--", "cargo", "build", "--release", "--bin", "rhai-run")
@@ -460,8 +474,13 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 	t.Helper()
 	clang = miseWhich(t, "clang", "conda:clang@22.1.8")
 	prefix := filepath.Dir(filepath.Dir(clang))
-	sysroot = filepath.Join(prefix, "x86_64-conda-linux-gnu", "sysroot")
 	libdir = filepath.Join(prefix, "lib")
+	sysroot = condaLinuxSysroot(prefix)
+	if sysroot != "" {
+		if _, err := os.Stat(sysroot); err != nil {
+			t.Fatalf("conda sysroot %s: %v", sysroot, err)
+		}
+	}
 	return clang, sysroot, libdir
 }
 
