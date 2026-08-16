@@ -46,10 +46,11 @@ func clangSysrootFlags() []string {
 }
 
 func lldNames(goos string) []string {
+	// Bare `lld` is a dispatcher. The real ELF linker is ld.lld.
 	if goos == "darwin" {
-		return []string{"ld64.lld", "lld"}
+		return []string{"ld64.lld"}
 	}
-	return []string{"lld", "ld.lld"}
+	return []string{"ld.lld"}
 }
 
 func lldPath() string {

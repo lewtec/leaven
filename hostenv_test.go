@@ -4,11 +4,11 @@ import "testing"
 
 func TestLldNames(t *testing.T) {
 	got := lldNames("linux")
-	if len(got) == 0 || got[0] == "ld64.lld" {
-		t.Fatalf("linux picked Mach-O lld: %v", got)
+	if len(got) != 1 || got[0] != "ld.lld" {
+		t.Fatalf("linux: %v", got)
 	}
 	got = lldNames("darwin")
-	if len(got) == 0 || got[0] != "ld64.lld" {
+	if len(got) != 1 || got[0] != "ld64.lld" {
 		t.Fatalf("darwin: %v", got)
 	}
 }
