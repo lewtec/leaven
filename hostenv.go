@@ -62,12 +62,15 @@ func lldPath() string {
 	return ""
 }
 
-// clangNativeFlags is for linking an executable. Prefer lld so we do
-// not hit Apple ld's libLTO.dylib basename check.
+// clangNativeFlags is for linking an executable. Darwin uses ld64.lld
+// so Apple ld never sees conda's -lto_library path. Linux keeps GNU ld
+// (lld 22 + clang 14 sysroot looks for /lib64/libc.so.6 and misses).
 func clangNativeFlags() []string {
 	flags := clangSysrootFlags()
-	if ld := lldPath(); ld != "" {
-		flags = append(flags, "-fuse-ld="+ld)
+	if runtime.GOOS == "darwin" {
+		if ld := lldPath(); ld != "" {
+			flags = append(flags, "-fuse-ld="+ld)
+		}
 	}
 	return flags
 }
