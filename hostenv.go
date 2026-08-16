@@ -54,3 +54,15 @@ func clangNativeFlags() []string {
 	}
 	return flags
 }
+
+// hostCCompiler is Apple clang on Darwin. conda clang-14 still passes
+// -lto_library to Apple ld even with -fno-lto.
+func hostCCompiler() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	if _, err := os.Stat("/usr/bin/clang"); err == nil {
+		return "/usr/bin/clang"
+	}
+	return ""
+}

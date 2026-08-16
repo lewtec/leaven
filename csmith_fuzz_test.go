@@ -273,7 +273,11 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	}
 
 	// 2. Native reference binary
-	clangNative := exec.Command(tools.clang, append(clangNativeFlags(),
+	cc := tools.clang
+	if h := hostCCompiler(); h != "" {
+		cc = h
+	}
+	clangNative := exec.Command(cc, append(clangNativeFlags(),
 		"-O0",
 		"-I"+tools.include,
 		"-o", nativeBin,
