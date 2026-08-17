@@ -213,6 +213,15 @@ func OstreamSentryCtor(this *byte, os *byte) unsafe.Pointer {
 	return unsafe.Pointer(this)
 }
 
+// OstreamSentryDestroy is basic_ostream::sentry::~sentry.
+func OstreamSentryDestroy(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
+
+// LocaleUseFacet is locale::use_facet(id&). Returns the stand-in ctype.
+func LocaleUseFacet(loc *byte, id *byte) unsafe.Pointer {
+	_, _ = loc, id
+	return unsafe.Pointer(&standinCtype[0])
+}
+
 // IosBaseCtor is std::ios_base::ios_base() / _M_init / basic_ios::init.
 // gensym's stack ostringstream calls this before operator<< / str().
 // Same stand-in vptr and ctype as cout so inlined fail/endl stay honest.

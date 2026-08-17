@@ -97,6 +97,19 @@ func PthreadGetStacksizeNp(thread int64) int64 {
 	return dummyStackSize
 }
 
+// Single-threaded: mutex/attr calls succeed and do nothing.
+func PthreadMutexattrInit(attr *byte) int32    { _ = attr; return 0 }
+func PthreadMutexattrDestroy(attr *byte) int32 { _ = attr; return 0 }
+func PthreadMutexattrSettype(attr *byte, typ int32) int32 {
+	_, _ = attr, typ
+	return 0
+}
+func PthreadMutexInit(m, attr *byte) int32 { _, _ = m, attr; return 0 }
+func PthreadMutexDestroy(m *byte) int32    { _ = m; return 0 }
+func PthreadMutexLock(m *byte) int32       { _ = m; return 0 }
+func PthreadMutexUnlock(m *byte) int32     { _ = m; return 0 }
+func PthreadMutexTrylock(m *byte) int32    { _ = m; return 0 }
+
 // Sigaction is sigaction(2). No-op success for rhai-run startup.
 func Sigaction(signum int32, act, oldact *byte) int32 {
 	_, _, _ = signum, act, oldact
