@@ -47,21 +47,42 @@ func collectModuleNames(m *ir.Module) {
 	}
 }
 
+// identPunct maps LLVM/rustc punctuation to `_` so names are Go identifiers.
+// rustc on Darwin uses `$` in symbol names (gofmt: illegal character U+0024).
+var identPunct = strings.NewReplacer(
+	".", "_", "-", "_", "$", "_",
+	":", "_", "<", "_", ">", "_",
+	",", "_", " ", "_", "*", "p",
+	";", "_", "[", "_", "]", "_",
+	"(", "_", ")", "_", "'", "_",
+	"\"", "_", "/", "_", "\\", "_",
+	"=", "_", "+", "_", "&", "_",
+	"|", "_", "!", "_", "?", "_",
+	"@", "_", "#", "_", "%", "_",
+	"^", "_", "~", "_", "`", "_",
+)
+
+func sanitizeIdent(name string) string {
+	name = identPunct.Replace(name)
+	if name == "" {
+		return "_"
+	}
+	if c := name[0]; '0' <= c && c <= '9' {
+		name = "v" + name
+	}
+	if invalidNames[name] {
+		name = "_" + name
+	}
+	return name
+}
+
 // rawIdentName sanitizes an LLVM name to a Go identifier without clash renames.
 func rawIdentName(v value.Named) string {
 	name := v.Name()
 	if name == "" {
 		return "v" + strings.TrimPrefix(v.Ident(), "%")
 	}
-	if c := name[0]; '0' <= c && c <= '9' {
-		name = "v" + name
-	}
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, "-", "_")
-	if invalidNames[name] {
-		name = "_" + name
-	}
-	return name
+	return sanitizeIdent(name)
 }
 
 // funcLocalNames disambiguates Go names inside one function (%0 and %v0
@@ -160,12 +181,7 @@ func BlockName(v value.Value) string {
 	if _, err := strconv.ParseInt(name, 10, 64); err == nil {
 		return "block" + name
 	}
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, "-", "_")
-	if invalidNames[name] {
-		name = "_" + name
-	}
-	return name
+	return sanitizeIdent(name)
 }
 
 // invalidNames are Go keywords and predeclared ids that cannot be used as names.

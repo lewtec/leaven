@@ -19,12 +19,16 @@ func TestTypeDefinitionI104(t *testing.T) {
 
 func TestTypeNameRustArrayGeneric(t *testing.T) {
 	st := &types.StructType{}
+	st.SetName("foo$bar")
+	if strings.Contains(TypeName(st), "$") {
+		t.Fatal("dollar survived")
+	}
 	st.SetName("smallvec::SmallVec<[usize; 2]>")
 	got := TypeName(st)
 	if got == "" {
 		t.Fatal("empty name")
 	}
-	for _, bad := range []byte{';', '[', ']', ' ', ':', '<', '>', ','} {
+	for _, bad := range []byte{';', '[', ']', ' ', ':', '<', '>', ',', '$'} {
 		if strings.ContainsRune(got, rune(bad)) {
 			t.Fatalf("name %q still has %q", got, string(bad))
 		}
