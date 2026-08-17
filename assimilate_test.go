@@ -463,11 +463,24 @@ func syncProjects(t *testing.T) {
 	if _, err := exec.LookPath("mise"); err != nil {
 		t.Fatal("mise not on PATH")
 	}
-	cmd := exec.Command("mise", "exec", "--", "workspaced", "codebase", "apply")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
+	var out []byte
+	var err error
+	for i, wait := range []time.Duration{0, 15 * time.Second, 45 * time.Second} {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		cmd := exec.Command("mise", "exec", "--", "workspaced", "codebase", "apply")
+		out, err = cmd.CombinedOutput()
+		if err == nil {
+			return
+		}
+		s := string(out)
+		if !strings.Contains(s, "429") && !strings.Contains(s, "504") {
+			break
+		}
+		t.Logf("workspaced apply retry %d after %s", i+1, wait)
 	}
+	t.Fatalf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
 }
 
 func llvmLink22(t *testing.T) string {
