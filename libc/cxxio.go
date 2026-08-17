@@ -86,7 +86,7 @@ func streamOf(this *byte) *fileStream {
 // IfstreamOpen is basic_ifstream::basic_ifstream(char const*, ios_openmode).
 // Opens the path for real. fail is set if open fails. mode is recorded only
 // as in/out; unknown bits fail the stream instead of pretending.
-func IfstreamOpen(this *byte, path *byte, mode int32) *byte {
+func IfstreamOpen(this *byte, path *byte, mode int32) unsafe.Pointer {
 	st := &fileStream{fail: true}
 	if this == nil {
 		return nil
@@ -103,7 +103,7 @@ func IfstreamOpen(this *byte, path *byte, mode int32) *byte {
 	}
 	streams.Store(Addr(this), st)
 	setIfstreamABI(this, st.fail, st.eof)
-	return this
+	return unsafe.Pointer(this)
 }
 
 func iosOpenFlag(mode int32) (int, bool) {
@@ -142,7 +142,7 @@ func iosOpenFlag(mode int32) (int, bool) {
 }
 
 // IfstreamClose is ifstream::close / D1 destructor.
-func IfstreamClose(this *byte) *byte {
+func IfstreamClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
@@ -153,11 +153,11 @@ func IfstreamClose(this *byte) *byte {
 		}
 		setIfstreamABI(this, true, s.eof)
 	}
-	return this
+	return unsafe.Pointer(this)
 }
 
 // IfstreamCloseVTT is D2(this, vtt).
-func IfstreamCloseVTT(this *byte, vtt *byte) *byte {
+func IfstreamCloseVTT(this *byte, vtt *byte) unsafe.Pointer {
 	_ = vtt
 	return IfstreamClose(this)
 }
@@ -168,13 +168,13 @@ func CxxNoop(this *byte) {}
 
 // FilebufClose is basic_filebuf::close. O2 inlines ifstream::close
 // as filebuf::close(this+16). Return this (non-null) on success.
-func FilebufClose(this *byte) *byte {
+func FilebufClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
 	owner := As[byte](Off(Ptr(this), -filebufOff))
 	IfstreamClose(owner)
-	return this
+	return unsafe.Pointer(this)
 }
 
 // IosFail is basic_ios::fail.
@@ -283,12 +283,12 @@ func StringstreamDefaultCtor(this *byte) {
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
-func OStringStreamClose(this *byte) *byte {
+func OStringStreamClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
 	ostringStreams.Delete(Addr(this))
-	return this
+	return unsafe.Pointer(this)
 }
 
 // StringstreamDefaultClose is basic_stringstream dtor (default or string ctor).
@@ -512,6 +512,42 @@ func cxxStringAssign(s *byte, data []byte) {
 	Store(base, 0, As[byte](p))
 	Store[int64](base, cxxStringLenOff, int64(n))
 	Store[uint64](base, cxxStringLocalOff, uint64(n))
+}
+
+// libc++ 64-bit little-endian short/long string (size<<1, long bit = 1).
+const (
+	libcxxSSO     = 22
+	libcxxLongBit = 1
+)
+
+// StdStringInit is libc++ basic_string::__init(char const*, size_t).
+func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	if n < 0 {
+		n = 0
+	}
+	base := Ptr(this)
+	Memset(this, 0, 32)
+	if n <= libcxxSSO {
+		Store[byte](base, 0, byte(n<<1))
+		if n > 0 && s != nil {
+			copy(Bytes(As[byte](Off(base, 1)), int(n)+1), Bytes(s, int(n)))
+		}
+		return unsafe.Pointer(this)
+	}
+	p := Malloc[byte](n + 1)
+	if p == nil {
+		return unsafe.Pointer(this)
+	}
+	if s != nil {
+		copy(Bytes(p, int(n)+1), Bytes(s, int(n)))
+	}
+	Store(base, 0, p)
+	Store[uint64](base, 8, uint64(n))
+	Store[uint64](base, 16, uint64(n)<<1|libcxxLongBit)
+	return unsafe.Pointer(this)
 }
 
 // cxxStringBytes reads a libstdc++ __cxx11::basic_string into a Go slice.

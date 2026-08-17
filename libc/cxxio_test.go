@@ -57,6 +57,21 @@ func TestIfstreamOpensRealFile(t *testing.T) {
 	}
 }
 
+func TestStdStringInitSSO(t *testing.T) {
+	var obj [32]byte
+	s := []byte("hi")
+	p := StdStringInit(&obj[0], &s[0], 2)
+	if p != unsafe.Pointer(&obj[0]) {
+		t.Fatal("this")
+	}
+	if obj[0] != 2<<1 {
+		t.Fatalf("short size byte=%d", obj[0])
+	}
+	if obj[1] != 'h' || obj[2] != 'i' {
+		t.Fatalf("data=%q", obj[1:3])
+	}
+}
+
 func TestLocaleCtorNilSafe(t *testing.T) {
 	LocaleCtor(nil)
 	var obj [16]byte

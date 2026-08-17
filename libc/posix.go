@@ -203,6 +203,12 @@ func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte
 	return p
 }
 
+// Mmap is mmap(2). Same allocator as Mmap64; returns unsafe.Pointer
+// because Darwin rustc assigns the result to an LLVM ptr.
+func Mmap(addr *byte, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
+	return unsafe.Pointer(Mmap64(addr, length, prot, flags, fd, offset))
+}
+
 // Munmap is munmap(2).
 func Munmap(addr *byte, length int64) int32 {
 	_ = length
