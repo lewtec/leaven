@@ -21,6 +21,9 @@ func TestAssimilate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: assimilate is cmake + cargo")
 	}
+	if runtime.GOOS != "windows" {
+		syncProjects(t)
+	}
 	t.Run("csmith", testAssimilateCsmith)
 	t.Run("rhai", testAssimilateRhai)
 }
@@ -465,7 +468,7 @@ func syncProjects(t *testing.T) {
 	}
 	var out []byte
 	var err error
-	for i, wait := range []time.Duration{0, 15 * time.Second, 45 * time.Second} {
+	for i, wait := range []time.Duration{0, 20 * time.Second, 60 * time.Second, 120 * time.Second} {
 		if wait > 0 {
 			time.Sleep(wait)
 		}
@@ -474,13 +477,21 @@ func syncProjects(t *testing.T) {
 		if err == nil {
 			return
 		}
-		s := string(out)
-		if !strings.Contains(s, "429") && !strings.Contains(s, "504") {
+		if !githubFetchRetry(string(out)) {
 			break
 		}
 		t.Logf("workspaced apply retry %d after %s", i+1, wait)
 	}
 	t.Fatalf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
+}
+
+func githubFetchRetry(out string) bool {
+	for _, s := range []string{"429", "502", "503", "504"} {
+		if strings.Contains(out, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func llvmLink22(t *testing.T) string {
