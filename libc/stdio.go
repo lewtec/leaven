@@ -65,11 +65,10 @@ func PthreadGetattrNp(thread int64, attr *byte) int32 {
 func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 	_ = attr
 	if stackaddr != nil {
-		const base = uintptr(1) << 48
-		Store(Ptr(stackaddr), 0, unsafe.Pointer(base))
+		Store(Ptr(stackaddr), 0, unsafe.Pointer(dummyStackBase))
 	}
 	if stacksize != nil {
-		Store[uint64](Ptr(stacksize), 0, 8<<20) // 8 MiB
+		Store[uint64](Ptr(stacksize), 0, dummyStackSize)
 	}
 	return 0
 }
@@ -78,6 +77,21 @@ func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 func PthreadAttrDestroy(attr *byte) int32 {
 	_ = attr
 	return 0
+}
+
+const dummyStackBase = uintptr(1) << 48
+const dummyStackSize = 8 << 20 // 8 MiB
+
+// PthreadGetStackaddrNp is Darwin pthread_get_stackaddr_np.
+func PthreadGetStackaddrNp(thread int64) unsafe.Pointer {
+	_ = thread
+	return unsafe.Pointer(dummyStackBase)
+}
+
+// PthreadGetStacksizeNp is Darwin pthread_get_stacksize_np.
+func PthreadGetStacksizeNp(thread int64) int64 {
+	_ = thread
+	return dummyStackSize
 }
 
 // Sigaction is sigaction(2). No-op success for rhai-run startup.

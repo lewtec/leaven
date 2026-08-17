@@ -31,3 +31,13 @@ func TestFcntlGetFL(t *testing.T) {
 		t.Fatal("bad fd")
 	}
 }
+
+func TestPthreadGetStackaddrNp(t *testing.T) {
+	p := PthreadGetStackaddrNp(PthreadSelf())
+	if p == nil {
+		t.Fatal("nil stackaddr")
+	}
+	if n := PthreadGetStacksizeNp(PthreadSelf()); n != dummyStackSize {
+		t.Fatalf("stacksize=%d", n)
+	}
+}

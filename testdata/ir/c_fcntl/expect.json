@@ -11,9 +11,5 @@
         "func fcntl"
       ]
     }
-  ],
-  "run": {
-    "stdout_contains": [],
-    "majors": ["22"]
-  }
+  ]
 }

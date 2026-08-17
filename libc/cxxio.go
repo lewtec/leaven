@@ -86,10 +86,10 @@ func streamOf(this *byte) *fileStream {
 // IfstreamOpen is basic_ifstream::basic_ifstream(char const*, ios_openmode).
 // Opens the path for real. fail is set if open fails. mode is recorded only
 // as in/out; unknown bits fail the stream instead of pretending.
-func IfstreamOpen(this *byte, path *byte, mode int32) {
+func IfstreamOpen(this *byte, path *byte, mode int32) *byte {
 	st := &fileStream{fail: true}
 	if this == nil {
-		return
+		return nil
 	}
 	if path != nil {
 		flag, ok := iosOpenFlag(mode)
@@ -103,6 +103,7 @@ func IfstreamOpen(this *byte, path *byte, mode int32) {
 	}
 	streams.Store(Addr(this), st)
 	setIfstreamABI(this, st.fail, st.eof)
+	return this
 }
 
 func iosOpenFlag(mode int32) (int, bool) {
@@ -141,9 +142,9 @@ func iosOpenFlag(mode int32) (int, bool) {
 }
 
 // IfstreamClose is ifstream::close / D1 destructor.
-func IfstreamClose(this *byte) {
+func IfstreamClose(this *byte) *byte {
 	if this == nil {
-		return
+		return nil
 	}
 	if v, ok := streams.LoadAndDelete(Addr(this)); ok {
 		s := v.(*fileStream)
@@ -152,10 +153,14 @@ func IfstreamClose(this *byte) {
 		}
 		setIfstreamABI(this, true, s.eof)
 	}
+	return this
 }
 
 // IfstreamCloseVTT is D2(this, vtt).
-func IfstreamCloseVTT(this *byte, vtt *byte) { IfstreamClose(this) }
+func IfstreamCloseVTT(this *byte, vtt *byte) *byte {
+	_ = vtt
+	return IfstreamClose(this)
+}
 
 // CxxNoop is a declare-only C++ dtor we never constructed a real
 // object for (locale, ios_base, __basic_file).
@@ -278,11 +283,12 @@ func StringstreamDefaultCtor(this *byte) {
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
-func OStringStreamClose(this *byte) {
+func OStringStreamClose(this *byte) *byte {
 	if this == nil {
-		return
+		return nil
 	}
 	ostringStreams.Delete(Addr(this))
+	return this
 }
 
 // StringstreamDefaultClose is basic_stringstream dtor (default or string ctor).
