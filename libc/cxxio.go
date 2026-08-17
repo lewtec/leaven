@@ -164,7 +164,7 @@ func IfstreamCloseVTT(this *byte, vtt *byte) unsafe.Pointer {
 
 // CxxNoop is a declare-only C++ dtor we never constructed a real
 // object for (locale, ios_base, __basic_file).
-func CxxNoop(this *byte) {}
+func CxxNoop(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
 // FilebufClose is basic_filebuf::close. O2 inlines ifstream::close
 // as filebuf::close(this+16). Return this (non-null) on success.
@@ -192,16 +192,17 @@ func IosBool(this *byte) bool { return !streamOf(this).fail }
 // LocaleCtor is std::locale::locale() (default and copy). gensym's
 // ostringstream constructs a locale after ios_base; we do not
 // reconstruct facets (ctype is already on the ios object).
-func LocaleCtor(this *byte) {}
+func LocaleCtor(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
 // IosBaseCtor is std::ios_base::ios_base() / _M_init / basic_ios::init.
 // gensym's stack ostringstream calls this before operator<< / str().
 // Same stand-in vptr and ctype as cout so inlined fail/endl stay honest.
-func IosBaseCtor(this *byte) {
+func IosBaseCtor(this *byte) unsafe.Pointer {
 	if this == nil {
-		return
+		return nil
 	}
 	InitOstream(Ptr(this))
+	return unsafe.Pointer(this)
 }
 
 // InitOstream writes the stand-in Itanium vptr and ctype<char>.
@@ -260,26 +261,28 @@ const stringstreamOstreamOff = 16
 
 // OStringStreamCtor is basic_ostringstream default ctor (gensym).
 // Object is ~112 bytes; do not InitOstream (ctype at +240).
-func OStringStreamCtor(this *byte) {
+func OStringStreamCtor(this *byte) unsafe.Pointer {
 	if this == nil {
-		return
+		return nil
 	}
 	buf := []byte{}
 	ostringStreams.Store(Addr(this), &buf)
 	// Stand-in vptr only (first word); no ctype slot in this size.
 	Store(Ptr(this), 0, StandinVptr())
+	return unsafe.Pointer(this)
 }
 
 // StringstreamDefaultCtor is basic_stringstream() used by Variable::new_ctrl_vars.
 // Registers both the object and the ostream subobject (+16) for <<.
-func StringstreamDefaultCtor(this *byte) {
+func StringstreamDefaultCtor(this *byte) unsafe.Pointer {
 	if this == nil {
-		return
+		return nil
 	}
 	buf := []byte{}
 	base := Addr(this)
 	ostringStreams.Store(base, &buf)
 	ostringStreams.Store(base+stringstreamOstreamOff, &buf)
+	return unsafe.Pointer(this)
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
@@ -292,15 +295,16 @@ func OStringStreamClose(this *byte) unsafe.Pointer {
 }
 
 // StringstreamDefaultClose is basic_stringstream dtor (default or string ctor).
-func StringstreamDefaultClose(this *byte) {
+func StringstreamDefaultClose(this *byte) unsafe.Pointer {
 	if this == nil {
-		return
+		return nil
 	}
 	base := Addr(this)
 	ostringStreams.Delete(base)
 	ostringStreams.Delete(base + stringstreamOstreamOff)
 	// Also drop the read-side table used by str2int.
 	StringstreamClose(this)
+	return unsafe.Pointer(this)
 }
 
 // OStringStreamStr is basic_ostringstream::str() / stringstream::str() → string.
@@ -550,6 +554,23 @@ func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 	return unsafe.Pointer(this)
 }
 
+// StdStringCopy is libc++ basic_string(basic_string const&).
+func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	if other == nil {
+		return StdStringInit(this, nil, 0)
+	}
+	b0 := Load[byte](Ptr(other), 0)
+	if b0&libcxxLongBit == 0 {
+		copy(Bytes(this, 24), Bytes(other, 24))
+		return unsafe.Pointer(this)
+	}
+	n := int64(Load[uint64](Ptr(other), 8))
+	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
+}
+
 // cxxStringBytes reads a libstdc++ __cxx11::basic_string into a Go slice.
 func cxxStringBytes(s *byte) []byte {
 	if s == nil {
@@ -589,25 +610,27 @@ func stringStreamOf(this *byte) *stringStream {
 // StringstreamCtor is basic_stringstream(string const&, ios_openmode).
 // csmith StringUtils::str2int builds one to parse an int (dec or hex).
 // Object is ~128 bytes; do not write ostream ctype at +240.
-func StringstreamCtor(this *byte, str *byte, mode int32) {
+func StringstreamCtor(this *byte, str *byte, mode int32) unsafe.Pointer {
 	_ = mode
 	if this == nil {
-		return
+		return nil
 	}
 	data := append([]byte(nil), cxxStringBytes(str)...)
 	st := &stringStream{buf: data, base: 10}
 	stringStreams.Store(Addr(this), st)
 	// Stand-in vptr + clear iostate (fail/eof slots at +32 fit in 128).
 	setIfstreamABI(this, false, false)
+	return unsafe.Pointer(this)
 }
 
 // StringstreamClose is stringstream::~stringstream / D1.
-func StringstreamClose(this *byte) {
+func StringstreamClose(this *byte) unsafe.Pointer {
 	if this == nil {
-		return
+		return nil
 	}
 	stringStreams.Delete(Addr(this))
 	setIfstreamABI(this, true, false)
+	return unsafe.Pointer(this)
 }
 
 // IstreamApplyIosManip is istream::operator>>(ios_base&(*)(ios_base&)).
