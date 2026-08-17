@@ -68,6 +68,27 @@ func TestParseRustAdd22(t *testing.T) {
 	}
 }
 
+func TestParseCallOperandBundles(t *testing.T) {
+	src := `define ptr @f(i64 %n) {
+entry:
+  %p = call noalias ptr @malloc(i64 %n) #0 [ "deopt"(i32 0) ]
+  ret ptr %p
+}
+declare ptr @malloc(i64)
+attributes #0 = { nounwind }
+`
+	m, err := ParseString("bundle.ll", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) == 0 || len(m.Funcs[0].Blocks[0].Insts) == 0 {
+		t.Fatal("no call")
+	}
+	if _, ok := m.Funcs[0].Blocks[0].Insts[0].(*ir.InstCall); !ok {
+		t.Fatalf("got %T", m.Funcs[0].Blocks[0].Insts[0])
+	}
+}
+
 func TestParseUseBeforeDef(t *testing.T) {
 	src := `define i64 @f() {
 entry:

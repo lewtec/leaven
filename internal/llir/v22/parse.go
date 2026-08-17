@@ -1409,6 +1409,9 @@ func (p *parser) parseCallSite() (callSite, error) {
 			return cs, err
 		}
 	}
+	if err := p.skipOperandBundles(); err != nil {
+		return cs, err
+	}
 	cs.callee = callee
 	cs.args = args
 	cs.ret = typ
@@ -2366,6 +2369,14 @@ func (p *parser) skipDbgRecord() error {
 		return p.errorf("expected dbg record (")
 	}
 	return p.skipBalanced(kLParen, kRParen)
+}
+
+// skipOperandBundles eats `[ "name"(...) , ... ]` after a call/invoke.
+func (p *parser) skipOperandBundles() error {
+	if p.tok.kind != kLBrack {
+		return nil
+	}
+	return p.skipBalanced(kLBrack, kRBrack)
 }
 
 func (p *parser) skipInstMD() error {

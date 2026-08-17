@@ -185,14 +185,12 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			// Bitfields and other non-power-of-two widths (e.g. i24) map to the
 			// next wider Go integer type (int16/int32/int64).
 			return goIntType(t.BitSize), nil
-		case t.BitSize == 128:
-			// rustc i128/u128 and TypeId. Two limbs, not int64.
+		case t.BitSize <= 128:
+			// rustc i128 and odd widths (i104 in std::sys::backtrace).
 			return Qual[libc.I128](), nil
-		case t.BitSize == 256:
-			// rustc core::fmt::num::__fmt_inner widens u128 to i256.
+		case t.BitSize <= 256:
 			return Qual[libc.I256](), nil
 		default:
-			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
 			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
 		}
 
@@ -272,6 +270,9 @@ func TypeSpec(t types.Type) (*jen.Statement, error) {
 
 // goIntBits rounds an LLVM integer width up to a Go integer width
 // (8, 16, 32, or 64). Widths above 64 stay as-is for the caller to reject.
+func isWide128(bits uint64) bool { return bits > 64 && bits <= 128 }
+func isWide256(bits uint64) bool { return bits > 128 && bits <= 256 }
+
 func goIntBits(bits uint64) uint64 {
 	switch {
 	case bits <= 8:

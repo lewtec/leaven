@@ -1,8 +1,15 @@
 [tools]
 # Install: mise install
 # Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
-"conda:clang" = ["14.0.6", "22.1.8"]
-"conda:clangxx" = ["14.0.6", "22.1.8"]
+# clang 14 has no windows-arm64 conda build. IR tests use committed .ll.
+"conda:clang" = [
+  { version = "14.0.6", os = ["linux", "macos", "windows/x64"] },
+  "22.1.8",
+]
+"conda:clangxx" = [
+  { version = "14.0.6", os = ["linux", "macos", "windows/x64"] },
+  "22.1.8",
+]
 "conda:llvm-tools" = "22.1.8"
 # Darwin only: Apple ld rejects conda's -lto_library path.
 "conda:lld" = { version = "22.1.8", os = ["macos"] }

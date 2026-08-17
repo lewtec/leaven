@@ -78,6 +78,9 @@ func testAssimilateCsmith(t *testing.T) {
 }
 
 func testAssimilateRhai(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rustc windows-msvc needs link.exe; mise clang path is not a Windows linker")
+	}
 	root := requireProject(t, "rhai", "Cargo.toml")
 	clang, sysroot, libdir := clang22LinkEnv(t)
 	clangxx := filepath.Join(filepath.Dir(clang), "clang++")

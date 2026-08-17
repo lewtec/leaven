@@ -625,7 +625,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			if toType.BitSize == 128 || toType.BitSize == 256 {
+			if isWide128(toType.BitSize) || isWide256(toType.BitSize) {
 				c, err := formatSExt(inst.From, inst.To)
 				if err != nil {
 					return nil, err
@@ -639,7 +639,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			return one(jen.If(from).Block(assign(name, neg)).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
-		if toType.BitSize == 128 || toType.BitSize == 256 {
+		if isWide128(toType.BitSize) || isWide256(toType.BitSize) {
 			c, err := formatSExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err
@@ -847,7 +847,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		}
 		name := VariableName(inst)
 		if fromType, ok := inst.From.Type().(*types.IntType); ok && fromType.BitSize == 1 {
-			if toType.BitSize == 128 || toType.BitSize == 256 {
+			if isWide128(toType.BitSize) || isWide256(toType.BitSize) {
 				c, err := formatZExt(inst.From, inst.To)
 				if err != nil {
 					return nil, err
@@ -856,7 +856,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			return one(jen.If(from).Block(assign(name, jen.Lit(1))).Else().Block(assign(name, jen.Lit(0)))), nil
 		}
-		if toType.BitSize == 128 || toType.BitSize == 256 {
+		if isWide128(toType.BitSize) || isWide256(toType.BitSize) {
 			c, err := formatZExt(inst.From, inst.To)
 			if err != nil {
 				return nil, err

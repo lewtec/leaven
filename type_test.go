@@ -7,6 +7,16 @@ import (
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 )
 
+func TestTypeDefinitionI104(t *testing.T) {
+	s, err := TypeDefinition(types.NewInt(104))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s == nil {
+		t.Fatal("nil")
+	}
+}
+
 func TestTypeNameRustArrayGeneric(t *testing.T) {
 	st := &types.StructType{}
 	st.SetName("smallvec::SmallVec<[usize; 2]>")

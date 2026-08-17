@@ -445,10 +445,10 @@ func formatExpr(v value.Value) (expr, error) {
 		return formatExpr(v.Constant)
 
 	case *constant.Int:
-		if v.Typ.BitSize == 128 {
+		if isWide128(v.Typ.BitSize) {
 			return val(i128Lit(v.X)), nil
 		}
-		if v.Typ.BitSize == 256 {
+		if isWide256(v.Typ.BitSize) {
 			return val(i256Lit(v.X)), nil
 		}
 		if v.Typ.BitSize > 64 {
@@ -558,10 +558,10 @@ func zeroOf(typ types.Type) (expr, error) {
 		if t.BitSize == 1 {
 			return val(jen.False()), nil
 		}
-		if t.BitSize == 128 {
+		if isWide128(t.BitSize) {
 			return val(Qual[libc.I128]().Values()), nil
 		}
-		if t.BitSize == 256 {
+		if isWide256(t.BitSize) {
 			return val(Qual[libc.I256]().Values()), nil
 		}
 		return val(jen.Lit(0)), nil
@@ -737,7 +737,7 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	if toType.BitSize == 128 {
+	if isWide128(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I128FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
@@ -746,7 +746,7 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		return Sym(libc.I128FromU64).Call(jen.Uint64().Call(src)), nil
 	}
-	if toType.BitSize == 256 {
+	if isWide256(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I256FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
@@ -779,7 +779,7 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	if toType.BitSize == 128 {
+	if isWide128(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I128FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
@@ -788,7 +788,7 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		return Sym(libc.I128FromI64).Call(jen.Int64().Call(src)), nil
 	}
-	if toType.BitSize == 256 {
+	if isWide256(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I256FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
@@ -1032,7 +1032,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
-		if ci.Typ.BitSize == 128 || ci.Typ.BitSize == 256 {
+		if isWide128(ci.Typ.BitSize) || isWide256(ci.Typ.BitSize) {
 			return result, nil
 		}
 		if ci.Typ.BitSize > 64 {
@@ -1088,7 +1088,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 
 	switch t := v.Type().(type) {
 	case *types.IntType:
-		if t.BitSize == 128 || t.BitSize == 256 {
+		if isWide128(t.BitSize) || isWide256(t.BitSize) {
 			return result, nil
 		}
 		if t.BitSize > 8 {
