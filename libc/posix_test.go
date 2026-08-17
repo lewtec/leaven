@@ -32,6 +32,19 @@ func TestFcntlGetFL(t *testing.T) {
 	}
 }
 
+func TestStrerrorR(t *testing.T) {
+	var buf [16]byte
+	if StrerrorR(1, &buf[0], int64(len(buf))) != 0 {
+		t.Fatal("strerror_r")
+	}
+	if buf[0] == 0 {
+		t.Fatal("empty")
+	}
+	if StrerrorR(1, nil, 8) != -1 {
+		t.Fatal("nil buf")
+	}
+}
+
 func TestPthreadGetStackaddrNp(t *testing.T) {
 	p := PthreadGetStackaddrNp(PthreadSelf())
 	if p == nil {

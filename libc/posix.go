@@ -248,6 +248,28 @@ func Getenv(name *byte) *byte {
 	return nil
 }
 
+// StrerrorR is POSIX strerror_r (XSI: returns 0 or -1). Darwin rustc
+// uses this for errno text; a short message in buf is enough.
+func StrerrorR(errnum int32, buf *byte, buflen int64) int32 {
+	if buf == nil || buflen <= 0 {
+		setErrno(22) // EINVAL
+		return -1
+	}
+	msg := "error"
+	if errnum == 0 {
+		msg = "success"
+	}
+	dst := Bytes(buf, int(buflen))
+	n := copy(dst, msg)
+	if n < len(dst) {
+		dst[n] = 0
+		return 0
+	}
+	dst[len(dst)-1] = 0
+	setErrno(34) // ERANGE
+	return -1
+}
+
 // Getcwd is getcwd(3).
 func Getcwd(buf *byte, size int64) *byte {
 	if buf == nil || size <= 0 {

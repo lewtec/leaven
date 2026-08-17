@@ -194,6 +194,25 @@ func IosBool(this *byte) bool { return !streamOf(this).fail }
 // reconstruct facets (ctype is already on the ios object).
 func LocaleCtor(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
+// IosGetloc is ios_base::getloc(). Writes a dummy locale into the
+// sret slot (first arg) when clang returns locale by value.
+func IosGetloc(ret *byte, _ ...any) unsafe.Pointer {
+	return LocaleCtor(ret)
+}
+
+// OstreamSentryCtor is basic_ostream::sentry::sentry(ostream&).
+func OstreamSentryCtor(this *byte, os *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	ok := int8(1)
+	if os != nil && IosFail(os) {
+		ok = 0
+	}
+	Store[int8](Ptr(this), 0, ok)
+	return unsafe.Pointer(this)
+}
+
 // IosBaseCtor is std::ios_base::ios_base() / _M_init / basic_ios::init.
 // gensym's stack ostringstream calls this before operator<< / str().
 // Same stand-in vptr and ctype as cout so inlined fail/endl stay honest.
