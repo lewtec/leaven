@@ -1790,13 +1790,6 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
 			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
-		} else if strings.Contains(llvmName, "begin_panic") ||
-			strings.Contains(llvmName, "panic_fmt") ||
-			strings.Contains(llvmName, "throw_logic_error") ||
-			strings.Contains(llvmName, "throw_length_error") ||
-			strings.Contains(llvmName, "throw_bad_alloc") ||
-			strings.Contains(llvmName, "throw_bad_array") {
-			return one(jen.Panic(jen.Lit("runtime error"))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
