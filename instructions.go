@@ -2499,6 +2499,8 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEPKcm":                               Sym(libc.StdStringInit),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_":                                   Sym(libc.StdStringCopy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_":                                   Sym(libc.StdStringCopy),
+	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev":                                       Sym(libc.StdStringDestroy),
+	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED2Ev":                                       Sym(libc.StdStringDestroy),
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             Sym(libc.IosFail),
 	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              Sym(libc.IosClear),
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              Sym(libc.IosEof),

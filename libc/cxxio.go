@@ -571,6 +571,20 @@ func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
 }
 
+// StdStringDestroy is libc++ basic_string::~basic_string.
+func StdStringDestroy(this *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	if Load[byte](Ptr(this), 0)&libcxxLongBit != 0 {
+		if p := Load[*byte](Ptr(this), 0); p != nil {
+			Free(p)
+		}
+	}
+	Memset(this, 0, 32)
+	return unsafe.Pointer(this)
+}
+
 // cxxStringBytes reads a libstdc++ __cxx11::basic_string into a Go slice.
 func cxxStringBytes(s *byte) []byte {
 	if s == nil {

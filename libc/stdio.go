@@ -65,7 +65,7 @@ func PthreadGetattrNp(thread int64, attr *byte) int32 {
 func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 	_ = attr
 	if stackaddr != nil {
-		Store(Ptr(stackaddr), 0, unsafe.Pointer(dummyStackBase))
+		Store(Ptr(stackaddr), 0, dummyStackAddr())
 	}
 	if stacksize != nil {
 		Store[uint64](Ptr(stacksize), 0, dummyStackSize)
@@ -79,13 +79,16 @@ func PthreadAttrDestroy(attr *byte) int32 {
 	return 0
 }
 
-const dummyStackBase = uintptr(1) << 48
 const dummyStackSize = 8 << 20 // 8 MiB
+
+var dummyStack [dummyStackSize]byte
+
+func dummyStackAddr() unsafe.Pointer { return unsafe.Pointer(&dummyStack[0]) }
 
 // PthreadGetStackaddrNp is Darwin pthread_get_stackaddr_np.
 func PthreadGetStackaddrNp(thread int64) unsafe.Pointer {
 	_ = thread
-	return unsafe.Pointer(dummyStackBase)
+	return dummyStackAddr()
 }
 
 // PthreadGetStacksizeNp is Darwin pthread_get_stacksize_np.
