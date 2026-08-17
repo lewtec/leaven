@@ -77,6 +77,44 @@ func Open64(path *byte, flags int32, mode ...int32) int32 {
 	return Open(path, flags, mode...)
 }
 
+// Fcntl is fcntl(2). The libc fd is looked up, then the host fcntl
+// runs on that *os.File (unix.FcntlInt via SyscallConn).
+func Fcntl(fd int32, cmd int32, args ...any) int32 {
+	f := fdGet(fd)
+	if f == nil {
+		setErrno(9) // EBADF
+		return -1
+	}
+	arg := 0
+	if len(args) > 0 {
+		arg = fcntlArg(args[0])
+	}
+	return fcntlFile(f, int(cmd), arg)
+}
+
+func fcntlArg(v any) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case int32:
+		return int(x)
+	case int64:
+		return int(x)
+	case uint32:
+		return int(x)
+	case uint64:
+		return int(x)
+	case uintptr:
+		return int(x)
+	case *byte:
+		return int(uintptr(unsafe.Pointer(x)))
+	case unsafe.Pointer:
+		return int(uintptr(x))
+	default:
+		return 0
+	}
+}
+
 // Close is close(fd).
 func Close(fd int32) int32 {
 	if fd < 3 {

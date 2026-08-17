@@ -2511,6 +2511,7 @@ var libraryFunctions = map[string]goRef{
 	"__ctype_b_loc":         Sym(libc.CtypeBLoc),
 	"dup":                   Sym(libc.Dup),
 	"fclose":                Sym(libc.Fclose),
+	"fcntl":                 Sym(libc.Fcntl),
 	"fdopen":                Sym(libc.Fdopen),
 	"fprintf":               Sym(libc.Fprintf),
 	"fputc":                 Sym(libc.Fputc),
