@@ -486,7 +486,7 @@ func syncProjects(t *testing.T) {
 }
 
 func githubFetchRetry(out string) bool {
-	for _, s := range []string{"429", "502", "503", "504"} {
+	for _, s := range []string{"403", "429", "502", "503", "504"} {
 		if strings.Contains(out, s) {
 			return true
 		}

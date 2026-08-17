@@ -571,6 +571,18 @@ func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
 }
 
+// StdStringAssign is libc++ basic_string::operator=(basic_string const&).
+func StdStringAssign(this *byte, other *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	if this == other {
+		return unsafe.Pointer(this)
+	}
+	StdStringDestroy(this)
+	return StdStringCopy(this, other)
+}
+
 // StdStringDestroy is libc++ basic_string::~basic_string.
 func StdStringDestroy(this *byte) unsafe.Pointer {
 	if this == nil {

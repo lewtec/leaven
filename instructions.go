@@ -1790,8 +1790,8 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
 			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
-		} else if strings.Contains(llvmName, "panicking") ||
-			strings.Contains(llvmName, "handle_error") ||
+		} else if strings.Contains(llvmName, "begin_panic") ||
+			strings.Contains(llvmName, "panic_fmt") ||
 			strings.Contains(llvmName, "throw_logic_error") ||
 			strings.Contains(llvmName, "throw_length_error") ||
 			strings.Contains(llvmName, "throw_bad_alloc") ||
@@ -2501,6 +2501,7 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_":                                   Sym(libc.StdStringCopy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev":                                       Sym(libc.StdStringDestroy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED2Ev":                                       Sym(libc.StdStringDestroy),
+	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEaSERKS5_":                                   Sym(libc.StdStringAssign),
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             Sym(libc.IosFail),
 	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              Sym(libc.IosClear),
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE3eofEv":                                                              Sym(libc.IosEof),
