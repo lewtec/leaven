@@ -42,10 +42,10 @@ func Signal(sig int32, handler int64) int64 {
 	return 0
 }
 
-// Sysconf is sysconf(3). Linux _SC_PAGESIZE is 30.
+// Sysconf is sysconf(3). Darwin _SC_PAGESIZE is 29; Linux is 30.
 func Sysconf(name int32) int64 {
 	switch name {
-	case 30: // _SC_PAGESIZE
+	case 29, 30: // _SC_PAGESIZE
 		return 4096
 	default:
 		return -1
