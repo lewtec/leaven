@@ -203,7 +203,7 @@ var invalidNames = map[string]bool{
 }
 
 func namedRef(name string) (*jen.Statement, bool) {
-	if ref, ok := libraryFunctions[name]; ok {
+	if ref, ok := libcLookup(name); ok {
 		return ref.code(), true
 	}
 	if c, ok := cxxIONamed(name); ok {
@@ -222,7 +222,7 @@ func namedRef(name string) (*jen.Statement, bool) {
 // llvm.* intrinsic that translateCall handles. Declare-only IR symbols with
 // no runtime def become panic/zero stubs.
 func hasRuntimeDef(name string) bool {
-	if _, ok := libraryFunctions[name]; ok {
+	if _, ok := libcLookup(name); ok {
 		return true
 	}
 	if _, ok := libraryGlobals[name]; ok {

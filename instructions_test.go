@@ -2,6 +2,15 @@ package leaven
 
 import "testing"
 
+func TestLibcLookupDarwinSuffix(t *testing.T) {
+	if _, ok := libcLookup("realpath$DARWIN_EXTSN"); !ok {
+		t.Fatal("realpath$DARWIN_EXTSN")
+	}
+	if _, ok := libcLookup("realpath"); !ok {
+		t.Fatal("realpath")
+	}
+}
+
 func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	name := "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1ERKNSt7__cxx1112basic_stringIcS2_SaIcEEE"
 	fn, args, retPtr, ok := cxxIOCall(name, nil)

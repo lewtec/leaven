@@ -1777,7 +1777,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	}
 
 	if callee == nil {
-		if ref, ok := libraryFunctions[llvmName]; ok {
+		if ref, ok := libcLookup(llvmName); ok {
 			callee = ref.code()
 			for i, a := range inst.Args {
 				args[i] = libcCallArg(llvmName, i, a, args[i])
@@ -2485,6 +2485,20 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	default:
 		return nil, 0, false
 	}
+}
+
+// libcLookup maps LLVM names to libc. Darwin symbols may be
+// realpath$DARWIN_EXTSN / fopen$UNIX2003; the suffix is ignored.
+func libcLookup(name string) (goRef, bool) {
+	if ref, ok := libraryFunctions[name]; ok {
+		return ref, true
+	}
+	if i := strings.IndexByte(name, '$'); i > 0 {
+		if ref, ok := libraryFunctions[name[:i]]; ok {
+			return ref, true
+		}
+	}
+	return goRef{}, false
 }
 
 var libraryFunctions = map[string]goRef{
