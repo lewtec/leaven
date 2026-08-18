@@ -228,7 +228,7 @@ func OstreamSentryCtor(this *byte, os *byte) unsafe.Pointer {
 func OstreamSentryDestroy(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
 // IstreamSentryCtor is basic_istream::sentry::sentry(istream&, bool).
-func IstreamSentryCtor(this *byte, is *byte, _ byte) unsafe.Pointer {
+func IstreamSentryCtor(this *byte, is *byte, _ bool) unsafe.Pointer {
 	return OstreamSentryCtor(this, is)
 }
 

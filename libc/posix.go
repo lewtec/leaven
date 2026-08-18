@@ -186,30 +186,48 @@ func Sigaltstack(ss, oss *byte) int32 {
 	return 0
 }
 
+func mmapAddr(v any) unsafe.Pointer {
+	switch x := v.(type) {
+	case nil:
+		return nil
+	case unsafe.Pointer:
+		return x
+	case *byte:
+		return unsafe.Pointer(x)
+	case uintptr:
+		return unsafe.Pointer(x)
+	case uint64:
+		return unsafe.Pointer(uintptr(x))
+	case int64:
+		return unsafe.Pointer(uintptr(x))
+	default:
+		return nil
+	}
+}
+
 // Mmap64 is mmap64. A non-nil addr is treated as MAP_FIXED (rustc
 // stack guard compares the result to the requested pointer).
-// MAP_FAILED is (void*)-1.
-func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte {
+func Mmap64(addr any, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
 	_, _, _ = prot, flags, offset
-	if addr != nil {
-		return addr
+	if p := mmapAddr(addr); p != nil {
+		return p
 	}
 	if length <= 0 {
 		setErrno(22)
-		return (*byte)(unsafe.Pointer(^uintptr(0)))
+		return unsafe.Pointer(^uintptr(0))
 	}
 	_ = fd
 	p := Malloc[byte](length)
 	if p == nil {
 		setErrno(12) // ENOMEM
-		return (*byte)(unsafe.Pointer(^uintptr(0)))
+		return unsafe.Pointer(^uintptr(0))
 	}
-	return p
+	return unsafe.Pointer(p)
 }
 
-// Mmap is mmap(2). Same as Mmap64; Darwin rustc assigns the result to ptr.
-func Mmap(addr *byte, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
-	return unsafe.Pointer(Mmap64(addr, length, prot, flags, fd, offset))
+// Mmap is mmap(2). Same as Mmap64.
+func Mmap(addr any, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
+	return Mmap64(addr, length, prot, flags, fd, offset)
 }
 
 // Munmap is munmap(2).

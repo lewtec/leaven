@@ -1858,7 +1858,7 @@ func libcReturnsTypedPtr(name string) bool {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
-		"mmap64", "__errno_location", "__error", "getenv", "getcwd", "realpath", "dlsym",
+		"__errno_location", "__error", "getenv", "getcwd", "realpath", "dlsym",
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
