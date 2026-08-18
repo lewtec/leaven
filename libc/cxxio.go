@@ -54,7 +54,7 @@ func init() {
 
 // CtypeWiden is ctype<char>::widen. Identity; this may be nil when
 // use_facet was inlined against a dummy locale.
-func CtypeWiden(this *byte, c int32) int32 {
+func CtypeWiden(this unsafe.Pointer, c byte) byte {
 	_ = this
 	return c
 }

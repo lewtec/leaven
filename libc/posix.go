@@ -203,10 +203,13 @@ func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte
 	return p
 }
 
-// Mmap is mmap(2). Same allocator as Mmap64; returns unsafe.Pointer
-// because Darwin rustc assigns the result to an LLVM ptr.
+// Mmap is mmap(2). A non-nil addr is treated as MAP_FIXED so rustc's
+// stack guard (mmap at stackaddr-page) sees the requested pointer.
 func Mmap(addr *byte, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
-	return unsafe.Pointer(Mmap64(addr, length, prot, flags, fd, offset))
+	if addr != nil {
+		return unsafe.Pointer(addr)
+	}
+	return unsafe.Pointer(Mmap64(nil, length, prot, flags, fd, offset))
 }
 
 // Munmap is munmap(2).
