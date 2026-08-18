@@ -2605,6 +2605,7 @@ var libraryFunctions = map[string]goRef{
 	"strerror_r":                Sym(libc.StrerrorR),
 	"close":                     Sym(libc.Close),
 	"dlsym":                     Sym(libc.Dlsym),
+	"fstat":                     Sym(libc.Fstat64),
 	"fstat64":                   Sym(libc.Fstat64),
 	"getauxval":                 Sym(libc.Getauxval),
 	"getcwd":                    Sym(libc.Getcwd),
