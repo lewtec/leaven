@@ -1779,10 +1779,11 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 	if callee == nil {
 		if ref, ok := libcLookup(llvmName); ok {
 			callee = ref.code()
+			name := libcCanon(llvmName)
 			for i, a := range inst.Args {
-				args[i] = libcCallArg(llvmName, i, a, args[i])
+				args[i] = libcCallArg(name, i, a, args[i])
 			}
-			typedPtr = libcReturnsTypedPtr(llvmName)
+			typedPtr = libcReturnsTypedPtr(name)
 		} else if cxxNoopDtor(llvmName) {
 			return nil, nil
 		} else if c, adj, retPtr, ok := cxxTreeCall(llvmName, args); ok {
@@ -2487,28 +2488,36 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 }
 
-// libcLookup maps LLVM names to libc. Darwin symbols may be
-// realpath$DARWIN_EXTSN; after sanitizeIdent they are realpath_DARWIN_EXTSN.
-func libcLookup(name string) (goRef, bool) {
-	if ref, ok := libraryFunctions[name]; ok {
-		return ref, true
+// libcCanon strips Darwin $ / sanitized suffixes so realpath$DARWIN_EXTSN
+// and realpath_DARWIN_EXTSN both map to realpath. Unknown names stay as-is.
+func libcCanon(name string) string {
+	if _, ok := libraryFunctions[name]; ok {
+		return name
 	}
 	for _, suf := range []string{
 		"$DARWIN_EXTSN", "$UNIX2003", "$INODE64",
 		"_DARWIN_EXTSN", "_UNIX2003", "_INODE64",
 	} {
 		if strings.HasSuffix(name, suf) {
-			if ref, ok := libraryFunctions[strings.TrimSuffix(name, suf)]; ok {
-				return ref, true
+			base := strings.TrimSuffix(name, suf)
+			if _, ok := libraryFunctions[base]; ok {
+				return base
 			}
 		}
 	}
 	if i := strings.IndexByte(name, '$'); i > 0 {
-		if ref, ok := libraryFunctions[name[:i]]; ok {
-			return ref, true
+		if _, ok := libraryFunctions[name[:i]]; ok {
+			return name[:i]
 		}
 	}
-	return goRef{}, false
+	return name
+}
+
+// libcLookup maps LLVM names to libc. Darwin symbols may be
+// realpath$DARWIN_EXTSN; after sanitizeIdent they are realpath_DARWIN_EXTSN.
+func libcLookup(name string) (goRef, bool) {
+	ref, ok := libraryFunctions[libcCanon(name)]
+	return ref, ok
 }
 
 var libraryFunctions = map[string]goRef{

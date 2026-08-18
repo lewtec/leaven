@@ -14,6 +14,20 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	}
 }
 
+func TestLibcReturnsTypedPtrDarwinSuffix(t *testing.T) {
+	for _, name := range []string{"realpath", "realpath$DARWIN_EXTSN", "realpath_DARWIN_EXTSN"} {
+		if !libcReturnsTypedPtr(libcCanon(name)) {
+			t.Fatalf("typedPtr %s", name)
+		}
+	}
+	if libcReturnsTypedPtr(libcCanon("_NSGetArgc")) {
+		t.Fatal("_NSGetArgc must not wrap")
+	}
+	if libcReturnsTypedPtr(libcCanon("mmap64_INODE64")) {
+		t.Fatal("mmap64 must not wrap")
+	}
+}
+
 func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	name := "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1ERKNSt7__cxx1112basic_stringIcS2_SaIcEEE"
 	fn, args, retPtr, ok := cxxIOCall(name, nil)
