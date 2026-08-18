@@ -18,6 +18,12 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("fstat$INODE64"); !ok {
 		t.Fatal("fstat$INODE64")
 	}
+	if _, ok := libcLookup("lseek"); !ok {
+		t.Fatal("lseek")
+	}
+	if _, ok := libcLookup("lseek$UNIX2003"); !ok {
+		t.Fatal("lseek$UNIX2003")
+	}
 }
 
 func TestLibcReturnsTypedPtrDarwinSuffix(t *testing.T) {

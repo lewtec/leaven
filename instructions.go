@@ -2614,6 +2614,7 @@ var libraryFunctions = map[string]goRef{
 	"getentropy":                Sym(libc.Getentropy),
 	"getrandom":                 Sym(libc.Getrandom),
 	"gettid":                    Sym(libc.Gettid),
+	"lseek":                     Sym(libc.Lseek64),
 	"lseek64":                   Sym(libc.Lseek64),
 	"mmap":                      Sym(libc.Mmap),
 	"mmap64":                    Sym(libc.Mmap64),

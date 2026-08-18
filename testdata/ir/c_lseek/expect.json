@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Lseek64"
+      ],
+      "not_contains": [
+        "unsatisfied: lseek",
+        "func lseek"
+      ]
+    }
+  ]
+}
