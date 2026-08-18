@@ -271,6 +271,44 @@ func Getenv(name *byte) *byte {
 	return nil
 }
 
+var (
+	nsArgc     int32
+	nsArgv     unsafe.Pointer
+	nsEnviron  [1]*byte
+	nsEnvironP = unsafe.Pointer(&nsEnviron[0])
+	nsInitOnce sync.Once
+)
+
+func nsInit() {
+	nsInitOnce.Do(func() {
+		nsArgv = Argv()
+		nsArgc = int32(len(os.Args))
+	})
+}
+
+// NSGetArgc is Darwin _NSGetArgc. Returns *int.
+func NSGetArgc() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&nsArgc)
+}
+
+// NSGetArgv is Darwin _NSGetArgv. Returns char ***.
+func NSGetArgv() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&nsArgv)
+}
+
+// NSGetEnviron is Darwin _NSGetEnviron. Returns char *** (empty).
+func NSGetEnviron() unsafe.Pointer {
+	return unsafe.Pointer(&nsEnvironP)
+}
+
+// NSGetProgname is Darwin _NSGetProgname. Returns char **.
+func NSGetProgname() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&argvPin[0])
+}
+
 // StrerrorR is POSIX strerror_r (XSI: returns 0 or -1). Darwin rustc
 // uses this for errno text; a short message in buf is enough.
 func StrerrorR(errnum int32, buf *byte, buflen int64) int32 {

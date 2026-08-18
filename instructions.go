@@ -1866,6 +1866,7 @@ func libcReturnsTypedPtr(name string) bool {
 		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
 		"__errno_location", "__error", "getenv", "getcwd", "realpath", "dlsym",
+		"_NSGetArgc", "_NSGetArgv", "_NSGetEnviron", "_NSGetProgname",
 		"__dynamic_cast",
 		"_ZNSt13basic_filebufIcSt11char_traitsIcEE5closeEv",
 		"_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l",
@@ -2488,6 +2489,10 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 }
 
 var libraryFunctions = map[string]goRef{
+	"_NSGetArgc":     Sym(libc.NSGetArgc),
+	"_NSGetArgv":     Sym(libc.NSGetArgv),
+	"_NSGetEnviron":  Sym(libc.NSGetEnviron),
+	"_NSGetProgname": Sym(libc.NSGetProgname),
 	"abort":          Sym(libc.Abort),
 	"arc4random_buf": Sym(libc.Arc4randomBuf),
 	"__cxa_atexit":   Sym(libc.CxaAtexit),

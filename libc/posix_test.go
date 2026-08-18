@@ -45,6 +45,17 @@ func TestStrerrorR(t *testing.T) {
 	}
 }
 
+func TestNSGetArgc(t *testing.T) {
+	p := NSGetArgc()
+	if p == nil || *(*int32)(p) < 1 {
+		t.Fatal("argc")
+	}
+	argv := NSGetArgv()
+	if argv == nil {
+		t.Fatal("argv")
+	}
+}
+
 func TestPthreadGetStackaddrNp(t *testing.T) {
 	p := PthreadGetStackaddrNp(PthreadSelf())
 	if p == nil {
