@@ -2610,6 +2610,7 @@ var libraryFunctions = map[string]goRef{
 	"getcwd":                    Sym(libc.Getcwd),
 	"getenv":                    Sym(libc.Getenv),
 	"getpid":                    Sym(libc.Getpid),
+	"getentropy":                Sym(libc.Getentropy),
 	"getrandom":                 Sym(libc.Getrandom),
 	"gettid":                    Sym(libc.Gettid),
 	"lseek64":                   Sym(libc.Lseek64),

@@ -511,3 +511,22 @@ func Getrandom(buf *byte, buflen int64, flags int32) int64 {
 	}
 	return int64(n)
 }
+
+// Getentropy is getentropy(2). n must be ≤ 256.
+func Getentropy(buf *byte, n int64) int32 {
+	if n > 256 {
+		setErrno(22) // EINVAL
+		return -1
+	}
+	if n <= 0 {
+		return 0
+	}
+	if buf == nil {
+		setErrno(14) // EFAULT
+		return -1
+	}
+	if Getrandom(buf, n, 0) < 0 {
+		return -1
+	}
+	return 0
+}
