@@ -2488,10 +2488,20 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 }
 
 // libcLookup maps LLVM names to libc. Darwin symbols may be
-// realpath$DARWIN_EXTSN / fopen$UNIX2003; the suffix is ignored.
+// realpath$DARWIN_EXTSN; after sanitizeIdent they are realpath_DARWIN_EXTSN.
 func libcLookup(name string) (goRef, bool) {
 	if ref, ok := libraryFunctions[name]; ok {
 		return ref, true
+	}
+	for _, suf := range []string{
+		"$DARWIN_EXTSN", "$UNIX2003", "$INODE64",
+		"_DARWIN_EXTSN", "_UNIX2003", "_INODE64",
+	} {
+		if strings.HasSuffix(name, suf) {
+			if ref, ok := libraryFunctions[strings.TrimSuffix(name, suf)]; ok {
+				return ref, true
+			}
+		}
 	}
 	if i := strings.IndexByte(name, '$'); i > 0 {
 		if ref, ok := libraryFunctions[name[:i]]; ok {

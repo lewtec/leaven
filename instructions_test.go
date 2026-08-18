@@ -6,6 +6,9 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("realpath$DARWIN_EXTSN"); !ok {
 		t.Fatal("realpath$DARWIN_EXTSN")
 	}
+	if _, ok := libcLookup("realpath_DARWIN_EXTSN"); !ok {
+		t.Fatal("realpath_DARWIN_EXTSN")
+	}
 	if _, ok := libcLookup("realpath"); !ok {
 		t.Fatal("realpath")
 	}
