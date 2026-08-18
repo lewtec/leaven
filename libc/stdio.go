@@ -86,9 +86,11 @@ var dummyStack [dummyStackSize]byte
 func dummyStackAddr() unsafe.Pointer { return unsafe.Pointer(&dummyStack[0]) }
 
 // PthreadGetStackaddrNp is Darwin pthread_get_stackaddr_np.
+// Darwin returns the top of the stack (highest address); rustc subtracts
+// get_stacksize_np to find the bottom before mmap MAP_FIXED of the guard.
 func PthreadGetStackaddrNp(thread int64) unsafe.Pointer {
 	_ = thread
-	return dummyStackAddr()
+	return unsafe.Pointer(uintptr(dummyStackAddr()) + dummyStackSize)
 }
 
 // PthreadGetStacksizeNp is Darwin pthread_get_stacksize_np.

@@ -2504,6 +2504,8 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC2ERS3_":                                            Sym(libc.OstreamSentryCtor),
 	"_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryD1Ev":                                               Sym(libc.OstreamSentryDestroy),
 	"_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryD2Ev":                                               Sym(libc.OstreamSentryDestroy),
+	"_ZNSt3__113basic_istreamIcNS_11char_traitsIcEEE6sentryC1ERS3_b":                                           Sym(libc.IstreamSentryCtor),
+	"_ZNSt3__113basic_istreamIcNS_11char_traitsIcEEE6sentryC2ERS3_b":                                           Sym(libc.IstreamSentryCtor),
 	"_ZNKSt3__16locale9use_facetERNS0_2idE":                                                                    Sym(libc.LocaleUseFacet),
 	"_ZNKSt9basic_iosIcSt11char_traitsIcEE4failEv":                                                             Sym(libc.IosFail),
 	"_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate":                                              Sym(libc.IosClear),

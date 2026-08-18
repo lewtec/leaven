@@ -227,6 +227,11 @@ func OstreamSentryCtor(this *byte, os *byte) unsafe.Pointer {
 // OstreamSentryDestroy is basic_ostream::sentry::~sentry.
 func OstreamSentryDestroy(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
+// IstreamSentryCtor is basic_istream::sentry::sentry(istream&, bool).
+func IstreamSentryCtor(this *byte, is *byte, _ byte) unsafe.Pointer {
+	return OstreamSentryCtor(this, is)
+}
+
 // LocaleUseFacet is locale::use_facet(id&). Returns the stand-in ctype.
 func LocaleUseFacet(loc *byte, id *byte) unsafe.Pointer {
 	_, _ = loc, id
