@@ -2597,6 +2597,7 @@ var libraryFunctions = map[string]goRef{
 	"pthread_mutexattr_init":    Sym(libc.PthreadMutexattrInit),
 	"pthread_mutexattr_settype": Sym(libc.PthreadMutexattrSettype),
 	"pthread_self":              Sym(libc.PthreadSelf),
+	"pthread_setname_np":        Sym(libc.PthreadSetnameNp),
 	"pthread_threadid_np":       Sym(libc.PthreadThreadidNp),
 	"puts":                      Sym(libc.Puts),
 	"read":                      Sym(libc.Read),

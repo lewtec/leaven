@@ -55,6 +55,9 @@ func Sysconf(name int32) int64 {
 // PthreadSelf is pthread_self. Single-threaded: fixed non-zero id.
 func PthreadSelf() int64 { return 1 }
 
+// PthreadSetnameNp is Darwin pthread_setname_np(name) or POSIX (thread, name).
+func PthreadSetnameNp(_ ...any) int32 { return 0 }
+
 // PthreadGetattrNp fills a dummy attr (stack base/size via getstack).
 func PthreadGetattrNp(thread int64, attr *byte) int32 {
 	_, _ = thread, attr
