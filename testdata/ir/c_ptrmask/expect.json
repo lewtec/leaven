@@ -4,7 +4,7 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "&"
+        "libc.PtrMask"
       ],
       "not_contains": [
         "unsatisfied: llvm.ptrmask",

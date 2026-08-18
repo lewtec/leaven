@@ -1388,11 +1388,11 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		return one(assign(name, castToResult(inst, e))), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_ptrmask") && len(args) == 2 {
-		masked := ptrToUint(jen.Add(args[0])).Op("&").Uintptr().Call(jen.Add(args[1]))
+		call := Sym(libc.PtrMask).Call(emitUP(jen.Add(args[0])), jen.Int64().Call(jen.Add(args[1])))
 		if isTaggedPointerType(inst.Type()) {
-			return one(assign(name, masked)), true
+			return one(assign(name, emitAddr(call))), true
 		}
-		return one(assign(name, emitUP(masked))), true
+		return one(assign(name, call)), true
 	}
 	if strings.HasPrefix(llvmName, "llvm_maximum") && len(args) == 2 {
 		e := Sym(libc.MaximumNumF64).Call(
