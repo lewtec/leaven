@@ -202,6 +202,9 @@ func IosBool(this *byte) bool { return !streamOf(this).fail }
 // reconstruct facets (ctype is already on the ios object).
 func LocaleCtor(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
+// LocaleDtor is libc++ locale::~locale.
+func LocaleDtor(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
+
 // IosGetloc is ios_base::getloc(). Writes a dummy locale into the
 // sret slot (first arg) when clang returns locale by value.
 func IosGetloc(ret *byte, _ ...any) unsafe.Pointer {

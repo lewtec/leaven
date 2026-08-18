@@ -20,7 +20,7 @@ func setErrno(e int32) { atomic.StoreInt32(&errnoTLS, e) }
 // fd table: 0/1/2 = stdin/out/err; others are opened files.
 var (
 	fdMu   sync.Mutex
-	fdTab  = map[int32]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
+	fdTab        = map[int32]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
 	fdNext int32 = 3
 )
 
@@ -186,14 +186,18 @@ func Sigaltstack(ss, oss *byte) int32 {
 	return 0
 }
 
-// Mmap64 is mmap64. Anonymous maps use Malloc; MAP_FAILED is (void*)-1.
+// Mmap64 is mmap64. A non-nil addr is treated as MAP_FIXED (rustc
+// stack guard compares the result to the requested pointer).
+// MAP_FAILED is (void*)-1.
 func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte {
-	_, _, _, _ = addr, prot, flags, offset
+	_, _, _ = prot, flags, offset
+	if addr != nil {
+		return addr
+	}
 	if length <= 0 {
 		setErrno(22)
 		return (*byte)(unsafe.Pointer(^uintptr(0)))
 	}
-	// File maps: still allocate; content not filled (rare at startup).
 	_ = fd
 	p := Malloc[byte](length)
 	if p == nil {
@@ -203,13 +207,9 @@ func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte
 	return p
 }
 
-// Mmap is mmap(2). A non-nil addr is treated as MAP_FIXED so rustc's
-// stack guard (mmap at stackaddr-page) sees the requested pointer.
+// Mmap is mmap(2). Same as Mmap64; Darwin rustc assigns the result to ptr.
 func Mmap(addr *byte, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
-	if addr != nil {
-		return unsafe.Pointer(addr)
-	}
-	return unsafe.Pointer(Mmap64(nil, length, prot, flags, fd, offset))
+	return unsafe.Pointer(Mmap64(addr, length, prot, flags, fd, offset))
 }
 
 // Munmap is munmap(2).
