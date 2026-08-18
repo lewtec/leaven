@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Close"
+      ],
+      "not_contains": [
+        "unsatisfied: close",
+        "func close"
+      ]
+    }
+  ]
+}

@@ -1387,6 +1387,13 @@ func translateLLVMPattern(llvmName string, inst *ir.InstCall, args []jen.Code) (
 		)
 		return one(assign(name, castToResult(inst, e))), true
 	}
+	if strings.HasPrefix(llvmName, "llvm_ptrmask") && len(args) == 2 {
+		masked := ptrToUint(jen.Add(args[0])).Op("&").Uintptr().Call(jen.Add(args[1]))
+		if isTaggedPointerType(inst.Type()) {
+			return one(assign(name, masked)), true
+		}
+		return one(assign(name, emitUP(masked))), true
+	}
 	if strings.HasPrefix(llvmName, "llvm_maximum") && len(args) == 2 {
 		e := Sym(libc.MaximumNumF64).Call(
 			jen.Float64().Call(jen.Add(args[0])),
@@ -1506,7 +1513,7 @@ func llvmCallHandled(name string) bool {
 		strings.HasPrefix(name, "llvm_cos_") || strings.HasPrefix(name, "llvm_exp_") ||
 		strings.HasPrefix(name, "llvm_log_") || strings.HasPrefix(name, "llvm_pow") ||
 		strings.HasPrefix(name, "llvm_copysign_") || strings.HasPrefix(name, "llvm_maximum") ||
-		strings.HasPrefix(name, "llvm_minimum") {
+		strings.HasPrefix(name, "llvm_minimum") || strings.HasPrefix(name, "llvm_ptrmask") {
 		return true
 	}
 	switch name {
@@ -2495,8 +2502,8 @@ func libcCanon(name string) string {
 		return name
 	}
 	for _, suf := range []string{
-		"$DARWIN_EXTSN", "$UNIX2003", "$INODE64",
-		"_DARWIN_EXTSN", "_UNIX2003", "_INODE64",
+		"$DARWIN_EXTSN", "$UNIX2003", "$INODE64", "$NOCANCEL",
+		"_DARWIN_EXTSN", "_UNIX2003", "_INODE64", "_NOCANCEL",
 	} {
 		if strings.HasSuffix(name, suf) {
 			base := strings.TrimSuffix(name, suf)

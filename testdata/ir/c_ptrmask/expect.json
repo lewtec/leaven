@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "&"
+      ],
+      "not_contains": [
+        "unsatisfied: llvm.ptrmask",
+        "func llvm_ptrmask"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

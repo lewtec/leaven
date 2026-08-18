@@ -24,6 +24,12 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("lseek$UNIX2003"); !ok {
 		t.Fatal("lseek$UNIX2003")
 	}
+	if _, ok := libcLookup("close$NOCANCEL"); !ok {
+		t.Fatal("close$NOCANCEL")
+	}
+	if _, ok := libcLookup("close_NOCANCEL"); !ok {
+		t.Fatal("close_NOCANCEL")
+	}
 }
 
 func TestLibcReturnsTypedPtrDarwinSuffix(t *testing.T) {
