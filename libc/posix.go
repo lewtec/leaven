@@ -186,31 +186,33 @@ func Sigaltstack(ss, oss *byte) int32 {
 	return 0
 }
 
-func mmapAddr(v any) unsafe.Pointer {
+func mmapAddr(v any) uintptr {
 	switch x := v.(type) {
 	case nil:
-		return nil
-	case unsafe.Pointer:
-		return x
-	case *byte:
-		return unsafe.Pointer(x)
+		return 0
 	case uintptr:
-		return unsafe.Pointer(x)
+		return x
 	case uint64:
-		return unsafe.Pointer(uintptr(x))
+		return uintptr(x)
 	case int64:
-		return unsafe.Pointer(uintptr(x))
+		return uintptr(x)
+	case int:
+		return uintptr(x)
+	case unsafe.Pointer:
+		return uintptr(x)
+	case *byte:
+		return uintptr(unsafe.Pointer(x))
 	default:
-		return nil
+		return 0
 	}
 }
 
-// Mmap64 is mmap64. A non-nil addr is treated as MAP_FIXED (rustc
-// stack guard compares the result to the requested pointer).
+// Mmap64 is mmap64. addr is taken as an integer so a non-heap
+// MAP_FIXED address is not a Go *byte the GC can nil.
 func Mmap64(addr any, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
 	_, _, _ = prot, flags, offset
-	if p := mmapAddr(addr); p != nil {
-		return p
+	if p := mmapAddr(addr); p != 0 {
+		return unsafe.Pointer(p)
 	}
 	if length <= 0 {
 		setErrno(22)

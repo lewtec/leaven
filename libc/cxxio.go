@@ -59,6 +59,18 @@ func CtypeWiden(this unsafe.Pointer, c byte) byte {
 	return c
 }
 
+// StreambufSgetc is basic_streambuf::sgetc. EOF if there is no buf.
+func StreambufSgetc(this *byte) int32 {
+	_ = this
+	return -1
+}
+
+// StreambufGptr is basic_streambuf::gptr. Nil: no get area.
+func StreambufGptr(this *byte) unsafe.Pointer {
+	_ = this
+	return nil
+}
+
 // StandinVptr is an Itanium vptr into ifstreamVT. vptr-24 is slot 0 (0).
 // Declare-only VTTs store these so inlined dtors do not load nil-24.
 func StandinVptr() unsafe.Pointer {

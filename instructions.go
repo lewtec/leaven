@@ -1235,6 +1235,13 @@ func libcCallArg(name string, i int, a value.Value, got jen.Code) *jen.Statement
 		if i == 1 {
 			return asBytePtr(got)
 		}
+	case "mmap", "mmap64":
+		if i == 0 {
+			if isTaggedPointerType(a.Type()) {
+				return jen.Add(got)
+			}
+			return ptrToUint(got)
+		}
 	}
 	return asBytePtr(got)
 }
@@ -1792,6 +1799,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
 		} else if strings.Contains(llvmName, "ctypeIcE5widen") {
 			return one(assign(VariableName(inst), Sym(libc.CtypeWiden).Call(args...))), nil
+		} else if strings.Contains(llvmName, "basic_streambuf") && strings.Contains(llvmName, "sgetc") {
+			return one(assign(VariableName(inst), Sym(libc.StreambufSgetc).Call(args...))), nil
+		} else if strings.Contains(llvmName, "basic_streambuf") && strings.Contains(llvmName, "4gptr") {
+			return one(assign(VariableName(inst), Sym(libc.StreambufGptr).Call(args...))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
