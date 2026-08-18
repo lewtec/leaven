@@ -1790,6 +1790,8 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
 			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
+		} else if strings.Contains(llvmName, "ctypeIcE5widen") {
+			return one(assign(VariableName(inst), Sym(libc.CtypeWiden).Call(args...))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
@@ -2584,6 +2586,7 @@ var libraryFunctions = map[string]goRef{
 	"pthread_mutexattr_init":    Sym(libc.PthreadMutexattrInit),
 	"pthread_mutexattr_settype": Sym(libc.PthreadMutexattrSettype),
 	"pthread_self":              Sym(libc.PthreadSelf),
+	"pthread_threadid_np":       Sym(libc.PthreadThreadidNp),
 	"puts":                      Sym(libc.Puts),
 	"read":                      Sym(libc.Read),
 	"realpath":                  Sym(libc.Realpath),

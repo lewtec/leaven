@@ -110,6 +110,14 @@ func PthreadMutexLock(m *byte) int32       { _ = m; return 0 }
 func PthreadMutexUnlock(m *byte) int32     { _ = m; return 0 }
 func PthreadMutexTrylock(m *byte) int32    { _ = m; return 0 }
 
+// PthreadThreadidNp is Darwin pthread_threadid_np. Writes 1 into *id.
+func PthreadThreadidNp(_ any, id *byte) int32 {
+	if id != nil {
+		Store[uint64](Ptr(id), 0, 1)
+	}
+	return 0
+}
+
 // Sigaction is sigaction(2). No-op success for rhai-run startup.
 func Sigaction(signum int32, act, oldact *byte) int32 {
 	_, _, _ = signum, act, oldact

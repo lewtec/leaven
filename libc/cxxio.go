@@ -45,10 +45,18 @@ const (
 var standinCtype [ctypeSize]byte
 
 func init() {
+	Store(Ptr(&standinCtype[0]), 0, StandinVptr())
 	standinCtype[ctypeWidenOkOff] = 1
 	for i := 0; i < 256; i++ {
 		standinCtype[ctypeWidenTabOff+i] = byte(i)
 	}
+}
+
+// CtypeWiden is ctype<char>::widen. Identity; this may be nil when
+// use_facet was inlined against a dummy locale.
+func CtypeWiden(this *byte, c int32) int32 {
+	_ = this
+	return c
 }
 
 // StandinVptr is an Itanium vptr into ifstreamVT. vptr-24 is slot 0 (0).
