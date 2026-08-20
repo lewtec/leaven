@@ -231,6 +231,9 @@ func hasRuntimeDef(name string) bool {
 	if _, ok := namedRef(name); ok {
 		return true
 	}
+	if isStreambufSgetc(name) || isStreambufGptr(name) {
+		return true
+	}
 	return llvmCallHandled(name)
 }
 

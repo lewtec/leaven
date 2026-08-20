@@ -102,6 +102,28 @@ func TestCxxIOCallGetline(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallLibcxxGetline(t *testing.T) {
+	name := "_ZNSt3__17getlineB9nqn220108IcNS_11char_traitsIcEENS_9allocatorIcEEEERNS_13basic_istreamIT_T0_EES9_RNS_12basic_stringIS6_S7_T1_EE"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || !retPtr || len(args) != 2 {
+		t.Fatalf("libcxx getline %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if !isGetline(name) {
+		t.Fatal("isGetline libcxx")
+	}
+}
+
+func TestStreambufSgetcGptrMatch(t *testing.T) {
+	sgetc := "_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE5sgetcB9nqn220108Ev"
+	gptr := "_ZNKSt3__115basic_streambufIcNS_11char_traitsIcEEE4gptrB9nqn220108Ev"
+	if !isStreambufSgetc(sgetc) || isStreambufSgetc(gptr) {
+		t.Fatal("sgetc")
+	}
+	if !isStreambufGptr(gptr) || isStreambufGptr(sgetc) {
+		t.Fatal("gptr")
+	}
+}
+
 func TestCxxTreeCall(t *testing.T) {
 	fn, args, retPtr, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
 	if !ok || fn == nil || len(args) != 1 || !retPtr {

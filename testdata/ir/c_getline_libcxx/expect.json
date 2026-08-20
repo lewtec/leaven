@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.IstreamGetline"
+      ],
+      "not_contains": [
+        "unsatisfied: _ZNSt3__17getline",
+        "func _ZNSt3__17getline"
+      ]
+    }
+  ]
+}
