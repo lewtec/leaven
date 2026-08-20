@@ -72,6 +72,19 @@ func TestStdStringInitSSO(t *testing.T) {
 	}
 }
 
+func TestStdStringSubstr(t *testing.T) {
+	var src, dst [32]byte
+	s := []byte("abcdef")
+	StdStringInit(&src[0], &s[0], 6)
+	StdStringSubstr(&dst[0], &src[0], 2, 3, nil)
+	if dst[0] != 3<<1 {
+		t.Fatalf("size byte=%d", dst[0])
+	}
+	if dst[1] != 'c' || dst[2] != 'd' || dst[3] != 'e' {
+		t.Fatalf("data=%q", dst[1:4])
+	}
+}
+
 func TestLocaleCtorNilSafe(t *testing.T) {
 	LocaleCtor(nil)
 	var obj [16]byte

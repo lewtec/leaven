@@ -598,6 +598,38 @@ func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 	return unsafe.Pointer(this)
 }
 
+func libcxxStringData(s *byte) (p *byte, n int64) {
+	if s == nil {
+		return nil, 0
+	}
+	b0 := Load[byte](Ptr(s), 0)
+	if b0&libcxxLongBit == 0 {
+		return As[byte](Off(Ptr(s), 1)), int64(b0 >> 1)
+	}
+	return Load[*byte](Ptr(s), 0), int64(Load[uint64](Ptr(s), 8))
+}
+
+// StdStringSubstr is libc++ basic_string(s, pos, n, alloc). n<0 is npos.
+func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointer {
+	_ = alloc
+	p, m := libcxxStringData(other)
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > m {
+		pos = m
+	}
+	rest := m - pos
+	if n < 0 || n > rest {
+		n = rest
+	}
+	var src *byte
+	if p != nil && n > 0 {
+		src = As[byte](Off(Ptr(p), int(pos)))
+	}
+	return StdStringInit(this, src, n)
+}
+
 // StdStringCopy is libc++ basic_string(basic_string const&).
 func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	if this == nil {
