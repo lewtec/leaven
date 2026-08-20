@@ -42,6 +42,16 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringEqCStrMatch(t *testing.T) {
+	name := "_ZNSt3__1eqIcNS_11char_traitsIcEENS_9allocatorIcEEEEbRKNS_12basic_stringIT_T0_T1_EEPKS6_"
+	if !isLibcxxStringEqCStr(name) {
+		t.Fatal("eq")
+	}
+	if isLibcxxStringEqCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_") {
+		t.Fatal("ctor is not eq")
+	}
+}
+
 func TestLibcReturnsTypedPtrDarwinSuffix(t *testing.T) {
 	for _, name := range []string{"realpath", "realpath$DARWIN_EXTSN", "realpath_DARWIN_EXTSN"} {
 		if !libcReturnsTypedPtr(libcCanon(name)) {

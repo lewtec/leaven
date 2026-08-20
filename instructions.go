@@ -1827,6 +1827,10 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
+		} else if isLibcxxStringEqCStr(llvmName) && len(inst.Args) >= 2 &&
+			isPtrish(inst.Args[0].Type()) && isPtrish(inst.Args[1].Type()) {
+			callee = Sym(libc.StdStringEqCStr).code()
+			args = []jen.Code{ptrArg(inst.Args, args, 0), ptrArg(inst.Args, args, 1)}
 		} else if c, adj, retPtr, ok := cxxIOCallIR(llvmName, inst.Args, args); ok {
 			callee = c
 			args = adj
@@ -2440,6 +2444,17 @@ func isLocaleCtor(name string) bool {
 		return false
 	}
 	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
+}
+
+func isLibcxxStringEqCStr(name string) bool {
+	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "basic_string") {
+		return false
+	}
+	if !strings.Contains(name, "PK") {
+		return false
+	}
+	return strings.Contains(name, "eqI") || strings.Contains(name, "eqERK") ||
+		strings.Contains(name, "eqEPKc") || strings.Contains(name, "3eqE")
 }
 
 func isGetline(name string) bool {

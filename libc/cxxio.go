@@ -2,6 +2,7 @@ package libc
 
 import (
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -520,7 +521,15 @@ func IstreamGetline(is, str *byte) *byte {
 		}
 	}
 	if !st.fail {
-		cxxStringAssign(str, buf)
+		if runtime.GOOS == "darwin" {
+			var src *byte
+			if len(buf) > 0 {
+				src = &buf[0]
+			}
+			StdStringInit(str, src, int64(len(buf)))
+		} else {
+			cxxStringAssign(str, buf)
+		}
 	}
 	setIfstreamABI(is, st.fail, st.eof)
 	return is
@@ -628,6 +637,19 @@ func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointe
 		src = As[byte](Off(Ptr(p), int(pos)))
 	}
 	return StdStringInit(this, src, n)
+}
+
+// StdStringEqCStr is libc++ string == const char*.
+func StdStringEqCStr(s, cstr *byte) bool {
+	p, n := libcxxStringData(s)
+	cs := GoString(cstr)
+	if int(n) != len(cs) {
+		return false
+	}
+	if n == 0 {
+		return true
+	}
+	return string(Bytes(p, int(n))) == cs
 }
 
 // StdStringCopy is libc++ basic_string(basic_string const&).

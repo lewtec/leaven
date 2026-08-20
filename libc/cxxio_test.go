@@ -83,6 +83,10 @@ func TestStdStringSubstr(t *testing.T) {
 	if dst[1] != 'c' || dst[2] != 'd' || dst[3] != 'e' {
 		t.Fatalf("data=%q", dst[1:4])
 	}
+	c := append([]byte("cde"), 0)
+	if !StdStringEqCStr(&dst[0], &c[0]) {
+		t.Fatal("eq")
+	}
 }
 
 func TestLocaleCtorNilSafe(t *testing.T) {

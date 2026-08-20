@@ -435,7 +435,7 @@ func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byt
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, tailBytes(buf.Bytes(), 4000))
+			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, clipEnds(buf.Bytes(), 4000))
 		}
 	case <-time.After(d):
 		_ = cmd.Process.Kill()
