@@ -182,8 +182,8 @@ func testAssimilateRhai(t *testing.T) {
 			if err := os.WriteFile(script, []byte(p.src), 0644); err != nil {
 				t.Fatal(err)
 			}
-			want := runTimeout(t, 30*time.Second, native, script)
-			got := runTimeout(t, 3*time.Minute, bin, script)
+			want := runTimeout(t, 30*time.Second, "", native, script)
+			got := runTimeout(t, 3*time.Minute, "", bin, script)
 			if !bytes.Equal(want, got) {
 				t.Fatalf("native vs leaven mismatch\n---- native (%d) ----\n%s\n---- leaven (%d) ----\n%s",
 					len(want), tailBytes(want, 1500), len(got), tailBytes(got, 1500))
@@ -361,7 +361,7 @@ func crossCheck(t *testing.T, native, ll string, args []string) {
 		t.Fatal(err)
 	}
 	defer os.Remove("platform.info")
-	want := runTimeout(t, 15*time.Second, native, args...)
+	want := runTimeout(t, 15*time.Second, "", native, args...)
 
 	m, err := parseIRFile(ll)
 	if err != nil {
@@ -425,12 +425,17 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
 	// -O0 csmith Go is much slower than native; seed=1 can exceed 30s.
-	return runTimeout(t, 3*time.Minute, bin, args...)
+	return runTimeout(t, 3*time.Minute, dir, bin, args...)
 }
 
-func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byte {
+func runTimeout(t *testing.T, d time.Duration, dir, bin string, args ...string) []byte {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
+	if dir != "" {
+		cmd.Dir = dir
+		_ = os.WriteFile(filepath.Join(dir, "platform.info"),
+			[]byte("integer size = 4\npointer size = 8\n"), 0644)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
