@@ -3,6 +3,7 @@ package libc
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"unsafe"
 )
@@ -142,6 +143,13 @@ func emptyCxxString() *[32]byte {
 }
 
 func cxxStringText(s *[32]byte) string {
+	if runtime.GOOS == "darwin" {
+		p, n := libcxxStringData(&s[0])
+		if p == nil || n <= 0 {
+			return ""
+		}
+		return string(Bytes(p, int(n)))
+	}
 	p := Load[*byte](Ptr(&s[0]), 0)
 	if p == nil {
 		return ""
