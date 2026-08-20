@@ -1,6 +1,13 @@
 package leaven
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dave/jennifer/jen"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
+)
 
 func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("realpath$DARWIN_EXTSN"); !ok {
@@ -110,6 +117,16 @@ func TestCxxIOCallLibcxxGetline(t *testing.T) {
 	}
 	if !isGetline(name) {
 		t.Fatal("isGetline libcxx")
+	}
+}
+
+func TestCxxIOCallIRGetlineSkipsIntArgs(t *testing.T) {
+	name := "_ZNSt3__17getlineB9nqn220108IcNS_11char_traitsIcEENS_9allocatorIcEEEERNS_13basic_istreamIT_T0_EES9_RNS_12basic_stringIS6_S7_T1_EE"
+	i64 := types.NewInt(64)
+	ir := []value.Value{constant.NewInt(i64, 1), constant.NewInt(i64, 2)}
+	_, _, _, ok := cxxIOCallIR(name, ir, []jen.Code{jen.Lit(1), jen.Lit(2)})
+	if ok {
+		t.Fatal("getline with i64 args")
 	}
 }
 

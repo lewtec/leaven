@@ -1198,6 +1198,36 @@ func asBytePtr(x jen.Code) *jen.Statement {
 	return emitAs(Qual[byte](), x)
 }
 
+func isPtrish(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if isTaggedPointerType(t) {
+		return true
+	}
+	_, ok := t.(*types.PointerType)
+	return ok
+}
+
+func ptrArg(ir []value.Value, args []jen.Code, i int) *jen.Statement {
+	if i >= len(args) {
+		return jen.Nil()
+	}
+	if i < len(ir) {
+		if isTaggedPointerType(ir[i].Type()) {
+			return asBytePtr(emitUP(args[i]))
+		}
+		if _, ok := ir[i].Type().(*types.PointerType); ok {
+			return asBytePtr(args[i])
+		}
+		if s, ok := args[i].(*jen.Statement); ok {
+			return s
+		}
+		return jen.Add(args[i])
+	}
+	return asBytePtr(args[i])
+}
+
 func asFilePtr(x jen.Code) *jen.Statement {
 	return emitAs(Qual[os.File](), x)
 }
@@ -1797,7 +1827,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if c, adj, retPtr, ok := cxxIOCall(llvmName, args); ok {
+		} else if c, adj, retPtr, ok := cxxIOCallIR(llvmName, inst.Args, args); ok {
 			callee = c
 			args = adj
 			typedPtr = retPtr
@@ -2129,18 +2159,25 @@ func cxxNoopDtor(name string) bool {
 }
 
 func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, bool) {
+	return cxxIOCallIR(name, nil, args)
+}
+
+func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement, []jen.Code, bool, bool) {
 	fn, kind, ok := cxxIOKind(name)
 	if !ok {
+		return nil, nil, false, false
+	}
+	if kind == cxxIOGetline && len(ir) >= 2 && (!isPtrish(ir[0].Type()) || !isPtrish(ir[1].Type())) {
 		return nil, nil, false, false
 	}
 	switch kind {
 	case cxxIOOpen:
 		this, path, mode := jen.Nil(), jen.Nil(), jen.Lit(8)
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			path = asBytePtr(args[1])
+			path = ptrArg(ir, args, 1)
 		}
 		if len(args) > 2 {
 			mode = jen.Add(args[2])
@@ -2149,16 +2186,16 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOClose:
 		this := jen.Nil()
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, false, true
 	case cxxIOInsert:
 		os, s, n := jen.Nil(), jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			s = asBytePtr(args[1])
+			s = ptrArg(ir, args, 1)
 		}
 		if len(args) > 2 {
 			n = jen.Add(args[2])
@@ -2167,16 +2204,16 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOLsCStr:
 		os, s := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			s = asBytePtr(args[1])
+			s = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{os, s}, true, true
 	case cxxIOInsertI64:
 		os, n := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			n = jen.Int64().Call(args[1])
@@ -2185,7 +2222,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertU64:
 		os, n := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			n = jen.Uint64().Call(args[1])
@@ -2194,7 +2231,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertU8:
 		os, n := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			n = jen.Uint64().Call(jen.Uint8().Call(args[1]))
@@ -2203,7 +2240,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertU16:
 		os, n := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			n = jen.Uint64().Call(jen.Uint16().Call(args[1]))
@@ -2212,7 +2249,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertU32:
 		os, n := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			n = jen.Uint64().Call(jen.Uint32().Call(args[1]))
@@ -2221,7 +2258,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertF64:
 		os, x := jen.Nil(), jen.Lit(0.0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			x = jen.Float64().Call(args[1])
@@ -2230,7 +2267,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertPtr:
 		os, p := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			p = emitUP(args[1])
@@ -2239,7 +2276,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOInsertBool:
 		os, b := jen.Nil(), jen.Lit(false)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			b = jen.Bool().Call(args[1])
@@ -2248,7 +2285,7 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOPut:
 		os, c := jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			os = asBytePtr(args[0])
+			os = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			c = jen.Byte().Call(args[1])
@@ -2257,31 +2294,31 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOEndl, cxxIOFlush:
 		this := jen.Nil()
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, true, true
 	case cxxIOCtypeInit, cxxIOIosBase:
 		this := jen.Nil()
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, false, true
 	case cxxIOGetline:
 		is, str := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			is = asBytePtr(args[0])
+			is = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			str = asBytePtr(args[1])
+			str = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{is, str}, true, true
 	case cxxIOStringstreamCtor:
 		this, str, mode := jen.Nil(), jen.Nil(), jen.Lit(0)
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			str = asBytePtr(args[1])
+			str = ptrArg(ir, args, 1)
 		}
 		if len(args) > 2 {
 			mode = jen.Add(args[2])
@@ -2290,36 +2327,36 @@ func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, 
 	case cxxIOOStringStreamCtor:
 		this := jen.Nil()
 		if len(args) > 0 {
-			this = asBytePtr(args[0])
+			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, false, true
 	case cxxIOOStringStreamStr:
 		// sret string first, then this (LLVM sret param order).
 		ret, this := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			ret = asBytePtr(args[0])
+			ret = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			this = asBytePtr(args[1])
+			this = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{ret, this}, false, true
 	case cxxIOManip:
 		is, manip := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			is = asBytePtr(args[0])
+			is = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
 			// Function pointer: opaque *byte; shim ignores the target.
-			manip = asBytePtr(args[1])
+			manip = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{is, manip}, true, true
 	case cxxIOExtractI32:
 		is, out := jen.Nil(), jen.Nil()
 		if len(args) > 0 {
-			is = asBytePtr(args[0])
+			is = ptrArg(ir, args, 0)
 		}
 		if len(args) > 1 {
-			out = asBytePtr(args[1])
+			out = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{is, out}, true, true
 	default:
