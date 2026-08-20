@@ -200,6 +200,9 @@ func TestCxxIOCallIosBaseCtor(t *testing.T) {
 	if !isIosBaseCtor("_ZNSt8ios_base7_M_initEv") {
 		t.Fatal("_M_init")
 	}
+	if !isIosBaseCtor("_ZNSt3__18ios_baseC2Ev") {
+		t.Fatal("libcxx ios_base")
+	}
 }
 
 func TestCxxIOCallStringstream(t *testing.T) {

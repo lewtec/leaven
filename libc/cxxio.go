@@ -247,6 +247,9 @@ func IosBaseCtor(this *byte) unsafe.Pointer {
 		return nil
 	}
 	InitOstream(Ptr(this))
+	// Inlined fail() is rdstate&failbit. libc++ ifstream starts
+	// zeroed; set fail so CGOptions takes the sizeof write path.
+	setIfstreamABI(this, true, false)
 	return unsafe.Pointer(this)
 }
 
