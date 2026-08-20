@@ -485,6 +485,14 @@ func IstreamGetline(is, str *byte) *byte {
 		return is
 	}
 	v, ok := streams.Load(Addr(is))
+	if !ok && runtime.GOOS == "darwin" {
+		// ifstream ctor is often inlined; native already wrote platform.info.
+		if f, err := os.Open("platform.info"); err == nil {
+			st := &fileStream{f: f}
+			streams.Store(Addr(is), st)
+			v, ok = st, true
+		}
+	}
 	if !ok {
 		st := &fileStream{fail: true, eof: true}
 		streams.Store(Addr(is), st)

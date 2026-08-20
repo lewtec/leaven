@@ -2452,9 +2452,9 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 
 func isIosBaseCtor(name string) bool {
 	if strings.Contains(name, "St8ios_base") {
-		return strings.Contains(name, "C1E") || strings.Contains(name, "C2E") || strings.Contains(name, "7_M_init")
+		return strings.Contains(name, "C1") || strings.Contains(name, "C2") || strings.Contains(name, "7_M_init")
 	}
-	return strings.Contains(name, "9basic_ios") && strings.Contains(name, "4initE")
+	return strings.Contains(name, "9basic_ios") && (strings.Contains(name, "4initE") || strings.Contains(name, "4initB"))
 }
 
 func isLocaleCtor(name string) bool {
