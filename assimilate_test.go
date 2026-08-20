@@ -354,6 +354,13 @@ func splitQuoted(s string) []string {
 
 func crossCheck(t *testing.T, native, ll string, args []string) {
 	t.Helper()
+	// csmith reads platform.info from cwd. Write it so leaven's
+	// remapped getline can parse sizes if ifstream ctor was inlined.
+	info := []byte("integer size = 4\npointer size = 8\n")
+	if err := os.WriteFile("platform.info", info, 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove("platform.info")
 	want := runTimeout(t, 15*time.Second, native, args...)
 
 	m, err := parseIRFile(ll)

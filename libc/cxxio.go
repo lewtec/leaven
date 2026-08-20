@@ -485,21 +485,28 @@ func IstreamGetline(is, str *byte) *byte {
 		return is
 	}
 	v, ok := streams.Load(Addr(is))
-	if !ok && runtime.GOOS == "darwin" {
-		// ifstream ctor is often inlined; native already wrote platform.info.
+	var st *fileStream
+	if ok {
+		st = v.(*fileStream)
+	}
+	if (!ok || st.f == nil || st.fail) && runtime.GOOS == "darwin" {
+		// ifstream ctor is inlined or open used a bad path; native
+		// (or the test) wrote platform.info in cwd.
 		if f, err := os.Open("platform.info"); err == nil {
-			st := &fileStream{f: f}
+			if st != nil && st.f != nil {
+				_ = st.f.Close()
+			}
+			st = &fileStream{f: f}
 			streams.Store(Addr(is), st)
-			v, ok = st, true
+			ok = true
 		}
 	}
 	if !ok {
-		st := &fileStream{fail: true, eof: true}
+		st = &fileStream{fail: true, eof: true}
 		streams.Store(Addr(is), st)
 		setIfstreamABI(is, true, true)
 		return is
 	}
-	st := v.(*fileStream)
 	if st.f == nil || st.fail {
 		st.fail = true
 		st.eof = true
