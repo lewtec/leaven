@@ -2556,9 +2556,13 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		return nil, 0, false
 	}
 	switch {
-	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"), strings.Contains(name, "4openE"):
+	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"),
+		strings.Contains(name, "C1B"), strings.Contains(name, "C2B"),
+		strings.Contains(name, "4openE"), strings.Contains(name, "4openB"):
 		return Sym(libc.IfstreamOpen).code(), cxxIOOpen, true
-	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"), strings.Contains(name, "5closeE"):
+	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"),
+		strings.Contains(name, "D0B"), strings.Contains(name, "D1B"), strings.Contains(name, "D2B"),
+		strings.Contains(name, "5closeE"), strings.Contains(name, "5closeB"):
 		return Sym(libc.IfstreamClose).code(), cxxIOClose, true
 	default:
 		return nil, 0, false
