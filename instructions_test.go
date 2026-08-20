@@ -95,6 +95,10 @@ func TestCxxOstreamOpEndl(t *testing.T) {
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
 	}
+	libcxx := "_ZNSt3__14endlB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_"
+	if _, _, _, ok := cxxIOCall(libcxx, nil); !ok {
+		t.Fatal("libcxx endl")
+	}
 }
 
 func TestCxxIOCallOstreamInsert(t *testing.T) {

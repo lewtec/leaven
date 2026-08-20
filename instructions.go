@@ -2377,9 +2377,15 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 // inlines some of these and calls the rest. Also gensym's ostringstream.
 func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	switch {
-	case strings.Contains(name, "4endlI") || strings.HasPrefix(name, "_ZSt4endl"):
+	case strings.Contains(name, "4endl"):
+		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
+	case strings.Contains(name, "basic_ostream") && strings.Contains(name, "EPFR") &&
+		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")):
+		// operator<<(ostream&(*)(ostream&)) — libc++ endl.
 		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
+		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
+	case strings.Contains(name, "lsINS_11char_traits") && strings.Contains(name, "PKc"):
 		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 	// operator<<(ostream&, char)
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
@@ -2400,6 +2406,11 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	case strings.Contains(name, "SolsEPFRSoS_E"):
 		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
 		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
+	case strings.Contains(name, "St3__1") && strings.Contains(name, "basic_ostream") &&
+		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")) &&
+		(strings.HasSuffix(name, "Ei") || strings.HasSuffix(name, "El") ||
+			strings.HasSuffix(name, "Ej") || strings.HasSuffix(name, "Ex")):
+		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
 	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
 		switch {
 		case strings.HasSuffix(name, "PKc"):
