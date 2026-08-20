@@ -2142,6 +2142,11 @@ func cxxIONamed(name string) (*jen.Statement, bool) {
 	if cxxNoopDtor(name) {
 		return Sym(libc.CxxNoop).code(), true
 	}
+	// Getline is rewritten only in cxxIOCallIR when the first two
+	// args are pointers. namedRef would keep integer args.
+	if isGetline(name) {
+		return nil, false
+	}
 	fn, _, ok := cxxIOKind(name)
 	return fn, ok
 }

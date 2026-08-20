@@ -101,8 +101,8 @@ func TestCxxIOCallGetline(t *testing.T) {
 	if !ok || fn == nil || !retPtr || len(args) != 2 {
 		t.Fatalf("getline %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
 	}
-	if _, ok := cxxIONamed(name); !ok {
-		t.Fatal("named miss")
+	if _, ok := cxxIONamed(name); ok {
+		t.Fatal("namedRef must not rewrite getline")
 	}
 	if !isGetline(name) {
 		t.Fatal("isGetline")
@@ -127,6 +127,9 @@ func TestCxxIOCallIRGetlineSkipsIntArgs(t *testing.T) {
 	_, _, _, ok := cxxIOCallIR(name, ir, []jen.Code{jen.Lit(1), jen.Lit(2)})
 	if ok {
 		t.Fatal("getline with i64 args")
+	}
+	if _, ok := cxxIONamed(name); ok {
+		t.Fatal("namedRef must not rewrite getline")
 	}
 }
 
