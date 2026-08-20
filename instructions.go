@@ -1801,18 +1801,6 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if isStreambufSgetc(llvmName) {
-			this := jen.Nil()
-			if len(args) > 0 {
-				this = asBytePtr(args[0])
-			}
-			return one(assign(VariableName(inst), Sym(libc.StreambufSgetc).Call(this))), nil
-		} else if isStreambufGptr(llvmName) {
-			this := jen.Nil()
-			if len(args) > 0 {
-				this = asBytePtr(args[0])
-			}
-			return one(assign(VariableName(inst), Sym(libc.StreambufGptr).Call(this))), nil
 		} else if strings.Contains(llvmName, "throw_bad_cast") {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
@@ -2416,14 +2404,6 @@ func isGetline(name string) bool {
 	return strings.Contains(name, "St7getline") ||
 		strings.Contains(name, "St3__17getline") ||
 		strings.HasPrefix(name, "_ZSt7getline")
-}
-
-func isStreambufSgetc(name string) bool {
-	return strings.Contains(name, "basic_streambuf") && strings.Contains(name, "5sgetc")
-}
-
-func isStreambufGptr(name string) bool {
-	return strings.Contains(name, "basic_streambuf") && strings.Contains(name, "4gptr")
 }
 
 func isStringstream(name string) bool {

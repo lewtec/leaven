@@ -113,17 +113,6 @@ func TestCxxIOCallLibcxxGetline(t *testing.T) {
 	}
 }
 
-func TestStreambufSgetcGptrMatch(t *testing.T) {
-	sgetc := "_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE5sgetcB9nqn220108Ev"
-	gptr := "_ZNKSt3__115basic_streambufIcNS_11char_traitsIcEEE4gptrB9nqn220108Ev"
-	if !isStreambufSgetc(sgetc) || isStreambufSgetc(gptr) {
-		t.Fatal("sgetc")
-	}
-	if !isStreambufGptr(gptr) || isStreambufGptr(sgetc) {
-		t.Fatal("gptr")
-	}
-}
-
 func TestCxxTreeCall(t *testing.T) {
 	fn, args, retPtr, ok := cxxTreeCall("_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", nil)
 	if !ok || fn == nil || len(args) != 1 || !retPtr {
