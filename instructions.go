@@ -2063,6 +2063,7 @@ const (
 	cxxIOOStringStreamStr
 	cxxIOManip
 	cxxIOExtractI32
+	cxxIOFail
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -2368,6 +2369,12 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 			out = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{is, out}, true, true
+	case cxxIOFail:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = ptrArg(ir, args, 0)
+		}
+		return fn, []jen.Code{this}, false, true
 	default:
 		return nil, nil, false, false
 	}
@@ -2552,17 +2559,16 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 			return nil, 0, false
 		}
 	}
+	if strings.Contains(name, "4failE") || strings.Contains(name, "4failB") {
+		return Sym(libc.IosFail).code(), cxxIOFail, true
+	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false
 	}
 	switch {
-	case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"),
-		strings.Contains(name, "C1B"), strings.Contains(name, "C2B"),
-		strings.Contains(name, "4openE"), strings.Contains(name, "4openB"):
+	case strings.Contains(name, "C1"), strings.Contains(name, "C2"), strings.Contains(name, "4open"):
 		return Sym(libc.IfstreamOpen).code(), cxxIOOpen, true
-	case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"),
-		strings.Contains(name, "D0B"), strings.Contains(name, "D1B"), strings.Contains(name, "D2B"),
-		strings.Contains(name, "5closeE"), strings.Contains(name, "5closeB"):
+	case strings.Contains(name, "D0"), strings.Contains(name, "D1"), strings.Contains(name, "D2"), strings.Contains(name, "5close"):
 		return Sym(libc.IfstreamClose).code(), cxxIOClose, true
 	default:
 		return nil, 0, false

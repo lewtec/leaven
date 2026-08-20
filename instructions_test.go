@@ -82,6 +82,10 @@ func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	if _, _, _, ok := cxxIOCall(libcxx, nil); !ok {
 		t.Fatal("libcxx ifstream C1B")
 	}
+	fail := "_ZNKSt3__19basic_iosIcNS_11char_traitsIcEEE4failB9nqn220108Ev"
+	if _, _, ret, ok := cxxIOCall(fail, nil); !ok || ret {
+		t.Fatal("libcxx fail")
+	}
 }
 
 func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
