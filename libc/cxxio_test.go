@@ -193,6 +193,22 @@ func TestInitOstreamVptrMinus24(t *testing.T) {
 	}
 }
 
+func putTestCxxString(text string) *[32]byte {
+	var s [32]byte
+	if runtime.GOOS == "darwin" {
+		var src *byte
+		b := []byte(text)
+		if len(b) > 0 {
+			src = &b[0]
+		}
+		StdStringInit(&s[0], src, int64(len(b)))
+		return &s
+	}
+	o := emptyCxxString()
+	cxxStringAssign(&o[0], []byte(text))
+	return o
+}
+
 func emptyCxxString() *[32]byte {
 	var s [32]byte
 	Store(Ptr(&s[0]), 0, Ptr(&s[16]))
@@ -316,8 +332,7 @@ func TestIstreamGetlineReadsLine(t *testing.T) {
 
 func TestStringbufStrThenExtract(t *testing.T) {
 	// Darwin CGOptions: stringstream(s) inlines as stringbuf::str; >> uses the parent.
-	s := emptyCxxString()
-	cxxStringAssign(&s[0], []byte("42"))
+	s := putTestCxxString("42")
 	var ss [176]byte
 	sb := &ss[16]
 	StringbufStr(sb, &s[0])
@@ -355,8 +370,7 @@ func TestGoCxxStringBytesLibcxxShort(t *testing.T) {
 
 func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	// StringUtils::str2int: stringstream(s); [ss>>hex;] ss>>i
-	s := emptyCxxString()
-	cxxStringAssign(&s[0], []byte("42"))
+	s := putTestCxxString("42")
 	var ss [128]byte
 	StringstreamCtor(&ss[0], &s[0], 24)
 	var out int32 = -1
@@ -366,8 +380,7 @@ func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	}
 	StringstreamClose(&ss[0])
 
-	s2 := emptyCxxString()
-	cxxStringAssign(&s2[0], []byte("0x2a"))
+	s2 := putTestCxxString("0x2a")
 	var ss2 [128]byte
 	StringstreamCtor(&ss2[0], &s2[0], 24)
 	IstreamApplyIosManip(&ss2[0], nil)
