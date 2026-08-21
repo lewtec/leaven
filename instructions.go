@@ -1956,7 +1956,7 @@ func finishCall(inst *ir.InstCall, callExpr *jen.Statement, typedPtr bool) ([]je
 func libcReturnsTypedPtr(name string) bool {
 	switch name {
 	case "realloc", "fdopen", "strchr", "strrchr", "strstr", "strpbrk",
-		"memchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
+		"memchr", "wmemchr", "strcpy", "strncpy", "strcat", "strncat", "memmove",
 		"memset", "memcpy",
 		"__errno_location", "__error", "getenv", "getcwd", "realpath", "dlsym",
 		"__dynamic_cast",
@@ -2815,6 +2815,7 @@ var libraryFunctions = map[string]goRef{
 	"llvm_maximumnum_f64":       Sym(libc.MaximumNumF64),
 	"llvm_pow_f64":              Sym(math.Pow),
 	"memchr":                    Sym(libc.Memchr),
+	"wmemchr":                   Sym(libc.Wmemchr),
 	"memcmp":                    Sym(libc.Memcmp),
 	"bcmp":                      Sym(libc.Memcmp),
 	"__memcpy_chk":              Sym(libc.MemcpyChk),

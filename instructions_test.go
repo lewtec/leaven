@@ -37,6 +37,9 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("close_NOCANCEL"); !ok {
 		t.Fatal("close_NOCANCEL")
 	}
+	if _, ok := libcLookup("wmemchr"); !ok {
+		t.Fatal("wmemchr")
+	}
 	if _, ok := libcLookup("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_"); !ok {
 		t.Fatal("string substr ctor")
 	}
