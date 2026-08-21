@@ -766,6 +766,29 @@ func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointe
 	return StdStringInit(this, src, n)
 }
 
+// StdStringAppendCStr is libc++ string::append(char const*) / append(char const*, n).
+// n<0 means strlen.
+func StdStringAppendCStr(s, cstr *byte, n int64) unsafe.Pointer {
+	p, m := libcxxStringData(s)
+	var buf []byte
+	if p != nil && m > 0 {
+		buf = append([]byte(nil), Bytes(p, int(m))...)
+	}
+	if cstr != nil {
+		if n < 0 {
+			buf = append(buf, []byte(GoString(cstr))...)
+		} else if n > 0 {
+			buf = append(buf, Bytes(cstr, int(n))...)
+		}
+	}
+	StdStringDestroy(s)
+	var src *byte
+	if len(buf) > 0 {
+		src = &buf[0]
+	}
+	return StdStringInit(s, src, int64(len(buf)))
+}
+
 // StdStringErase is libc++ string::erase(pos, n). n<0 is npos.
 func StdStringErase(s *byte, pos, n int64) unsafe.Pointer {
 	p, m := libcxxStringData(s)

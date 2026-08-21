@@ -48,6 +48,16 @@ func TestLibcxxStringEraseMatch(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringAppendCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc"
+	if !isLibcxxStringAppendCStr(name) {
+		t.Fatal("append")
+	}
+	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendERKS5_") {
+		t.Fatal("append string is not cstr")
+	}
+}
+
 func TestLibcxxStringCompareCStrMatch(t *testing.T) {
 	name := "_ZNKSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7compareEmmPKcm"
 	if !isLibcxxStringCompareCStr(name) {

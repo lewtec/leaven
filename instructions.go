@@ -1827,6 +1827,17 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
+		} else if isLibcxxStringAppendCStr(llvmName) && len(inst.Args) >= 2 {
+			callee = Sym(libc.StdStringAppendCStr).code()
+			n := jen.Lit(int64(-1))
+			if len(inst.Args) >= 3 {
+				n = jen.Int64().Call(jen.Add(args[2]))
+			}
+			args = []jen.Code{
+				ptrArg(inst.Args, args, 0),
+				ptrArg(inst.Args, args, 1),
+				n,
+			}
 		} else if isLibcxxStringErase(llvmName) && len(inst.Args) >= 2 {
 			callee = Sym(libc.StdStringErase).code()
 			n := jen.Lit(int64(-1))
@@ -2529,6 +2540,16 @@ func isLibcxxStringErase(name string) bool {
 	return strings.Contains(name, "St3__1") &&
 		strings.Contains(name, "12basic_string") &&
 		(strings.Contains(name, "5eraseE") || strings.Contains(name, "5eraseB"))
+}
+
+func isLibcxxStringAppendCStr(name string) bool {
+	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "12basic_string") {
+		return false
+	}
+	if !strings.Contains(name, "PK") {
+		return false
+	}
+	return strings.Contains(name, "6appendE") || strings.Contains(name, "6appendB")
 }
 
 func isLibcxxStringCompareCStr(name string) bool {
