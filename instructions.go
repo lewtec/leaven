@@ -1827,14 +1827,33 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if isLibcxxStringCompareCStr(llvmName) && len(inst.Args) >= 5 {
+		} else if isLibcxxStringCompareCStr(llvmName) && len(inst.Args) >= 2 {
 			callee = Sym(libc.StdStringCompareCStr).code()
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				jen.Int64().Call(jen.Add(args[1])),
-				jen.Int64().Call(jen.Add(args[2])),
-				ptrArg(inst.Args, args, 3),
-				jen.Int64().Call(jen.Add(args[4])),
+			switch len(inst.Args) {
+			case 2:
+				// compare(const char*)
+				args = []jen.Code{
+					ptrArg(inst.Args, args, 0), jen.Lit(int64(0)), jen.Lit(int64(-1)),
+					ptrArg(inst.Args, args, 1), jen.Lit(int64(-1)),
+				}
+			case 4:
+				// compare(pos, n, const char*)
+				args = []jen.Code{
+					ptrArg(inst.Args, args, 0),
+					jen.Int64().Call(jen.Add(args[1])),
+					jen.Int64().Call(jen.Add(args[2])),
+					ptrArg(inst.Args, args, 3),
+					jen.Lit(int64(-1)),
+				}
+			default:
+				// compare(pos, n, const char*, n2)
+				args = []jen.Code{
+					ptrArg(inst.Args, args, 0),
+					jen.Int64().Call(jen.Add(args[1])),
+					jen.Int64().Call(jen.Add(args[2])),
+					ptrArg(inst.Args, args, 3),
+					jen.Int64().Call(jen.Add(args[4])),
+				}
 			}
 		} else if isLibcxxStringEqCStr(llvmName) && len(inst.Args) >= 2 &&
 			isPtrish(inst.Args[0].Type()) && isPtrish(inst.Args[1].Type()) {
