@@ -698,11 +698,29 @@ func cxxStringAssign(s *byte, data []byte) {
 	Store[uint64](base, cxxStringLocalOff, uint64(n))
 }
 
-// libc++ 64-bit little-endian short/long string (size<<1, long bit = 1).
+// libc++ 64-bit little-endian string. Darwin x86_64 uses the default
+// layout (flag in byte 0); Darwin arm64 uses the alternate layout
+// (data first, flag in byte 23 bit 7). See LLVM 18 <string> __long/__short.
 const (
 	libcxxSSO     = 22
 	libcxxLongBit = 1
+	libcxxAltFlag = 0x80
+	libcxxAltLast = 23
 )
+
+func libcxxAlternate() bool {
+	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+
+func libcxxIsLong(s *byte) bool {
+	if s == nil {
+		return false
+	}
+	if libcxxAlternate() {
+		return Load[byte](Ptr(s), libcxxAltLast)&libcxxAltFlag != 0
+	}
+	return Load[byte](Ptr(s), 0)&libcxxLongBit != 0
+}
 
 // StdStringInit is libc++ basic_string::__init(char const*, size_t).
 func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
@@ -715,6 +733,13 @@ func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 	base := Ptr(this)
 	Memset(this, 0, 32)
 	if n <= libcxxSSO {
+		if libcxxAlternate() {
+			if n > 0 && s != nil {
+				copy(Bytes(this, int(n)+1), Bytes(s, int(n)))
+			}
+			Store[byte](base, libcxxAltLast, byte(n))
+			return unsafe.Pointer(this)
+		}
 		Store[byte](base, 0, byte(n<<1))
 		if n > 0 && s != nil {
 			copy(Bytes(As[byte](Off(base, 1)), int(n)+1), Bytes(s, int(n)))
@@ -728,9 +753,20 @@ func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 	if s != nil {
 		copy(Bytes(p, int(n)+1), Bytes(s, int(n)))
 	}
-	Store(base, 0, p)
+	cap := uint64(n + 1)
+	if cap&1 != 0 {
+		cap++
+	}
+	if libcxxAlternate() {
+		Store(base, 0, p)
+		Store[uint64](base, 8, uint64(n))
+		Store[uint64](base, 16, cap|(1<<63))
+		return unsafe.Pointer(this)
+	}
+	// default: {is_long:1, cap:63} at word 0, size at 8, data at 16.
+	Store[uint64](base, 0, cap|libcxxLongBit)
 	Store[uint64](base, 8, uint64(n))
-	Store[uint64](base, 16, uint64(n)<<1|libcxxLongBit)
+	Store(base, 16, p)
 	return unsafe.Pointer(this)
 }
 
@@ -738,11 +774,18 @@ func libcxxStringData(s *byte) (p *byte, n int64) {
 	if s == nil {
 		return nil, 0
 	}
+	if libcxxAlternate() {
+		last := Load[byte](Ptr(s), libcxxAltLast)
+		if last&libcxxAltFlag == 0 {
+			return s, int64(last & 0x7f)
+		}
+		return Load[*byte](Ptr(s), 0), int64(Load[uint64](Ptr(s), 8))
+	}
 	b0 := Load[byte](Ptr(s), 0)
 	if b0&libcxxLongBit == 0 {
 		return As[byte](Off(Ptr(s), 1)), int64(b0 >> 1)
 	}
-	return Load[*byte](Ptr(s), 0), int64(Load[uint64](Ptr(s), 8))
+	return Load[*byte](Ptr(s), 16), int64(Load[uint64](Ptr(s), 8))
 }
 
 // StdStringSubstr is libc++ basic_string(s, pos, n, alloc). n<0 is npos.
@@ -868,16 +911,8 @@ func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	if other == nil {
-		return StdStringInit(this, nil, 0)
-	}
-	b0 := Load[byte](Ptr(other), 0)
-	if b0&libcxxLongBit == 0 {
-		copy(Bytes(this, 24), Bytes(other, 24))
-		return unsafe.Pointer(this)
-	}
-	n := int64(Load[uint64](Ptr(other), 8))
-	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
+	p, n := libcxxStringData(other)
+	return StdStringInit(this, p, n)
 }
 
 // StdStringInsertCStr is libc++ string::insert(pos, char const*) / insert(pos, char const*, n).
@@ -959,8 +994,9 @@ func StdStringDestroy(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	if Load[byte](Ptr(this), 0)&libcxxLongBit != 0 {
-		if p := Load[*byte](Ptr(this), 0); p != nil {
+	if libcxxIsLong(this) {
+		p, _ := libcxxStringData(this)
+		if p != nil {
 			Free(p)
 		}
 	}
@@ -1013,27 +1049,18 @@ func stringStreamOf(this *byte) *stringStream {
 }
 
 // goCxxStringBytes reads a libc++ or libstdc++ string.
-// libc++ short strings store size in byte 0; libstdc++ SSO stores a
-// pointer to this+16 in word 0. Prefer the layout that matches.
+// libstdc++ SSO stores a pointer to this+16 in word 0.
 func goCxxStringBytes(s *byte) []byte {
 	if s == nil {
 		return nil
 	}
 	local := As[byte](Off(Ptr(s), cxxStringLocalOff))
-	p0 := Load[*byte](Ptr(s), 0)
-	if p0 != local {
-		b0 := Load[byte](Ptr(s), 0)
-		if b0&libcxxLongBit == 0 {
-			n := int64(b0 >> 1)
-			if n > 0 && n <= libcxxSSO {
-				return append([]byte(nil), Bytes(As[byte](Off(Ptr(s), 1)), int(n))...)
-			}
-		} else {
-			n := int64(Load[uint64](Ptr(s), 8))
-			if p0 != nil && n > 0 {
-				return append([]byte(nil), Bytes(p0, int(n))...)
-			}
-		}
+	if Load[*byte](Ptr(s), 0) == local {
+		return append([]byte(nil), cxxStringBytes(s)...)
+	}
+	p, n := libcxxStringData(s)
+	if p != nil && n > 0 {
+		return append([]byte(nil), Bytes(p, int(n))...)
 	}
 	return append([]byte(nil), cxxStringBytes(s)...)
 }

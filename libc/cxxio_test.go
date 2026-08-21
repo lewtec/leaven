@@ -65,12 +65,44 @@ func TestStdStringInitSSO(t *testing.T) {
 	if p != unsafe.Pointer(&obj[0]) {
 		t.Fatal("this")
 	}
-	if obj[0] != 2<<1 {
-		t.Fatalf("short size byte=%d", obj[0])
+	dp, n := libcxxStringData(&obj[0])
+	if n != 2 {
+		t.Fatalf("n=%d", n)
 	}
-	if obj[1] != 'h' || obj[2] != 'i' {
-		t.Fatalf("data=%q", obj[1:3])
+	got := Bytes(dp, 2)
+	if got[0] != 'h' || got[1] != 'i' {
+		t.Fatalf("data=%q", got)
 	}
+}
+
+func TestStdStringLongRoundTrip(t *testing.T) {
+	var obj [32]byte
+	s := []byte("abcdefghijklmnopqrstuvwxyz0123") // 30 > SSO
+	StdStringInit(&obj[0], &s[0], int64(len(s)))
+	if !libcxxIsLong(&obj[0]) {
+		t.Fatal("expected long")
+	}
+	dp, n := libcxxStringData(&obj[0])
+	if n != int64(len(s)) || string(Bytes(dp, int(n))) != string(s) {
+		t.Fatalf("n=%d data=%q", n, Bytes(dp, int(n)))
+	}
+	StdStringDestroy(&obj[0])
+}
+
+func TestStdStringLongDefaultLayout(t *testing.T) {
+	if libcxxAlternate() {
+		t.Skip("arm64 alternate")
+	}
+	var obj [32]byte
+	s := []byte("abcdefghijklmnopqrstuvwxyz0123")
+	StdStringInit(&obj[0], &s[0], int64(len(s)))
+	if Load[uint64](Ptr(&obj[0]), 0)&1 == 0 {
+		t.Fatal("long bit in word 0")
+	}
+	if Load[*byte](Ptr(&obj[0]), 16) == nil {
+		t.Fatal("data ptr at +16")
+	}
+	StdStringDestroy(&obj[0])
 }
 
 func TestStdStringSubstr(t *testing.T) {
@@ -78,11 +110,10 @@ func TestStdStringSubstr(t *testing.T) {
 	s := []byte("abcdef")
 	StdStringInit(&src[0], &s[0], 6)
 	StdStringSubstr(&dst[0], &src[0], 2, 3, nil)
-	if dst[0] != 3<<1 {
-		t.Fatalf("size byte=%d", dst[0])
-	}
-	if dst[1] != 'c' || dst[2] != 'd' || dst[3] != 'e' {
-		t.Fatalf("data=%q", dst[1:4])
+	dp, n := libcxxStringData(&dst[0])
+	got := Bytes(dp, int(n))
+	if n != 3 || string(got) != "cde" {
+		t.Fatalf("n=%d data=%q", n, got)
 	}
 	c := append([]byte("cde"), 0)
 	if !StdStringEqCStr(&dst[0], &c[0]) {
