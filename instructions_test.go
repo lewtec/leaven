@@ -56,6 +56,9 @@ func TestLibcxxStringAppendCStrMatch(t *testing.T) {
 	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendERKS5_") {
 		t.Fatal("append string is not cstr")
 	}
+	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKcS7_") {
+		t.Fatal("append iterator pair is not cstr")
+	}
 }
 
 func TestLibcxxStringCompareCStrMatch(t *testing.T) {
