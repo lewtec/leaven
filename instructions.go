@@ -2470,10 +2470,15 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
 		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
 	case strings.Contains(name, "St3__1") && strings.Contains(name, "basic_ostream") &&
-		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")) &&
-		(strings.HasSuffix(name, "Ei") || strings.HasSuffix(name, "El") ||
-			strings.HasSuffix(name, "Ej") || strings.HasSuffix(name, "Ex")):
-		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
+		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")):
+		switch {
+		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"),
+			strings.HasSuffix(name, "Ej"):
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
+		case strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
+			strings.HasSuffix(name, "Ex"):
+			return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
+		}
 	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
 		switch {
 		case strings.HasSuffix(name, "PKc"):

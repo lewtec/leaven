@@ -147,6 +147,10 @@ func TestCxxOstreamOpEndl(t *testing.T) {
 	if _, _, _, ok := cxxIOCall(libcxx, nil); !ok {
 		t.Fatal("libcxx endl")
 	}
+	uls := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEm"
+	if _, a, ret, ok := cxxIOCall(uls, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<ulong ret=%v n=%d", ret, len(a))
+	}
 }
 
 func TestCxxIOCallOstreamInsert(t *testing.T) {
