@@ -36,6 +36,10 @@ const (
 	ctypeWidenOkOff  = 56
 	ctypeWidenTabOff = 57
 	ctypeSize        = 570
+	// LLVM 22 libc++ basic_streambuf: vptr, locale, then _GetArea.
+	sbEbackOff = 16
+	sbGptrOff  = 24
+	sbEgptrOff = 32
 )
 
 // standinCtype is libstdc++ ctype<char>. endl does
@@ -175,12 +179,87 @@ func IfstreamCloseVTT(this *byte, vtt *byte) unsafe.Pointer {
 // object for (locale, ios_base, __basic_file).
 func CxxNoop(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
+func filebufSetg(this, eback, gptr, egptr *byte) {
+	if this == nil {
+		return
+	}
+	base := Ptr(this)
+	Store(base, sbEbackOff, eback)
+	Store(base, sbGptrOff, gptr)
+	Store(base, sbEgptrOff, egptr)
+}
+
+// FilebufOpen is basic_filebuf::open. Slurps the file into the get
+// area so inlined sgetc/getline can read without underflow.
+// Returns this on success, nil on failure (libc++).
+func FilebufOpen(this *byte, path *byte, mode int32) unsafe.Pointer {
+	if this == nil || path == nil {
+		return nil
+	}
+	if mode == 0 {
+		mode = 8 // ios_base::in
+	}
+	flag, ok := iosOpenFlag(mode)
+	if !ok {
+		return nil
+	}
+	// Probe open with the same flags, then slurp. platform.info is tiny.
+	f, err := os.OpenFile(GoString(path), flag, 0)
+	if err != nil {
+		return nil
+	}
+	_ = f.Close()
+	data, err := os.ReadFile(GoString(path))
+	if err != nil {
+		return nil
+	}
+	n := len(data)
+	buf := Malloc[byte](int64(n + 1))
+	if buf == nil {
+		return nil
+	}
+	if n > 0 {
+		copy(Bytes(buf, n), data)
+	}
+	end := As[byte](Off(Ptr(buf), n))
+	filebufSetg(this, buf, buf, end)
+	return unsafe.Pointer(this)
+}
+
+// FilebufUnderflow is basic_filebuf::underflow. Get area already
+// holds the file; empty means EOF.
+func FilebufUnderflow(this *byte) int32 {
+	if this == nil {
+		return -1
+	}
+	gptr := Load[*byte](Ptr(this), sbGptrOff)
+	egptr := Load[*byte](Ptr(this), sbEgptrOff)
+	if gptr != nil && egptr != nil && Addr(gptr) < Addr(egptr) {
+		return int32(*gptr)
+	}
+	return -1
+}
+
+// StreambufSgetc is basic_streambuf::sgetc. Reads the get area.
+func StreambufSgetc(this *byte) int32 {
+	if this == nil {
+		return -1
+	}
+	gptr := Load[*byte](Ptr(this), sbGptrOff)
+	egptr := Load[*byte](Ptr(this), sbEgptrOff)
+	if gptr != nil && egptr != nil && Addr(gptr) < Addr(egptr) {
+		return int32(*gptr)
+	}
+	return FilebufUnderflow(this)
+}
+
 // FilebufClose is basic_filebuf::close. O2 inlines ifstream::close
 // as filebuf::close(this+16). Return this (non-null) on success.
 func FilebufClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
+	filebufSetg(this, nil, nil, nil)
 	owner := As[byte](Off(Ptr(this), -filebufOff))
 	IfstreamClose(owner)
 	return unsafe.Pointer(this)

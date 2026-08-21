@@ -2064,6 +2064,7 @@ const (
 	cxxIOManip
 	cxxIOExtractI32
 	cxxIOFail
+	cxxIOUnderflow
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -2375,6 +2376,12 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, false, true
+	case cxxIOUnderflow:
+		this := jen.Nil()
+		if len(args) > 0 {
+			this = ptrArg(ir, args, 0)
+		}
+		return fn, []jen.Code{this}, false, true
 	default:
 		return nil, nil, false, false
 	}
@@ -2561,6 +2568,16 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if strings.Contains(name, "4failE") || strings.Contains(name, "4failB") {
 		return Sym(libc.IosFail).code(), cxxIOFail, true
+	}
+	if strings.Contains(name, "13basic_filebuf") {
+		switch {
+		case strings.Contains(name, "4open"):
+			return Sym(libc.FilebufOpen).code(), cxxIOOpen, true
+		case strings.Contains(name, "10underflow"):
+			return Sym(libc.FilebufUnderflow).code(), cxxIOUnderflow, true
+		case strings.Contains(name, "5close"):
+			return Sym(libc.FilebufClose).code(), cxxIOClose, true
+		}
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false

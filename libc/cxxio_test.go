@@ -161,6 +161,27 @@ func cxxStringText(s *[32]byte) string {
 	return string(Bytes(p, int(n)))
 }
 
+func TestFilebufOpenFillsGetArea(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "platform.info")
+	if err := os.WriteFile(p, []byte("integer size = 4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var fb [64]byte
+	got := FilebufOpen(&fb[0], &append([]byte(p), 0)[0], 8)
+	if got == nil {
+		t.Fatal("open")
+	}
+	gptr := Load[*byte](Ptr(&fb[0]), sbGptrOff)
+	egptr := Load[*byte](Ptr(&fb[0]), sbEgptrOff)
+	if gptr == nil || egptr == nil || Addr(gptr) >= Addr(egptr) {
+		t.Fatal("empty get area")
+	}
+	if StreambufSgetc(&fb[0]) != int32('i') {
+		t.Fatalf("sgetc=%d", StreambufSgetc(&fb[0]))
+	}
+}
+
 func TestIstreamGetlineMissingFails(t *testing.T) {
 	var obj [256]byte
 	var str = emptyCxxString()
