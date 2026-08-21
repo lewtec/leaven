@@ -404,7 +404,7 @@ func TestOStringStreamGensym(t *testing.T) {
 	OstreamInsertI64(&oss[0], 1)
 	ret := emptyCxxString()
 	OStringStreamStr(&ret[0], &oss[0])
-	got := string(cxxStringBytes(&ret[0]))
+	got := string(goCxxStringBytes(&ret[0]))
 	if got != "func_1" {
 		t.Fatalf("str %q", got)
 	}
@@ -420,7 +420,7 @@ func TestStringstreamDefaultNewCtrlVars(t *testing.T) {
 	OstreamInsertU64(os, 0)
 	ret := emptyCxxString()
 	StringstreamStr(&ret[0], &ss[0])
-	got := string(cxxStringBytes(&ret[0]))
+	got := string(goCxxStringBytes(&ret[0]))
 	if got != "i0" {
 		t.Fatalf("str %q", got)
 	}

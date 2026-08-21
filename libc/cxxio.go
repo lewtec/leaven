@@ -473,6 +473,14 @@ func OStringStreamStr(ret, this *byte) {
 	if b := ostringBuf(this); b != nil {
 		data = *b
 	}
+	if runtime.GOOS == "darwin" {
+		var src *byte
+		if len(data) > 0 {
+			src = &data[0]
+		}
+		StdStringInit(ret, src, int64(len(data)))
+		return
+	}
 	cxxStringAssign(ret, data)
 }
 
@@ -506,7 +514,7 @@ func OstreamLsCStr(out *byte, s *byte) *byte {
 
 // OstreamLsString is operator<<(ostream&, basic_string const&).
 func OstreamLsString(out *byte, s *byte) *byte {
-	writeOstream(out, cxxStringBytes(s))
+	writeOstream(out, goCxxStringBytes(s))
 	return out
 }
 
