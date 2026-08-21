@@ -88,6 +88,9 @@ func TestStdStringSubstr(t *testing.T) {
 	if !StdStringEqCStr(&dst[0], &c[0]) {
 		t.Fatal("eq")
 	}
+	if StdStringCompareCStr(&src[0], 2, 3, &c[0], 3) != 0 {
+		t.Fatal("compare")
+	}
 }
 
 func TestLocaleCtorNilSafe(t *testing.T) {

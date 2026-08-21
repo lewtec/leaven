@@ -231,7 +231,7 @@ func hasRuntimeDef(name string) bool {
 	if _, ok := namedRef(name); ok {
 		return true
 	}
-	if isGetline(name) || isLibcxxStringEqCStr(name) {
+	if isGetline(name) || isLibcxxStringEqCStr(name) || isLibcxxStringCompareCStr(name) {
 		return true
 	}
 	return llvmCallHandled(name)

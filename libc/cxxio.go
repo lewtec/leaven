@@ -736,6 +736,41 @@ func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointe
 	return StdStringInit(this, src, n)
 }
 
+// StdStringCompareCStr is libc++ string::compare(pos, n, cstr, n2).
+func StdStringCompareCStr(s *byte, pos, n int64, cstr *byte, n2 int64) int32 {
+	p, m := libcxxStringData(s)
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > m {
+		pos = m
+	}
+	rest := m - pos
+	if n < 0 || n > rest {
+		n = rest
+	}
+	var left string
+	if p != nil && n > 0 {
+		left = string(Bytes(As[byte](Off(Ptr(p), int(pos))), int(n)))
+	}
+	right := ""
+	if cstr != nil {
+		if n2 < 0 {
+			right = GoString(cstr)
+		} else {
+			right = string(Bytes(cstr, int(n2)))
+		}
+	}
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // StdStringEqCStr is libc++ string == const char*.
 func StdStringEqCStr(s, cstr *byte) bool {
 	p, n := libcxxStringData(s)

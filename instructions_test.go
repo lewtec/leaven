@@ -42,6 +42,13 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringCompareCStrMatch(t *testing.T) {
+	name := "_ZNKSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7compareEmmPKcm"
+	if !isLibcxxStringCompareCStr(name) {
+		t.Fatal("compare")
+	}
+}
+
 func TestLibcxxStringEqCStrMatch(t *testing.T) {
 	name := "_ZNSt3__1eqIcNS_11char_traitsIcEENS_9allocatorIcEEEEbRKNS_12basic_stringIT_T0_T1_EEPKS6_"
 	if !isLibcxxStringEqCStr(name) {

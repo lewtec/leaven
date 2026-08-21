@@ -1827,6 +1827,15 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
+		} else if isLibcxxStringCompareCStr(llvmName) && len(inst.Args) >= 5 {
+			callee = Sym(libc.StdStringCompareCStr).code()
+			args = []jen.Code{
+				ptrArg(inst.Args, args, 0),
+				jen.Int64().Call(jen.Add(args[1])),
+				jen.Int64().Call(jen.Add(args[2])),
+				ptrArg(inst.Args, args, 3),
+				jen.Int64().Call(jen.Add(args[4])),
+			}
 		} else if isLibcxxStringEqCStr(llvmName) && len(inst.Args) >= 2 &&
 			isPtrish(inst.Args[0].Type()) && isPtrish(inst.Args[1].Type()) {
 			callee = Sym(libc.StdStringEqCStr).code()
@@ -2469,6 +2478,13 @@ func isLocaleCtor(name string) bool {
 		return false
 	}
 	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
+}
+
+func isLibcxxStringCompareCStr(name string) bool {
+	return strings.Contains(name, "St3__1") &&
+		strings.Contains(name, "12basic_string") &&
+		strings.Contains(name, "7compare") &&
+		strings.Contains(name, "PK")
 }
 
 func isLibcxxStringEqCStr(name string) bool {
