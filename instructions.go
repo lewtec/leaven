@@ -2104,6 +2104,7 @@ const (
 	cxxIOExtractI32
 	cxxIOFail
 	cxxIOUnderflow
+	cxxIOStringbufStr
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -2421,6 +2422,15 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 			this = ptrArg(ir, args, 0)
 		}
 		return fn, []jen.Code{this}, false, true
+	case cxxIOStringbufStr:
+		this, str := jen.Nil(), jen.Nil()
+		if len(args) > 0 {
+			this = ptrArg(ir, args, 0)
+		}
+		if len(args) > 1 {
+			str = ptrArg(ir, args, 1)
+		}
+		return fn, []jen.Code{this, str}, false, true
 	default:
 		return nil, nil, false, false
 	}
@@ -2548,6 +2558,15 @@ func isOstringstream(name string) bool {
 	return strings.Contains(name, "19basic_ostringstream")
 }
 
+func isStringbuf(name string) bool {
+	return strings.Contains(name, "15basic_stringbuf")
+}
+
+// isCxxStrSetter is str(const string&), not the sret getter str().
+func isCxxStrSetter(name string) bool {
+	return strings.Contains(name, "3strE") && strings.Contains(name, "RK")
+}
+
 // isRustAlloc is __rust_alloc / __rust_alloc_zeroed, not *_error_handler.
 func isRustAlloc(name string) bool {
 	if strings.Contains(name, "error") || strings.Contains(name, "dealloc") ||
@@ -2592,6 +2611,8 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if isStringstream(name) {
 		switch {
+		case isCxxStrSetter(name):
+			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "3strE"):
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
 		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
@@ -2610,12 +2631,24 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		switch {
 		case strings.Contains(name, "C1E") || strings.Contains(name, "C2E"):
 			return Sym(libc.OStringStreamCtor).code(), cxxIOOStringStreamCtor, true
+		case isCxxStrSetter(name):
+			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "3strE"):
 			return Sym(libc.OStringStreamStr).code(), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
 			return Sym(libc.OStringStreamClose).code(), cxxIOClose, true
 		default:
 			return nil, 0, false
+		}
+	}
+	if isStringbuf(name) {
+		switch {
+		case isCxxStrSetter(name):
+			return Sym(libc.StringbufStr).code(), cxxIOStringbufStr, true
+		case strings.Contains(name, "3strE"):
+			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
+		case strings.Contains(name, "C1") || strings.Contains(name, "C2"):
+			return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
 		}
 	}
 	if strings.Contains(name, "4failE") || strings.Contains(name, "4failB") {
@@ -2700,8 +2733,8 @@ var libraryFunctions = map[string]goRef{
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEPKcm":                              Sym(libc.StdStringInit),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_":                                  Sym(libc.StdStringCopy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_":                                  Sym(libc.StdStringCopy),
-	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_":                            Sym(libc.StdStringSubstr),
-	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_mmRKS4_":                            Sym(libc.StdStringSubstr),
+	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_":                           Sym(libc.StdStringSubstr),
+	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_mmRKS4_":                           Sym(libc.StdStringSubstr),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev":                                      Sym(libc.StdStringDestroy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED2Ev":                                      Sym(libc.StdStringDestroy),
 	"_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEaSERKS5_":                                  Sym(libc.StdStringAssign),

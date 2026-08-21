@@ -118,6 +118,9 @@ func TestIosBaseCtorVptrAndCtype(t *testing.T) {
 	if ct == nil {
 		t.Fatal("nil _M_ctype")
 	}
+	if Load[int32](Ptr(&obj[0]), iosStateOff) != 0 {
+		t.Fatal("fresh ios_base must be goodbit")
+	}
 }
 
 func TestInitOstreamVptrMinus24(t *testing.T) {
@@ -174,19 +177,27 @@ func TestFilebufOpenFillsGetArea(t *testing.T) {
 	if err := os.WriteFile(p, []byte("integer size = 4\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	var fb [64]byte
-	got := FilebufOpen(&fb[0], &append([]byte(p), 0)[0], 8)
+	var obj [256]byte
+	fb := &obj[filebufOff]
+	got := FilebufOpen(fb, &append([]byte(p), 0)[0], 8)
 	if got == nil {
 		t.Fatal("open")
 	}
-	gptr := Load[*byte](Ptr(&fb[0]), sbGptrOff)
-	egptr := Load[*byte](Ptr(&fb[0]), sbEgptrOff)
+	gptr := Load[*byte](Ptr(fb), sbGptrOff)
+	egptr := Load[*byte](Ptr(fb), sbEgptrOff)
 	if gptr == nil || egptr == nil || Addr(gptr) >= Addr(egptr) {
 		t.Fatal("empty get area")
 	}
-	if StreambufSgetc(&fb[0]) != int32('i') {
-		t.Fatalf("sgetc=%d", StreambufSgetc(&fb[0]))
+	if StreambufSgetc(fb) != int32('i') {
+		t.Fatalf("sgetc=%d", StreambufSgetc(fb))
 	}
+	if IosFail(fb) {
+		t.Fatal("open left filebuf failed")
+	}
+	if IosFail(&obj[0]) {
+		t.Fatal("open left ifstream failed")
+	}
+	FilebufClose(fb)
 }
 
 func TestIstreamGetlineMissingFails(t *testing.T) {
@@ -254,6 +265,28 @@ func TestIstreamGetlineReadsLine(t *testing.T) {
 		t.Fatal("EOF getline should set fail+eof")
 	}
 	IfstreamClose(&obj[0])
+}
+
+func TestStringbufStrThenExtract(t *testing.T) {
+	// Darwin CGOptions: stringstream(s) inlines as stringbuf::str; >> uses the parent.
+	s := emptyCxxString()
+	if runtime.GOOS == "darwin" {
+		StdStringInit(&s[0], &[]byte("42")[0], 2)
+	} else {
+		cxxStringAssign(&s[0], []byte("42"))
+	}
+	var ss [176]byte
+	sb := &ss[16]
+	StringbufStr(sb, &s[0])
+	if StreambufSgetc(sb) != int32('4') {
+		t.Fatalf("sgetc=%d", StreambufSgetc(sb))
+	}
+	var out int32 = -1
+	IstreamExtractI32(&ss[0], As[byte](Ptr(&out)))
+	if out != 42 {
+		t.Fatalf("extract got %d", out)
+	}
+	StringstreamClose(sb)
 }
 
 func TestStringstreamStr2intDecAndHex(t *testing.T) {

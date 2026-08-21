@@ -109,6 +109,25 @@ func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	}
 }
 
+func TestCxxIOCallStringbufStr(t *testing.T) {
+	set := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEE3strERKNS_12basic_stringIcS2_S3_EE"
+	fn, args, retPtr, ok := cxxIOCall(set, nil)
+	if !ok || fn == nil || retPtr || len(args) != 2 {
+		t.Fatalf("str setter %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(set); !ok {
+		t.Fatal("named setter")
+	}
+	get := "_ZNKSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEE3strEv"
+	if _, a, ret, ok := cxxIOCall(get, nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("str getter ret=%v n=%d", ret, len(a))
+	}
+	ctor := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEEC2Ev"
+	if _, _, _, ok := cxxIOCall(ctor, nil); !ok {
+		t.Fatal("stringbuf ctor")
+	}
+}
+
 func TestCxxIOCallIgnoresUnrelated(t *testing.T) {
 	if _, _, _, ok := cxxIOCall("printf", nil); ok {
 		t.Fatal("printf")

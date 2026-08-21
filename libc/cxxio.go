@@ -204,6 +204,7 @@ func filebufSetg(this, eback, gptr, egptr *byte) {
 // Returns this on success, nil on failure (libc++).
 func FilebufOpen(this *byte, path *byte, mode int32) unsafe.Pointer {
 	if this == nil || path == nil {
+		registerFilebuf(this, &fileStream{fail: true})
 		return nil
 	}
 	if mode == 0 {
@@ -211,29 +212,49 @@ func FilebufOpen(this *byte, path *byte, mode int32) unsafe.Pointer {
 	}
 	flag, ok := iosOpenFlag(mode)
 	if !ok {
+		registerFilebuf(this, &fileStream{fail: true})
 		return nil
 	}
-	// Probe open with the same flags, then slurp. platform.info is tiny.
-	f, err := os.OpenFile(GoString(path), flag, 0)
+	name := GoString(path)
+	f, err := os.OpenFile(name, flag, 0)
 	if err != nil {
+		registerFilebuf(this, &fileStream{fail: true})
 		return nil
 	}
-	_ = f.Close()
-	data, err := os.ReadFile(GoString(path))
+	data, err := os.ReadFile(name)
 	if err != nil {
+		_ = f.Close()
+		registerFilebuf(this, &fileStream{fail: true})
 		return nil
 	}
 	n := len(data)
 	buf := Malloc[byte](int64(n + 1))
 	if buf == nil {
+		_ = f.Close()
+		registerFilebuf(this, &fileStream{fail: true})
 		return nil
 	}
 	if n > 0 {
 		copy(Bytes(buf, n), data)
 	}
-	end := As[byte](Off(Ptr(buf), n))
-	filebufSetg(this, buf, buf, end)
+	filebufSetg(this, buf, buf, As[byte](Off(Ptr(buf), n)))
+	if _, err := f.Seek(0, 0); err != nil {
+		_ = f.Close()
+		f = nil
+	}
+	registerFilebuf(this, &fileStream{f: f})
 	return unsafe.Pointer(this)
+}
+
+// registerFilebuf keys the filebuf and the ifstream that owns it
+// (filebuf at this+16). Map keys only — do not write through the
+// owner pointer; that slot is eback after setg.
+func registerFilebuf(filebuf *byte, st *fileStream) {
+	if filebuf == nil {
+		return
+	}
+	streams.Store(Addr(filebuf), st)
+	streams.Store(Addr(As[byte](Off(Ptr(filebuf), -filebufOff))), st)
 }
 
 // FilebufUnderflow is basic_filebuf::underflow. Get area already
@@ -270,6 +291,7 @@ func FilebufClose(this *byte) unsafe.Pointer {
 		return nil
 	}
 	filebufSetg(this, nil, nil, nil)
+	streams.Delete(Addr(this))
 	owner := As[byte](Off(Ptr(this), -filebufOff))
 	IfstreamClose(owner)
 	return unsafe.Pointer(this)
@@ -336,6 +358,7 @@ func IosBaseCtor(this *byte) unsafe.Pointer {
 		return nil
 	}
 	InitOstream(Ptr(this))
+	Store[int32](Ptr(this), iosStateOff, 0)
 	return unsafe.Pointer(this)
 }
 
@@ -893,7 +916,50 @@ func stringStreamOf(this *byte) *stringStream {
 	if v, ok := stringStreams.Load(Addr(this)); ok {
 		return v.(*stringStream)
 	}
+	// libc++ stringstream::>> uses the iostream address; str()
+	// wrote the stringbuf tail member.
+	base := Addr(this)
+	for _, off := range []uintptr{16, 24, 32, 40, 48, 64, 80, 96, 104, 112, 128, 144, 160} {
+		if v, ok := stringStreams.Load(base + off); ok {
+			return v.(*stringStream)
+		}
+	}
 	return nil
+}
+
+// goCxxStringBytes reads a libstdc++ or Darwin libc++ string.
+func goCxxStringBytes(s *byte) []byte {
+	if s == nil {
+		return nil
+	}
+	if runtime.GOOS == "darwin" {
+		p, n := libcxxStringData(s)
+		if p == nil || n <= 0 {
+			return nil
+		}
+		return append([]byte(nil), Bytes(p, int(n))...)
+	}
+	return append([]byte(nil), cxxStringBytes(s)...)
+}
+
+// StringbufStr is libc++ basic_stringbuf::str(string const&).
+// Fills the get area (inlined sgetc) and the stringstream table (>>).
+func StringbufStr(this, s *byte) {
+	if this == nil {
+		return
+	}
+	StringstreamCtor(this, s, 0)
+	data := goCxxStringBytes(s)
+	n := len(data)
+	buf := Malloc[byte](int64(n + 1))
+	if buf == nil {
+		filebufSetg(this, nil, nil, nil)
+		return
+	}
+	if n > 0 {
+		copy(Bytes(buf, n), data)
+	}
+	filebufSetg(this, buf, buf, As[byte](Off(Ptr(buf), n)))
 }
 
 // StringstreamCtor is basic_stringstream(string const&, ios_openmode).
@@ -904,7 +970,7 @@ func StringstreamCtor(this *byte, str *byte, mode int32) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	data := append([]byte(nil), cxxStringBytes(str)...)
+	data := goCxxStringBytes(str)
 	st := &stringStream{buf: data, base: 10}
 	stringStreams.Store(Addr(this), st)
 	// Stand-in vptr + clear iostate (fail/eof slots at +32 fit in 128).
