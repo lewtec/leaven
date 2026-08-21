@@ -42,6 +42,12 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringEraseMatch(t *testing.T) {
+	if !isLibcxxStringErase("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE5eraseEmm") {
+		t.Fatal("erase")
+	}
+}
+
 func TestLibcxxStringCompareCStrMatch(t *testing.T) {
 	name := "_ZNKSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7compareEmmPKcm"
 	if !isLibcxxStringCompareCStr(name) {

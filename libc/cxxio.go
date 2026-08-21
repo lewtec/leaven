@@ -733,6 +733,32 @@ func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointe
 	return StdStringInit(this, src, n)
 }
 
+// StdStringErase is libc++ string::erase(pos, n). n<0 is npos.
+func StdStringErase(s *byte, pos, n int64) unsafe.Pointer {
+	p, m := libcxxStringData(s)
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > m {
+		pos = m
+	}
+	rest := m - pos
+	if n < 0 || n > rest {
+		n = rest
+	}
+	var buf []byte
+	if p != nil && m > 0 {
+		buf = append([]byte(nil), Bytes(p, int(m))...)
+	}
+	buf = append(buf[:pos], buf[pos+n:]...)
+	StdStringDestroy(s)
+	var src *byte
+	if len(buf) > 0 {
+		src = &buf[0]
+	}
+	return StdStringInit(s, src, int64(len(buf)))
+}
+
 // StdStringCompareCStr is libc++ string::compare(pos, n, cstr, n2).
 func StdStringCompareCStr(s *byte, pos, n int64, cstr *byte, n2 int64) int32 {
 	p, m := libcxxStringData(s)

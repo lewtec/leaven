@@ -91,6 +91,10 @@ func TestStdStringSubstr(t *testing.T) {
 	if StdStringCompareCStr(&src[0], 2, 3, &c[0], 3) != 0 {
 		t.Fatal("compare")
 	}
+	StdStringErase(&src[0], 0, 1)
+	if StdStringCompareCStr(&src[0], 0, -1, &[]byte("bcdef\x00")[0], -1) != 0 {
+		t.Fatal("erase")
+	}
 }
 
 func TestLocaleCtorNilSafe(t *testing.T) {
