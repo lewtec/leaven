@@ -880,6 +880,22 @@ func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
 }
 
+// StdStringPushBack is libc++ string::push_back(char).
+func StdStringPushBack(s *byte, c byte) unsafe.Pointer {
+	p, n := libcxxStringData(s)
+	var buf []byte
+	if p != nil && n > 0 {
+		buf = append([]byte(nil), Bytes(p, int(n))...)
+	}
+	buf = append(buf, c)
+	StdStringDestroy(s)
+	var src *byte
+	if len(buf) > 0 {
+		src = &buf[0]
+	}
+	return StdStringInit(s, src, int64(len(buf)))
+}
+
 // StdStringAssignCStr is libc++ string::assign(char const*) / assign(char const*, n).
 // n<0 means strlen.
 func StdStringAssignCStr(s, cstr *byte, n int64) unsafe.Pointer {
