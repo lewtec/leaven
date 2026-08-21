@@ -233,7 +233,8 @@ func hasRuntimeDef(name string) bool {
 	}
 	if isGetline(name) || isLibcxxStringEqCStr(name) || isLibcxxStringCompareCStr(name) ||
 		isLibcxxStringErase(name) || isLibcxxStringAppendCStr(name) ||
-		isLibcxxStringAssignCStr(name) || isLibcxxStringPushBack(name) {
+		isLibcxxStringAssignCStr(name) || isLibcxxStringPushBack(name) ||
+		isLibcxxStringInsertCStr(name) {
 		return true
 	}
 	return llvmCallHandled(name)

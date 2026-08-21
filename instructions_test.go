@@ -67,6 +67,13 @@ func TestLibcxxStringAppendCStrMatch(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringInsertCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6insertEmPKc"
+	if !isLibcxxStringInsertCStr(name) {
+		t.Fatal("insert")
+	}
+}
+
 func TestLibcxxStringPushBackMatch(t *testing.T) {
 	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE9push_backEc"
 	if !isLibcxxStringPushBack(name) {

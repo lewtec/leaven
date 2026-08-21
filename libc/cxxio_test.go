@@ -107,6 +107,10 @@ func TestStdStringSubstr(t *testing.T) {
 	if StdStringCompareCStr(&src[0], 0, -1, &[]byte("zy\x00")[0], -1) != 0 {
 		t.Fatal("push_back")
 	}
+	StdStringInsertCStr(&src[0], 1, &[]byte("Q\x00")[0], -1)
+	if StdStringCompareCStr(&src[0], 0, -1, &[]byte("zQy\x00")[0], -1) != 0 {
+		t.Fatal("insert")
+	}
 }
 
 func TestLocaleCtorNilSafe(t *testing.T) {
