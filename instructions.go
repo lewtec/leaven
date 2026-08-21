@@ -1827,7 +1827,8 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if isLibcxxStringPushBack(llvmName) && len(inst.Args) >= 2 {
+		} else if isLibcxxStringPushBack(llvmName) && len(inst.Args) >= 2 &&
+			!isPtrish(inst.Args[1].Type()) {
 			callee = Sym(libc.StdStringPushBack).code()
 			args = []jen.Code{
 				ptrArg(inst.Args, args, 0),
@@ -2556,13 +2557,12 @@ func isLocaleCtor(name string) bool {
 }
 
 func isLibcxxStringErase(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		strings.Contains(name, "12basic_string") &&
+	return strings.Contains(name, "NSt3__112basic_string") &&
 		(strings.Contains(name, "5eraseE") || strings.Contains(name, "5eraseB"))
 }
 
 func isLibcxxStringAppendCStr(name string) bool {
-	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "12basic_string") {
+	if !strings.Contains(name, "NSt3__112basic_string") {
 		return false
 	}
 	if !strings.Contains(name, "6appendE") && !strings.Contains(name, "6appendB") {
@@ -2572,13 +2572,18 @@ func isLibcxxStringAppendCStr(name string) bool {
 }
 
 func isLibcxxStringPushBack(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		strings.Contains(name, "12basic_string") &&
-		(strings.Contains(name, "9push_backE") || strings.Contains(name, "9push_backB"))
+	// Method on basic_string, not vector<basic_string>::push_back.
+	if !strings.Contains(name, "NSt3__112basic_string") {
+		return false
+	}
+	if !strings.Contains(name, "9push_backE") && !strings.Contains(name, "9push_backB") {
+		return false
+	}
+	return strings.HasSuffix(name, "c") || strings.HasSuffix(name, "w")
 }
 
 func isLibcxxStringAssignCStr(name string) bool {
-	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "12basic_string") {
+	if !strings.Contains(name, "NSt3__112basic_string") {
 		return false
 	}
 	if !strings.Contains(name, "6assignE") && !strings.Contains(name, "6assignB") {

@@ -72,6 +72,10 @@ func TestLibcxxStringPushBackMatch(t *testing.T) {
 	if !isLibcxxStringPushBack(name) {
 		t.Fatal("push_back")
 	}
+	vec := "_ZNSt3__16vectorINS_12basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEENS4_IS6_EEE9push_backERKS6_"
+	if isLibcxxStringPushBack(vec) {
+		t.Fatal("vector push_back is not string push_back")
+	}
 }
 
 func TestLibcxxStringAssignCStrMatch(t *testing.T) {
