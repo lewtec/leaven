@@ -40,6 +40,9 @@ const (
 	sbEbackOff = 16
 	sbGptrOff  = 24
 	sbEgptrOff = 32
+	sbPbaseOff = 40
+	sbPptrOff  = 48
+	sbEpptrOff = 56
 )
 
 // standinCtype is libstdc++ ctype<char>. endl does
@@ -394,20 +397,31 @@ func ostringBuf(out *byte) *[]byte {
 	if out == nil {
 		return nil
 	}
-	base := Addr(out)
-	if v, ok := ostringStreams.Load(base); ok {
+	if v, ok := ostringStreams.Load(Addr(out)); ok {
 		return v.(*[]byte)
 	}
-	// ostream / stringbuf sit inside ostringstream (up to ~160 bytes).
-	for off := uintptr(8); off <= 192; off += 8 {
-		if v, ok := ostringStreams.Load(base + off); ok {
-			return v.(*[]byte)
-		}
-		if v, ok := ostringStreams.Load(base - off); ok {
-			return v.(*[]byte)
-		}
-	}
 	return nil
+}
+
+func registerOString(at *byte, buf *[]byte) {
+	if at == nil || buf == nil {
+		return
+	}
+	ostringStreams.Store(Addr(at), buf)
+	// str() uses the ostringstream address; << may use this+16.
+	ostringStreams.Store(Addr(As[byte](Off(Ptr(at), -16))), buf)
+	ostringStreams.Store(Addr(As[byte](Off(Ptr(at), -32))), buf)
+}
+
+func unregisterOString(at *byte) {
+	if at == nil {
+		return
+	}
+	ostringStreams.Delete(Addr(at))
+	ostringStreams.Delete(Addr(As[byte](Off(Ptr(at), -16))))
+	ostringStreams.Delete(Addr(As[byte](Off(Ptr(at), -32))))
+	ostringStreams.Delete(Addr(at) + 16)
+	ostringStreams.Delete(Addr(at) + 32)
 }
 
 var stdoutStreams sync.Map // uintptr → struct{}
@@ -425,6 +439,7 @@ func writeOstream(out *byte, p []byte) {
 	}
 	if b := ostringBuf(out); b != nil {
 		*b = append(*b, p...)
+		syncStreambufArea(out, *b)
 		return
 	}
 	if out != nil {
@@ -435,10 +450,31 @@ func writeOstream(out *byte, p []byte) {
 		// Inlined ostringstream ctor never registered; gensym <<
 		// must not leak to stdout (that printed "1234" before FactMgr).
 		buf := append([]byte(nil), p...)
-		ostringStreams.Store(Addr(out), &buf)
+		registerOString(out, &buf)
+		syncStreambufArea(out, buf)
 		return
 	}
 	_, _ = os.Stdout.Write(p)
+}
+
+func syncStreambufArea(sb *byte, data []byte) {
+	if sb == nil {
+		return
+	}
+	n := len(data)
+	buf := Malloc[byte](int64(n + 1))
+	if buf == nil {
+		return
+	}
+	if n > 0 {
+		copy(Bytes(buf, n), data)
+	}
+	end := As[byte](Off(Ptr(buf), n))
+	filebufSetg(sb, buf, buf, end)
+	base := Ptr(sb)
+	Store(base, sbPbaseOff, buf)
+	Store(base, sbPptrOff, end)
+	Store(base, sbEpptrOff, end)
 }
 
 // stringstreamOstreamOff is the ostream subobject inside basic_stringstream
@@ -453,7 +489,7 @@ func OStringStreamCtor(this *byte) unsafe.Pointer {
 		return nil
 	}
 	buf := []byte{}
-	ostringStreams.Store(Addr(this), &buf)
+	registerOString(this, &buf)
 	// Stand-in vptr only (first word); no ctype slot in this size.
 	Store(Ptr(this), 0, StandinVptr())
 	return unsafe.Pointer(this)
@@ -477,7 +513,7 @@ func OStringStreamClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	ostringStreams.Delete(Addr(this))
+	unregisterOString(this)
 	return unsafe.Pointer(this)
 }
 
@@ -486,9 +522,8 @@ func StringstreamDefaultClose(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	base := Addr(this)
-	ostringStreams.Delete(base)
-	ostringStreams.Delete(base + stringstreamOstreamOff)
+	unregisterOString(this)
+	unregisterOString(As[byte](Off(Ptr(this), stringstreamOstreamOff)))
 	// Also drop the read-side table used by str2int.
 	StringstreamClose(this)
 	return unsafe.Pointer(this)

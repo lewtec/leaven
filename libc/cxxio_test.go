@@ -442,6 +442,14 @@ func TestWriteOstreamLazyParentStr(t *testing.T) {
 	}
 	OStringStreamClose(os)
 	OStringStreamClose(&ss[0])
+	pbase := Load[*byte](Ptr(os), sbPbaseOff)
+	pptr := Load[*byte](Ptr(os), sbPptrOff)
+	if pbase == nil || pptr == nil || Addr(pbase) >= Addr(pptr) {
+		t.Fatal("empty put area")
+	}
+	if string(Bytes(pbase, int(Addr(pptr)-Addr(pbase)))) != "g_1" {
+		t.Fatalf("put area %q", Bytes(pbase, int(Addr(pptr)-Addr(pbase))))
+	}
 }
 
 func TestOStringStreamGensym(t *testing.T) {
