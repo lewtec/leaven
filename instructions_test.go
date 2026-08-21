@@ -103,6 +103,10 @@ func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	if _, _, _, ok := cxxIOCall(open, nil); !ok {
 		t.Fatal("filebuf open")
 	}
+	ctor := "_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev"
+	if _, _, _, ok := cxxIOCall(ctor, nil); !ok {
+		t.Fatal("streambuf ctor")
+	}
 }
 
 func TestCxxIOCallIgnoresUnrelated(t *testing.T) {

@@ -179,6 +179,16 @@ func IfstreamCloseVTT(this *byte, vtt *byte) unsafe.Pointer {
 // object for (locale, ios_base, __basic_file).
 func CxxNoop(this *byte) unsafe.Pointer { return unsafe.Pointer(this) }
 
+// StreambufCtor is basic_streambuf / basic_filebuf default ctor.
+func StreambufCtor(this *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	Store(Ptr(this), 0, StandinVptr())
+	filebufSetg(this, nil, nil, nil)
+	return unsafe.Pointer(this)
+}
+
 func filebufSetg(this, eback, gptr, egptr *byte) {
 	if this == nil {
 		return

@@ -2623,6 +2623,8 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if strings.Contains(name, "13basic_filebuf") {
 		switch {
+		case strings.Contains(name, "C1"), strings.Contains(name, "C2"):
+			return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
 		case strings.Contains(name, "4open"):
 			return Sym(libc.FilebufOpen).code(), cxxIOOpen, true
 		case strings.Contains(name, "10underflow"):
@@ -2630,6 +2632,10 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		case strings.Contains(name, "5close"):
 			return Sym(libc.FilebufClose).code(), cxxIOClose, true
 		}
+	}
+	if strings.Contains(name, "15basic_streambuf") &&
+		(strings.Contains(name, "C1") || strings.Contains(name, "C2")) {
+		return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
 	}
 	if !strings.Contains(name, "14basic_ifstream") {
 		return nil, 0, false
