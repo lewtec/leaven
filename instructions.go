@@ -1827,6 +1827,18 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
+		} else if isLibcxxStringAssignCStr(llvmName) && len(inst.Args) >= 2 &&
+			(len(inst.Args) < 3 || !isPtrish(inst.Args[2].Type())) {
+			callee = Sym(libc.StdStringAssignCStr).code()
+			n := jen.Lit(int64(-1))
+			if len(inst.Args) >= 3 {
+				n = jen.Int64().Call(jen.Add(args[2]))
+			}
+			args = []jen.Code{
+				ptrArg(inst.Args, args, 0),
+				ptrArg(inst.Args, args, 1),
+				n,
+			}
 		} else if isLibcxxStringAppendCStr(llvmName) && len(inst.Args) >= 2 &&
 			(len(inst.Args) < 3 || !isPtrish(inst.Args[2].Type())) {
 			callee = Sym(libc.StdStringAppendCStr).code()
@@ -2553,6 +2565,16 @@ func isLibcxxStringAppendCStr(name string) bool {
 	return strings.HasSuffix(name, "EPKc") || strings.HasSuffix(name, "EPKcm")
 }
 
+func isLibcxxStringAssignCStr(name string) bool {
+	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "12basic_string") {
+		return false
+	}
+	if !strings.Contains(name, "6assignE") && !strings.Contains(name, "6assignB") {
+		return false
+	}
+	return strings.HasSuffix(name, "EPKc") || strings.HasSuffix(name, "EPKcm")
+}
+
 func isLibcxxStringCompareCStr(name string) bool {
 	return strings.Contains(name, "St3__1") &&
 		strings.Contains(name, "12basic_string") &&
@@ -2784,6 +2806,7 @@ var libraryFunctions = map[string]goRef{
 	"_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE": Sym(libc.IstreamGetline),
 	// stringstream / istream >> are matched by cxxIOKind (arg reshaping).
 	"__assert_fail":             Sym(libc.AssertFail),
+	"__assert_rtn":              Sym(libc.AssertRtn),
 	"fabs":                      Sym(math.Abs),
 	"fmod":                      Sym(math.Mod),
 	"pow":                       Sym(math.Pow),

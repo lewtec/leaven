@@ -40,6 +40,9 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("wmemchr"); !ok {
 		t.Fatal("wmemchr")
 	}
+	if _, ok := libcLookup("__assert_rtn"); !ok {
+		t.Fatal("__assert_rtn")
+	}
 	if _, ok := libcLookup("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_"); !ok {
 		t.Fatal("string substr ctor")
 	}
@@ -61,6 +64,13 @@ func TestLibcxxStringAppendCStrMatch(t *testing.T) {
 	}
 	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKcS7_") {
 		t.Fatal("append iterator pair is not cstr")
+	}
+}
+
+func TestLibcxxStringAssignCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKc"
+	if !isLibcxxStringAssignCStr(name) {
+		t.Fatal("assign")
 	}
 }
 

@@ -880,6 +880,20 @@ func StdStringCopy(this *byte, other *byte) unsafe.Pointer {
 	return StdStringInit(this, Load[*byte](Ptr(other), 0), n)
 }
 
+// StdStringAssignCStr is libc++ string::assign(char const*) / assign(char const*, n).
+// n<0 means strlen.
+func StdStringAssignCStr(s, cstr *byte, n int64) unsafe.Pointer {
+	if n < 0 {
+		if cstr == nil {
+			n = 0
+		} else {
+			n = Strlen(cstr)
+		}
+	}
+	StdStringDestroy(s)
+	return StdStringInit(s, cstr, n)
+}
+
 // StdStringAssign is libc++ basic_string::operator=(basic_string const&).
 func StdStringAssign(this *byte, other *byte) unsafe.Pointer {
 	if this == nil {
