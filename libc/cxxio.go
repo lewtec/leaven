@@ -398,8 +398,8 @@ func ostringBuf(out *byte) *[]byte {
 	if v, ok := ostringStreams.Load(base); ok {
 		return v.(*[]byte)
 	}
-	// ostream subobject sits inside ostringstream / stringstream.
-	for _, off := range []uintptr{8, 16, 24, 32, 40, 48, 64, 80, 96, 112, 128} {
+	// ostream / stringbuf sit inside ostringstream (up to ~160 bytes).
+	for off := uintptr(8); off <= 192; off += 8 {
 		if v, ok := ostringStreams.Load(base + off); ok {
 			return v.(*[]byte)
 		}
@@ -502,6 +502,12 @@ func OStringStreamStr(ret, this *byte) {
 	var data []byte
 	if b := ostringBuf(this); b != nil {
 		data = *b
+	} else if this != nil {
+		eback := Load[*byte](Ptr(this), sbEbackOff)
+		egptr := Load[*byte](Ptr(this), sbEgptrOff)
+		if eback != nil && egptr != nil && Addr(eback) < Addr(egptr) {
+			data = Bytes(eback, int(Addr(egptr)-Addr(eback)))
+		}
 	}
 	if runtime.GOOS == "darwin" {
 		var src *byte

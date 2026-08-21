@@ -429,6 +429,21 @@ func TestWriteOstreamLazyGensym(t *testing.T) {
 	OStringStreamClose(&oss[0])
 }
 
+func TestWriteOstreamLazyParentStr(t *testing.T) {
+	// << on the ostream subobject; str() on the ostringstream.
+	var ss [176]byte
+	os := &ss[16]
+	OstreamLsCStr(os, &[]byte("g_\x00")[0])
+	OstreamInsertI64(os, 1)
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &ss[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "g_1" {
+		t.Fatalf("parent str %q", got)
+	}
+	OStringStreamClose(os)
+	OStringStreamClose(&ss[0])
+}
+
 func TestOStringStreamGensym(t *testing.T) {
 	// gensym: oss << basename << count; return oss.str()
 	var oss [112]byte
