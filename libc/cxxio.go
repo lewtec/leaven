@@ -927,17 +927,28 @@ func stringStreamOf(this *byte) *stringStream {
 	return nil
 }
 
-// goCxxStringBytes reads a libstdc++ or Darwin libc++ string.
+// goCxxStringBytes reads a libc++ or libstdc++ string.
+// libc++ short strings store size in byte 0; libstdc++ SSO stores a
+// pointer to this+16 in word 0. Prefer the layout that matches.
 func goCxxStringBytes(s *byte) []byte {
 	if s == nil {
 		return nil
 	}
-	if runtime.GOOS == "darwin" {
-		p, n := libcxxStringData(s)
-		if p == nil || n <= 0 {
-			return nil
+	local := As[byte](Off(Ptr(s), cxxStringLocalOff))
+	p0 := Load[*byte](Ptr(s), 0)
+	if p0 != local {
+		b0 := Load[byte](Ptr(s), 0)
+		if b0&libcxxLongBit == 0 {
+			n := int64(b0 >> 1)
+			if n > 0 && n <= libcxxSSO {
+				return append([]byte(nil), Bytes(As[byte](Off(Ptr(s), 1)), int(n))...)
+			}
+		} else {
+			n := int64(Load[uint64](Ptr(s), 8))
+			if p0 != nil && n > 0 {
+				return append([]byte(nil), Bytes(p0, int(n))...)
+			}
 		}
-		return append([]byte(nil), Bytes(p, int(n))...)
 	}
 	return append([]byte(nil), cxxStringBytes(s)...)
 }
@@ -949,6 +960,10 @@ func StringbufStr(this, s *byte) {
 		return
 	}
 	StringstreamCtor(this, s, 0)
+	if v, ok := stringStreams.Load(Addr(this)); ok {
+		// stringstream >> uses the iostream address; __sb_ is at +16.
+		stringStreams.Store(Addr(As[byte](Off(Ptr(this), -16))), v)
+	}
 	data := goCxxStringBytes(s)
 	n := len(data)
 	buf := Malloc[byte](int64(n + 1))

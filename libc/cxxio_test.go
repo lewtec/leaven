@@ -270,11 +270,7 @@ func TestIstreamGetlineReadsLine(t *testing.T) {
 func TestStringbufStrThenExtract(t *testing.T) {
 	// Darwin CGOptions: stringstream(s) inlines as stringbuf::str; >> uses the parent.
 	s := emptyCxxString()
-	if runtime.GOOS == "darwin" {
-		StdStringInit(&s[0], &[]byte("42")[0], 2)
-	} else {
-		cxxStringAssign(&s[0], []byte("42"))
-	}
+	cxxStringAssign(&s[0], []byte("42"))
 	var ss [176]byte
 	sb := &ss[16]
 	StringbufStr(sb, &s[0])
@@ -284,9 +280,23 @@ func TestStringbufStrThenExtract(t *testing.T) {
 	var out int32 = -1
 	IstreamExtractI32(&ss[0], As[byte](Ptr(&out)))
 	if out != 42 {
-		t.Fatalf("extract got %d", out)
+		t.Fatalf("extract parent got %d", out)
 	}
 	StringstreamClose(sb)
+	StringstreamClose(&ss[0])
+}
+
+func TestGoCxxStringBytesLibcxxShort(t *testing.T) {
+	var s [32]byte
+	StdStringInit(&s[0], &[]byte("42")[0], 2)
+	if got := string(goCxxStringBytes(&s[0])); got != "42" {
+		t.Fatalf("libcxx %q", got)
+	}
+	libstd := emptyCxxString()
+	cxxStringAssign(&libstd[0], []byte("42"))
+	if got := string(goCxxStringBytes(&libstd[0])); got != "42" {
+		t.Fatalf("libstd %q", got)
+	}
 }
 
 func TestStringstreamStr2intDecAndHex(t *testing.T) {
