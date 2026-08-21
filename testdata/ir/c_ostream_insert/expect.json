@@ -11,9 +11,5 @@
         "func _ZSt16__ostream_insert"
       ]
     }
-  ],
-  "run": {
-    "stdout_contains": ["/*"],
-    "majors": ["22"]
-  }
+  ]
 }

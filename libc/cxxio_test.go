@@ -336,8 +336,15 @@ func TestStringbufStrThenExtract(t *testing.T) {
 func TestGoCxxStringBytesLibcxxShort(t *testing.T) {
 	var s [32]byte
 	StdStringInit(&s[0], &[]byte("42")[0], 2)
-	if got := string(goCxxStringBytes(&s[0])); got != "42" {
-		t.Fatalf("libcxx %q", got)
+	p, n := libcxxStringData(&s[0])
+	if n != 2 || string(Bytes(p, 2)) != "42" {
+		t.Fatalf("libcxx n=%d", n)
+	}
+	if runtime.GOOS == "darwin" {
+		if got := string(goCxxStringBytes(&s[0])); got != "42" {
+			t.Fatalf("darwin go %q", got)
+		}
+		return
 	}
 	libstd := emptyCxxString()
 	cxxStringAssign(&libstd[0], []byte("42"))
@@ -381,6 +388,7 @@ func TestOstreamInsertWrites(t *testing.T) {
 	os.Stdout = w
 	msg := []byte("/*\n")
 	var dummy [8]byte
+	MarkStdoutStream(unsafe.Pointer(&dummy[0]))
 	got := OstreamInsert(&dummy[0], &msg[0], int64(len(msg)))
 	_ = w.Close()
 	os.Stdout = old
@@ -393,6 +401,19 @@ func TestOstreamInsertWrites(t *testing.T) {
 	if string(buf[:n]) != "/*\n" {
 		t.Fatalf("wrote %q", buf[:n])
 	}
+}
+
+func TestWriteOstreamLazyGensym(t *testing.T) {
+	// Inlined ostringstream ctor: no table entry; << must not hit stdout.
+	var oss [112]byte
+	OstreamInsertI64(&oss[0], 12)
+	OstreamInsertI64(&oss[0], 34)
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &oss[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "1234" {
+		t.Fatalf("lazy str %q", got)
+	}
+	OStringStreamClose(&oss[0])
 }
 
 func TestOStringStreamGensym(t *testing.T) {

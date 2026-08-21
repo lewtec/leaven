@@ -394,10 +394,29 @@ func ostringBuf(out *byte) *[]byte {
 	if out == nil {
 		return nil
 	}
-	if v, ok := ostringStreams.Load(Addr(out)); ok {
+	base := Addr(out)
+	if v, ok := ostringStreams.Load(base); ok {
 		return v.(*[]byte)
 	}
+	// ostream subobject sits inside ostringstream / stringstream.
+	for _, off := range []uintptr{8, 16, 24, 32, 40, 48, 64, 80, 96, 112, 128} {
+		if v, ok := ostringStreams.Load(base + off); ok {
+			return v.(*[]byte)
+		}
+		if v, ok := ostringStreams.Load(base - off); ok {
+			return v.(*[]byte)
+		}
+	}
 	return nil
+}
+
+var stdoutStreams sync.Map // uintptr → struct{}
+
+// MarkStdoutStream records cout/cerr so writeOstream does not capture them.
+func MarkStdoutStream(this unsafe.Pointer) {
+	if this != nil {
+		stdoutStreams.Store(uintptr(this), true)
+	}
 }
 
 func writeOstream(out *byte, p []byte) {
@@ -406,6 +425,17 @@ func writeOstream(out *byte, p []byte) {
 	}
 	if b := ostringBuf(out); b != nil {
 		*b = append(*b, p...)
+		return
+	}
+	if out != nil {
+		if _, ok := stdoutStreams.Load(Addr(out)); ok {
+			_, _ = os.Stdout.Write(p)
+			return
+		}
+		// Inlined ostringstream ctor never registered; gensym <<
+		// must not leak to stdout (that printed "1234" before FactMgr).
+		buf := append([]byte(nil), p...)
+		ostringStreams.Store(Addr(out), &buf)
 		return
 	}
 	_, _ = os.Stdout.Write(p)
@@ -1056,19 +1086,17 @@ func stringStreamOf(this *byte) *stringStream {
 	return nil
 }
 
-// goCxxStringBytes reads a libc++ or libstdc++ string.
-// libstdc++ SSO stores a pointer to this+16 in word 0.
+// goCxxStringBytes reads a libc++ string on Darwin, libstdc++ elsewhere.
 func goCxxStringBytes(s *byte) []byte {
 	if s == nil {
 		return nil
 	}
-	local := As[byte](Off(Ptr(s), cxxStringLocalOff))
-	if Load[*byte](Ptr(s), 0) == local {
-		return append([]byte(nil), cxxStringBytes(s)...)
-	}
-	p, n := libcxxStringData(s)
-	if p != nil && n > 0 {
-		return append([]byte(nil), Bytes(p, int(n))...)
+	if runtime.GOOS == "darwin" {
+		p, n := libcxxStringData(s)
+		if p != nil && n > 0 {
+			return append([]byte(nil), Bytes(p, int(n))...)
+		}
+		return nil
 	}
 	return append([]byte(nil), cxxStringBytes(s)...)
 }

@@ -295,7 +295,8 @@ func vectorBin(v vecBin) *jen.Statement {
 
 func isStdStream(name string) bool {
 	switch name {
-	case "_ZSt4cout", "_ZSt4cerr", "_ZSt4clog", "_ZSt3cin":
+	case "_ZSt4cout", "_ZSt4cerr", "_ZSt4clog", "_ZSt3cin",
+		"_ZNSt3__14coutE", "_ZNSt3__14cerrE", "_ZNSt3__14clogE", "_ZNSt3__13cinE":
 		return true
 	default:
 		return false
@@ -303,7 +304,11 @@ func isStdStream(name string) bool {
 }
 
 func initStdStream(name string) *jen.Statement {
-	return Sym(libc.InitOstream).Call(emitPtr(addrOf(jen.Id(name))))
+	p := emitPtr(addrOf(jen.Id(name)))
+	return jen.Block(
+		Sym(libc.InitOstream).Call(p),
+		Sym(libc.MarkStdoutStream).Call(p),
+	)
 }
 
 func i1PackFn(n uint64) (any, bool) {
