@@ -39,12 +39,13 @@ func libcxxTreeIntChild(p *byte) bool {
 	return p != nil && !libcxxTreePtr(p)
 }
 
-// libcxxTreeLooksLikeNode is a heap pointer whose __is_black_ is 0/1.
-func libcxxTreeLooksLikeNode(p *byte) bool {
-	if !libcxxTreePtr(p) {
+// libcxxTreeRealChild is a node whose __parent_ points at parent.
+// A Variable* sitting in __left_ (pair overlaid at +0) fails this.
+func libcxxTreeRealChild(parent, child *byte) bool {
+	if !libcxxTreePtr(child) {
 		return false
 	}
-	return Load[byte](Ptr(p), libcxxTreeBlackOff) <= 1
+	return libcxxTreeLoadPtr(child, libcxxTreeParentOff) == parent
 }
 
 // LibcxxTreeGetValue is __tree_node::__get_value. Returns this+32, or nil
@@ -82,7 +83,8 @@ func libcxxTreeCopy(src *byte, depth int) *byte {
 	left := libcxxTreeLoadPtr(src, libcxxTreeLeftOff)
 	right := libcxxTreeLoadPtr(src, libcxxTreeRightOff)
 	overlay := libcxxTreeIntChild(left) || libcxxTreeIntChild(right) ||
-		(right == nil && left != nil && !libcxxTreeLooksLikeNode(left))
+		(left != nil && !libcxxTreeRealChild(src, left)) ||
+		(right != nil && !libcxxTreeRealChild(src, right))
 	valOff := libcxxTreeValueOff
 	if overlay {
 		valOff = 0

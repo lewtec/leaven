@@ -52,10 +52,27 @@ func TestLibcxxTreeConstructSkipsLowChild(t *testing.T) {
 	}
 }
 
+func TestLibcxxTreeConstructDoesNotWalkKeyPtr(t *testing.T) {
+	// Overlay with unsigned 0: right is nil, left is a heap object
+	// whose parent is not src (Variable* in the pair).
+	fake := make([]byte, libcxxTreeNodeSize)
+	src := make([]byte, libcxxTreeNodeSize)
+	Store(Ptr(&src[0]), libcxxTreeLeftOff, Ptr(&fake[0]))
+
+	dst := LibcxxTreeConstructFromTree(nil, &src[0], nil)
+	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeLeftOff) != nil {
+		t.Fatal("walked key")
+	}
+	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeValueOff) != Ptr(&fake[0]) {
+		t.Fatal("key")
+	}
+}
+
 func TestLibcxxTreeConstructCopiesChild(t *testing.T) {
 	child := make([]byte, libcxxTreeNodeSize)
-	Store(Ptr(&child[0]), libcxxTreeValueOff+8, uint32(9))
 	src := make([]byte, libcxxTreeNodeSize)
+	Store(Ptr(&child[0]), libcxxTreeValueOff+8, uint32(9))
+	Store(Ptr(&child[0]), libcxxTreeParentOff, Ptr(&src[0]))
 	Store(Ptr(&src[0]), libcxxTreeLeftOff, Ptr(&child[0]))
 	Store(Ptr(&src[0]), libcxxTreeValueOff+8, uint32(1))
 
