@@ -483,6 +483,23 @@ func TestOStringStreamGensym(t *testing.T) {
 	OStringStreamClose(&oss[0])
 }
 
+func TestOStringStreamStrOnStringbufThis(t *testing.T) {
+	// Darwin: << on ostringstream, inlined str() on __sb_ at +8.
+	if runtime.GOOS != "darwin" {
+		t.Skip("libstdc++ str() uses the ostringstream this")
+	}
+	var oss [192]byte
+	OStringStreamCtor(&oss[0])
+	defer OStringStreamClose(&oss[0])
+	OstreamLsCStr(&oss[0], &[]byte("g_\x00")[0])
+	OstreamInsertI64(&oss[0], 3)
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &oss[libcxxOStringSBOff])
+	if got := string(goCxxStringBytes(&ret[0])); got != "g_3" {
+		t.Fatalf("sb this str %q", got)
+	}
+}
+
 func TestOStringStreamStrAfterMovedThis(t *testing.T) {
 	// Go stack copy changes &oss; put-area fields move with the object.
 	var oss [192]byte

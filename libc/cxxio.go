@@ -444,6 +444,7 @@ func unregisterOString(at *byte) {
 		return
 	}
 	ostringStreams.Delete(Addr(at))
+	ostringStreams.Delete(Addr(at) + libcxxOStringSBOff)
 }
 
 var stdoutStreams sync.Map // uintptr → struct{}
@@ -477,23 +478,35 @@ func writeOstream(out *byte, p []byte) {
 	b := newOStringBuf()
 	*b = append(*b, data...)
 	registerOString(out, b)
+	// ostringstream::str inlines as __sb_.str(); this for << is the
+	// ostream, this for str() is the stringbuf at +8.
+	registerOString(As[byte](Off(Ptr(out), libcxxOStringSBOff)), b)
 	syncOStringAreas(out, data)
+}
+
+func zeroPutArea(sb *byte) bool {
+	if sb == nil {
+		return true
+	}
+	return Load[*byte](Ptr(sb), sbPbaseOff) == nil && Load[*byte](Ptr(sb), sbPptrOff) == nil
 }
 
 func liveOStringBytes(out *byte) []byte {
 	if out == nil {
 		return nil
 	}
-	obj := streambufBytes(stringbufOf(out))
-	if b := ostringBufExact(out); b != nil {
-		if len(obj) > 0 || len(*b) == 0 {
-			return *b
+	obj := streambufBytes(out)
+	if len(obj) == 0 {
+		obj = streambufBytes(stringbufOf(out))
+	}
+	if b := ostringBufExact(out); b != nil && len(*b) > 0 {
+		// Reused stack slot: Go zeros the new object, leftover key is stale.
+		if len(obj) == 0 && zeroPutArea(out) && zeroPutArea(stringbufOf(out)) {
+			return nil
 		}
+		return *b
 	}
-	if len(obj) > 0 {
-		return obj
-	}
-	return nil
+	return obj
 }
 
 func stringbufOf(out *byte) *byte {
