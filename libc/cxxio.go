@@ -515,12 +515,8 @@ func liveOStringBytes(out *byte) []byte {
 }
 
 func stringbufOf(out *byte) *byte {
-	if out == nil {
-		return nil
-	}
-	if runtime.GOOS == "darwin" {
-		return As[byte](Off(Ptr(out), libcxxOStringSBOff))
-	}
+	// << this is already the streambuf when clang inlines to rdbuf().
+	// Writing extras at +8 on Darwin missed __mode_ and left FactMgr empty.
 	return out
 }
 
@@ -584,16 +580,18 @@ func syncStreambufArea(sb *byte, data []byte) {
 	Store(base, sbPbaseOff, buf)
 	Store(base, sbPptrOff, end)
 	Store(base, sbEpptrOff, end)
+	if runtime.GOOS != "darwin" {
+		// libstdc++ layout is not libc++ stringbuf; extras smash linux csmith.
+		return
+	}
 	var src *byte
 	if n > 0 {
 		src = buf
 	}
-	str := As[byte](Off(base, sbStrOff))
 	// Do not Destroy: first << hits uninitialized stack and a
 	// leftover long-bit would Free a garbage pointer.
-	StdStringInit(str, src, int64(n))
-	// After __str_ (Init memsets 24 bytes). Inlined str() needs
-	// __mode_ & out and __hm_ >= pptr or it returns empty.
+	StdStringInit(As[byte](Off(base, sbStrOff)), src, int64(n))
+	// Inlined C++20 view(): string(pbase(), __hm_) if __mode_ & out.
 	Store(base, sbHmOff, end)
 	Store[int32](base, sbModeOff, int32(iosModeIn|iosModeOut))
 }

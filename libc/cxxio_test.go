@@ -452,15 +452,17 @@ func TestWriteOstreamLazyParentStr(t *testing.T) {
 	if string(Bytes(pbase, int(Addr(pptr)-Addr(pbase)))) != "g_1" {
 		t.Fatalf("put area %q", Bytes(pbase, int(Addr(pptr)-Addr(pbase))))
 	}
-	if Load[*byte](Ptr(sb), sbHmOff) != pptr {
-		t.Fatal("hm")
-	}
-	if Load[int32](Ptr(sb), sbModeOff)&iosModeOut == 0 {
-		t.Fatalf("mode=%d", Load[int32](Ptr(sb), sbModeOff))
-	}
-	sp, sn := libcxxStringData(As[byte](Off(Ptr(sb), sbStrOff)))
-	if sn != 3 || string(Bytes(sp, int(sn))) != "g_1" {
-		t.Fatalf("__str_ %q", Bytes(sp, int(sn)))
+	if runtime.GOOS == "darwin" {
+		if Load[*byte](Ptr(sb), sbHmOff) != pptr {
+			t.Fatal("hm")
+		}
+		if Load[int32](Ptr(sb), sbModeOff)&iosModeOut == 0 {
+			t.Fatalf("mode=%d", Load[int32](Ptr(sb), sbModeOff))
+		}
+		sp, sn := libcxxStringData(As[byte](Off(Ptr(sb), sbStrOff)))
+		if sn != 3 || string(Bytes(sp, int(sn))) != "g_1" {
+			t.Fatalf("__str_ %q", Bytes(sp, int(sn)))
+		}
 	}
 	OStringStreamClose(os)
 	OStringStreamClose(&ss[0])
