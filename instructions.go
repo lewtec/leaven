@@ -2243,6 +2243,12 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 		return Sym(libc.LibcxxTreeGetValue).code(), cxxTreeWalk, true
 	case isLibcxxTreeConstructFromTree(name):
 		return Sym(libc.LibcxxTreeConstructFromTree).code(), cxxTreeCopy, true
+	case isLibcxxTreeNext(name):
+		return Sym(libc.LibcxxTreeNext).code(), cxxTreeWalk, true
+	case isLibcxxTreePrev(name):
+		return Sym(libc.LibcxxTreePrev).code(), cxxTreeWalk, true
+	case isLibcxxTreeMin(name):
+		return Sym(libc.LibcxxTreeMin).code(), cxxTreeWalk, true
 	default:
 		return nil, 0, false
 	}
@@ -2257,6 +2263,20 @@ func isLibcxxTreeGetValue(name string) bool {
 func isLibcxxTreeConstructFromTree(name string) bool {
 	return strings.Contains(name, "St3__1") &&
 		strings.Contains(name, "21__construct_from_tree")
+}
+
+func isLibcxxTreeNext(name string) bool {
+	return strings.Contains(name, "St3__1") &&
+		(strings.Contains(name, "11__tree_next") || strings.Contains(name, "16__tree_next_iter"))
+}
+
+func isLibcxxTreePrev(name string) bool {
+	return strings.Contains(name, "St3__1") &&
+		(strings.Contains(name, "11__tree_prev") || strings.Contains(name, "16__tree_prev_iter"))
+}
+
+func isLibcxxTreeMin(name string) bool {
+	return strings.Contains(name, "St3__1") && strings.Contains(name, "10__tree_min")
 }
 
 func isRbTreeDefaultCtor(name string) bool {

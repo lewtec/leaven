@@ -108,3 +108,77 @@ func libcxxTreeCopy(src *byte, depth int) *byte {
 	}
 	return n
 }
+
+func libcxxTreeMin(x *byte) *byte {
+	for {
+		left := libcxxTreeLoadPtr(x, libcxxTreeLeftOff)
+		if !libcxxTreeRealChild(x, left) {
+			return x
+		}
+		x = left
+	}
+}
+
+func libcxxTreeMax(x *byte) *byte {
+	for {
+		right := libcxxTreeLoadPtr(x, libcxxTreeRightOff)
+		if !libcxxTreeRealChild(x, right) {
+			return x
+		}
+		x = right
+	}
+}
+
+func libcxxTreeIsLeftChild(x *byte) bool {
+	p := libcxxTreeLoadPtr(x, libcxxTreeParentOff)
+	if !libcxxTreePtr(p) {
+		return false
+	}
+	return libcxxTreeLoadPtr(p, libcxxTreeLeftOff) == x
+}
+
+// LibcxxTreeNext is std::__tree_next. Bad child pointers (overlay
+// unsigned / key) are treated as null so increment cannot hang.
+func LibcxxTreeNext(x *byte) *byte {
+	if !libcxxTreePtr(x) {
+		return nil
+	}
+	right := libcxxTreeLoadPtr(x, libcxxTreeRightOff)
+	if libcxxTreeRealChild(x, right) {
+		return libcxxTreeMin(right)
+	}
+	for libcxxTreePtr(x) && !libcxxTreeIsLeftChild(x) {
+		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)
+	}
+	if !libcxxTreePtr(x) {
+		return nil
+	}
+	return libcxxTreeLoadPtr(x, libcxxTreeParentOff)
+}
+
+// LibcxxTreePrev is std::__tree_prev_iter. x may be the end node
+// (only __left_ is meaningful).
+func LibcxxTreePrev(x *byte) *byte {
+	if !libcxxTreePtr(x) {
+		return nil
+	}
+	left := libcxxTreeLoadPtr(x, libcxxTreeLeftOff)
+	if libcxxTreeRealChild(x, left) || (libcxxTreePtr(left) && libcxxTreeLoadPtr(left, libcxxTreeParentOff) == x) {
+		return libcxxTreeMax(left)
+	}
+	for libcxxTreePtr(x) && libcxxTreeIsLeftChild(x) {
+		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)
+	}
+	if !libcxxTreePtr(x) {
+		return nil
+	}
+	return libcxxTreeLoadPtr(x, libcxxTreeParentOff)
+}
+
+// LibcxxTreeMin is std::__tree_min.
+func LibcxxTreeMin(x *byte) *byte {
+	if !libcxxTreePtr(x) {
+		return nil
+	}
+	return libcxxTreeMin(x)
+}

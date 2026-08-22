@@ -564,6 +564,7 @@ int main() {
 	}
 	t.Logf("libcxx ostringstream layout:\n%s", out)
 	logLibcxxGensymIR(t, clangxx, dir)
+	logLibcxxTreeIR(t, clangxx, dir)
 }
 
 func logLibcxxGensymIR(t *testing.T, clangxx, dir string) {
@@ -616,6 +617,52 @@ std::string probe(const char* b) {
 		}
 	}
 	t.Logf("gensym probe ir (%d lines):\n%s", len(keep), strings.Join(keep, "\n"))
+}
+
+func logLibcxxTreeIR(t *testing.T, clangxx, dir string) {
+	t.Helper()
+	src := filepath.Join(dir, "treeprobe.cpp")
+	const code = `#include <map>
+struct Variable { int x; };
+unsigned probe(std::map<const Variable*, unsigned> m, const Variable* v) {
+  m[v] = 3;
+  auto c = m;
+  return c[v];
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Logf("treeprobe.cpp: %v", err)
+		return
+	}
+	ll := filepath.Join(dir, "treeprobe.ll")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions",
+		"-emit-llvm", "-S", src, "-o", ll)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("treeprobe ir: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	raw, err := os.ReadFile(ll)
+	if err != nil {
+		t.Logf("read treeprobe.ll: %v", err)
+		return
+	}
+	var keep []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "__tree_node") ||
+			strings.Contains(line, "__tree_end_node") ||
+			strings.Contains(line, "__get_value") ||
+			strings.Contains(line, "__construct_from_tree") ||
+			strings.Contains(line, "__tree_next") ||
+			strings.Contains(line, "__tree_min") ||
+			strings.Contains(line, "3mapI") {
+			keep = append(keep, line)
+			if len(keep) >= 100 {
+				break
+			}
+		}
+	}
+	t.Logf("tree probe ir (%d lines):\n%s", len(keep), strings.Join(keep, "\n"))
 }
 
 func miseWhich(t *testing.T, bin, tool string) string {

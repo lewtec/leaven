@@ -68,6 +68,19 @@ func TestLibcxxTreeConstructDoesNotWalkKeyPtr(t *testing.T) {
 	}
 }
 
+func TestLibcxxTreeNextSkipsIntRight(t *testing.T) {
+	var end, root [libcxxTreeNodeSize]byte
+	Store(Ptr(&end[0]), libcxxTreeLeftOff, Ptr(&root[0]))
+	Store(Ptr(&root[0]), libcxxTreeParentOff, Ptr(&end[0]))
+	Store(Ptr(&root[0]), libcxxTreeRightOff, unsafe.Pointer(uintptr(3)))
+	root[libcxxTreeBlackOff] = 1
+
+	got := LibcxxTreeNext(&root[0])
+	if got != &end[0] {
+		t.Fatalf("next overlay = %p, want end", got)
+	}
+}
+
 func TestLibcxxTreeConstructCopiesChild(t *testing.T) {
 	child := make([]byte, libcxxTreeNodeSize)
 	src := make([]byte, libcxxTreeNodeSize)

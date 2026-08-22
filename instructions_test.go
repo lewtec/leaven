@@ -295,6 +295,9 @@ func TestCxxTreeCall(t *testing.T) {
 	if isRbTreeDefaultCtor("_ZNSt3__13mapIPK8VariablejNS_4lessIS3_EENS_9allocatorINS_4pairIKS3_jEEEEEC1B9nqn220108Ev") {
 		t.Fatal("libc++ map ctor is not libstdc++ RbTreeInit")
 	}
+	if _, a, ret, ok := cxxTreeCall("_ZNSt3__1L11__tree_nextIPNS_16__tree_node_baseIPvEEEET_S6_", nil); !ok || !ret || len(a) != 1 {
+		t.Fatalf("tree_next ret=%v n=%d", ret, len(a))
+	}
 }
 
 func TestCxxIOCallLocaleCtor(t *testing.T) {
