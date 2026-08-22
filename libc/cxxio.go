@@ -489,53 +489,51 @@ func writeOstream(out *byte, p []byte) {
 	syncOStringAreas(out, data)
 }
 
-func zeroPutArea(sb *byte) bool {
-	if sb == nil {
-		return true
-	}
-	return Load[*byte](Ptr(sb), sbPbaseOff) == nil && Load[*byte](Ptr(sb), sbPptrOff) == nil
-}
-
 func liveOStringBytes(out *byte) []byte {
 	if out == nil {
 		return nil
 	}
-	obj := streambufBytes(out)
-	if len(obj) == 0 {
-		obj = streambufBytes(stringbufOf(out))
-	}
-	if b := ostringBufExact(out); b != nil && len(*b) > 0 {
-		// Reused stack slot: Go zeros the new object, leftover key is stale.
-		if len(obj) == 0 && zeroPutArea(out) && zeroPutArea(stringbufOf(out)) {
+	if b := ostringBufExact(out); b != nil {
+		// Reused stack slot: Go zeros the new object; leftover key is stale.
+		// Darwin keeps a +8 alias whose object slice may not hold the put-area.
+		if runtime.GOOS != "darwin" && len(*b) > 0 && oursPutArea(out) == nil {
 			return nil
 		}
 		return *b
 	}
-	return obj
+	if d := oursPutArea(out); len(d) > 0 {
+		return d
+	}
+	return oursPutArea(stringbufOf(out))
+}
+
+// oursPutArea is the buffer syncStreambufArea wrote: eback==pbase,
+// epptr==pptr, pbase < pptr. Native libstdc++/uninitialized stack
+// does not match, so we do not prepend garbage onto gensym names.
+func oursPutArea(sb *byte) []byte {
+	if sb == nil {
+		return nil
+	}
+	base := Ptr(sb)
+	pbase := Load[*byte](base, sbPbaseOff)
+	pptr := Load[*byte](base, sbPptrOff)
+	if pbase == nil || pptr == nil || Addr(pptr) <= Addr(pbase) {
+		return nil
+	}
+	if Load[*byte](base, sbEpptrOff) != pptr || Load[*byte](base, sbEbackOff) != pbase {
+		return nil
+	}
+	n := int(Addr(pptr) - Addr(pbase))
+	if n <= 0 || n >= 1<<20 {
+		return nil
+	}
+	return append([]byte(nil), Bytes(pbase, n)...)
 }
 
 func stringbufOf(out *byte) *byte {
 	// << this is already the streambuf when clang inlines to rdbuf().
 	// Writing extras at +8 on Darwin missed __mode_ and left FactMgr empty.
 	return out
-}
-
-func streambufBytes(sb *byte) []byte {
-	if sb == nil {
-		return nil
-	}
-	pbase := Load[*byte](Ptr(sb), sbPbaseOff)
-	end := Load[*byte](Ptr(sb), sbPptrOff)
-	if hm := Load[*byte](Ptr(sb), sbHmOff); hm != nil && (end == nil || Addr(hm) > Addr(end)) {
-		end = hm
-	}
-	if pbase != nil && end != nil && Addr(end) > Addr(pbase) {
-		n := int(Addr(end) - Addr(pbase))
-		if n > 0 && n < 1<<20 {
-			return append([]byte(nil), Bytes(pbase, n)...)
-		}
-	}
-	return nil
 }
 
 func ostringData(out *byte) []byte {
