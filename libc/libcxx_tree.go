@@ -147,7 +147,7 @@ func LibcxxTreeNext(x *byte) *byte {
 	if libcxxTreeRealChild(x, right) {
 		return libcxxTreeMin(right)
 	}
-	for libcxxTreePtr(x) && !libcxxTreeIsLeftChild(x) {
+	for i := 0; libcxxTreePtr(x) && !libcxxTreeIsLeftChild(x) && i < 64; i++ {
 		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)
 	}
 	if !libcxxTreePtr(x) {
@@ -166,7 +166,7 @@ func LibcxxTreePrev(x *byte) *byte {
 	if libcxxTreeRealChild(x, left) || (libcxxTreePtr(left) && libcxxTreeLoadPtr(left, libcxxTreeParentOff) == x) {
 		return libcxxTreeMax(left)
 	}
-	for libcxxTreePtr(x) && libcxxTreeIsLeftChild(x) {
+	for i := 0; libcxxTreePtr(x) && libcxxTreeIsLeftChild(x) && i < 64; i++ {
 		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)
 	}
 	if !libcxxTreePtr(x) {
