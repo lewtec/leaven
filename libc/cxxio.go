@@ -444,7 +444,9 @@ func unregisterOString(at *byte) {
 		return
 	}
 	ostringStreams.Delete(Addr(at))
-	ostringStreams.Delete(Addr(at) + libcxxOStringSBOff)
+	if runtime.GOOS == "darwin" {
+		ostringStreams.Delete(Addr(at) + libcxxOStringSBOff)
+	}
 }
 
 var stdoutStreams sync.Map // uintptr → struct{}
@@ -478,9 +480,12 @@ func writeOstream(out *byte, p []byte) {
 	b := newOStringBuf()
 	*b = append(*b, data...)
 	registerOString(out, b)
-	// ostringstream::str inlines as __sb_.str(); this for << is the
-	// ostream, this for str() is the stringbuf at +8.
-	registerOString(As[byte](Off(Ptr(out), libcxxOStringSBOff)), b)
+	// Darwin libc++: << sees the ostream; inlined str() is __sb_.str()
+	// at +8. Do not register +8 on libstdc++ — that key sits inside
+	// the same object and collides with later stack slots.
+	if runtime.GOOS == "darwin" {
+		registerOString(As[byte](Off(Ptr(out), libcxxOStringSBOff)), b)
+	}
 	syncOStringAreas(out, data)
 }
 
