@@ -110,9 +110,19 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating index (%v): %w", index, err)
 			}
-			result = jen.Add(result).Index(v)
+			if takeAddress {
+				result = jen.Add(result).Index(v)
+				takeAddress = true
+			} else {
+				es, err := llvmTypeSize(ct.ElemType)
+				if err != nil {
+					return expr{}, err
+				}
+				off := jen.Int().Call(v).Op("*").Lit(int(es))
+				result = emitAddPtr(Qual[byte](), result, off)
+				takeAddress = false
+			}
 			currentType = ct.ElemType
-			takeAddress = true
 
 		case *types.StructType:
 			ci, ok := index.(*constant.Int)
@@ -124,8 +134,9 @@ func GetElementPtr(elemType types.Type, src value.Value, indices []value.Value) 
 				return expr{}, fmt.Errorf("%w: field %d of %v", errUnsupportedIndexType, fi, ct)
 			}
 			currentType = ct.Fields[fi]
-			if isZeroSizeType(currentType) {
-				// ZST omitted from Go struct; GEP address = base + ABI offset.
+			if isZeroSizeType(currentType) || structGEPNeedsByteOff(ct) {
+				// Packed / parent-of-packed: Go pads (25→32) so .Fi is wrong.
+				// ZST is omitted from the Go struct. Use the LLVM ABI offset.
 				off, err := llvmFieldOffset(ct, fi)
 				if err != nil {
 					return expr{}, err

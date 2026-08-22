@@ -444,6 +444,23 @@ func isZeroSizeType(t types.Type) bool {
 }
 
 // llvmFieldOffset is the ABI byte offset of field i in st.
+// structGEPNeedsByteOff is true when Go field offsets diverge from
+// LLVM: packed structs, or an unpacked parent of a packed member
+// (libc++ __tree_node: 25-byte packed base + [7 x i8] pad + union;
+// Go pads the base to 32 so .F2 is 40, LLVM F2 is 32).
+func structGEPNeedsByteOff(st *types.StructType) bool {
+	if st.Packed {
+		return true
+	}
+	for _, f := range st.Fields {
+		n, ok := f.(*types.StructType)
+		if ok && (n.Packed || structGEPNeedsByteOff(n)) {
+			return true
+		}
+	}
+	return false
+}
+
 func llvmFieldOffset(st *types.StructType, i int64) (int64, error) {
 	if i < 0 || int(i) >= len(st.Fields) {
 		return 0, fmt.Errorf("%w: field %d", errUnsupportedIndexType, i)
