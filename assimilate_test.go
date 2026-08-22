@@ -563,6 +563,59 @@ int main() {
 		return
 	}
 	t.Logf("libcxx ostringstream layout:\n%s", out)
+	logLibcxxGensymIR(t, clangxx, dir)
+}
+
+func logLibcxxGensymIR(t *testing.T, clangxx, dir string) {
+	t.Helper()
+	src := filepath.Join(dir, "probe.cpp")
+	const code = `#include <sstream>
+#include <string>
+std::string probe(const char* b) {
+  std::ostringstream ss;
+  ss << b;
+  ss << 1;
+  return ss.str();
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Logf("probe.cpp: %v", err)
+		return
+	}
+	ll := filepath.Join(dir, "probe.ll")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions",
+		"-emit-llvm", "-S", src, "-o", ll)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("probe ir: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	raw, err := os.ReadFile(ll)
+	if err != nil {
+		t.Logf("read probe.ll: %v", err)
+		return
+	}
+	var keep []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "probe") ||
+			strings.Contains(line, "ostringstream") ||
+			strings.Contains(line, "stringbuf") ||
+			strings.Contains(line, "ostream_insert") ||
+			strings.Contains(line, "3strE") ||
+			strings.Contains(line, "lsEm") ||
+			strings.Contains(line, "getelementptr") && (strings.Contains(line, "i64 8") ||
+				strings.Contains(line, "i32 8") ||
+				strings.Contains(line, "i64 40") ||
+				strings.Contains(line, "i64 48") ||
+				strings.Contains(line, "i64 88") ||
+				strings.Contains(line, "i64 96")) {
+			keep = append(keep, line)
+			if len(keep) >= 80 {
+				break
+			}
+		}
+	}
+	t.Logf("gensym probe ir (%d lines):\n%s", len(keep), strings.Join(keep, "\n"))
 }
 
 func miseWhich(t *testing.T, bin, tool string) string {

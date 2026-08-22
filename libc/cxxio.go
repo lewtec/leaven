@@ -531,13 +531,8 @@ func oursPutArea(sb *byte) []byte {
 }
 
 func stringbufOf(out *byte) *byte {
-	if out == nil {
-		return nil
-	}
-	// Darwin clang++ 22: sizeof ostringstream=264, stringbuf=104, rdbuf-oss=8.
-	if runtime.GOOS == "darwin" {
-		return As[byte](Off(Ptr(out), libcxxOStringSBOff))
-	}
+	// +8 is rdbuf-from-oss. << this is already rdbuf() after
+	// always_inline operator<<; extras at +8 landed past the stringbuf.
 	return out
 }
 
