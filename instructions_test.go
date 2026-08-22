@@ -214,6 +214,14 @@ func TestCxxIOCallOstreamInsert(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(li, nil); !ok || !ret || len(a) != 2 {
 		t.Fatalf("darwin lsB int ret=%v n=%d ok=%v", ret, len(a), ok)
 	}
+	ld := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEd"
+	if _, a, ret, ok := cxxIOCall(ld, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<double ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	lt := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEt"
+	if _, a, ret, ok := cxxIOCall(lt, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<ushort ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
 }
 
 func TestCxxIOCallGetline(t *testing.T) {
