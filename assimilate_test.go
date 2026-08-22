@@ -35,6 +35,7 @@ func testAssimilateCsmith(t *testing.T) {
 	root := requireProject(t, "csmith", "src/RandomProgramGenerator.cpp")
 	clang := miseWhich(t, "clang", "conda:clang@22.1.8")
 	clangxx := miseWhich(t, "clang++", "conda:clangxx@22.1.8")
+	logLibcxxOStringLayout(t, clangxx)
 	cmake := miseWhich(t, "cmake", "cmake@4.4.1")
 	ninja := miseWhich(t, "ninja", "ninja@1.13.2")
 	m4 := miseWhich(t, "m4", "conda:m4@1.4.20")
@@ -523,6 +524,45 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 		}
 	}
 	return clang, sysroot, libdir
+}
+
+func logLibcxxOStringLayout(t *testing.T, clangxx string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "layout.cpp")
+	const code = `#include <sstream>
+#include <cstdio>
+int main() {
+  std::ostringstream oss;
+  std::ostream* os = &oss;
+  auto* sb = oss.rdbuf();
+  std::printf("sizeof_oss=%zu sizeof_sb=%zu sizeof_os=%zu sizeof_str=%zu\n",
+    sizeof(oss), sizeof(*sb), sizeof(std::ostream), sizeof(std::string));
+  std::printf("os-oss=%td sb-oss=%td\n",
+    (char*)(void*)os - (char*)&oss, (char*)(void*)sb - (char*)&oss);
+  return 0;
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Fatalf("layout.cpp: %v", err)
+	}
+	bin := filepath.Join(dir, "layout")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions", src, "-o", bin)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("layout compile: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	run := exec.Command(bin)
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Logf("layout run: %v\n%s", err, out)
+		return
+	}
+	t.Logf("libcxx ostringstream layout:\n%s", out)
 }
 
 func miseWhich(t *testing.T, bin, tool string) string {
