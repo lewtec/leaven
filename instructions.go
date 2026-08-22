@@ -2200,6 +2200,16 @@ func cxxTreeCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool
 			h = asBytePtr(args[1])
 		}
 		return fn, []jen.Code{z, h}, true, true
+	case cxxTreeCopy:
+		out := make([]jen.Code, 3)
+		for i := range out {
+			if i < len(args) {
+				out[i] = asBytePtr(args[i])
+			} else {
+				out[i] = jen.Nil()
+			}
+		}
+		return fn, out, true, true
 	default:
 		this := jen.Nil()
 		if len(args) > 0 {
@@ -2214,6 +2224,7 @@ const (
 	cxxTreeInsert
 	cxxTreeInit
 	cxxTreeErase
+	cxxTreeCopy
 )
 
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
@@ -2228,12 +2239,31 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 		return Sym(libc.RbTreeRebalanceForErase).code(), cxxTreeErase, true
 	case isRbTreeDefaultCtor(name):
 		return Sym(libc.RbTreeInit).code(), cxxTreeInit, true
+	case isLibcxxTreeGetValue(name):
+		return Sym(libc.LibcxxTreeGetValue).code(), cxxTreeWalk, true
+	case isLibcxxTreeConstructFromTree(name):
+		return Sym(libc.LibcxxTreeConstructFromTree).code(), cxxTreeCopy, true
 	default:
 		return nil, 0, false
 	}
 }
 
+func isLibcxxTreeGetValue(name string) bool {
+	return strings.Contains(name, "St3__1") &&
+		strings.Contains(name, "11__tree_node") &&
+		strings.Contains(name, "11__get_value")
+}
+
+func isLibcxxTreeConstructFromTree(name string) bool {
+	return strings.Contains(name, "St3__1") &&
+		strings.Contains(name, "21__construct_from_tree")
+}
+
 func isRbTreeDefaultCtor(name string) bool {
+	// libc++ map/__tree is not libstdc++ _Rb_tree (header at +8).
+	if strings.Contains(name, "St3__1") {
+		return false
+	}
 	if !strings.HasSuffix(name, "C1Ev") && !strings.HasSuffix(name, "C2Ev") {
 		return false
 	}

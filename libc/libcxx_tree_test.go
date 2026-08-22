@@ -1,0 +1,73 @@
+package libc
+
+import (
+	"testing"
+	"unsafe"
+)
+
+func TestLibcxxTreeGetValueBadPtr(t *testing.T) {
+	if LibcxxTreeGetValue(nil) != nil {
+		t.Fatal("nil")
+	}
+	bad := As[byte](unsafe.Pointer(uintptr(3)))
+	if LibcxxTreeGetValue(bad) != nil {
+		t.Fatal("0x3")
+	}
+}
+
+func TestLibcxxTreeGetValueOff(t *testing.T) {
+	buf := make([]byte, libcxxTreeNodeSize)
+	got := LibcxxTreeGetValue(&buf[0])
+	want := &buf[libcxxTreeValueOff]
+	if got != want {
+		t.Fatalf("got %p want %p", got, want)
+	}
+}
+
+func TestLibcxxTreeConstructSkipsLowChild(t *testing.T) {
+	src := make([]byte, libcxxTreeNodeSize)
+	Store(Ptr(&src[0]), libcxxTreeValueOff, unsafe.Pointer(uintptr(0x1000)))
+	Store(Ptr(&src[0]), libcxxTreeValueOff+8, uint32(7))
+	Store(Ptr(&src[0]), libcxxTreeRightOff, unsafe.Pointer(uintptr(3)))
+	src[libcxxTreeBlackOff] = 1
+
+	dst := LibcxxTreeConstructFromTree(nil, &src[0], nil)
+	if dst == nil {
+		t.Fatal("dst")
+	}
+	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeRightOff) != nil {
+		t.Fatal("right child 0x3 should be skipped")
+	}
+	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeValueOff) != unsafe.Pointer(uintptr(0x1000)) {
+		t.Fatal("key")
+	}
+	if Load[uint32](Ptr(dst), libcxxTreeValueOff+8) != 7 {
+		t.Fatal("val")
+	}
+	if Load[byte](Ptr(dst), libcxxTreeBlackOff) != 1 {
+		t.Fatal("black")
+	}
+}
+
+func TestLibcxxTreeConstructCopiesChild(t *testing.T) {
+	child := make([]byte, libcxxTreeNodeSize)
+	Store(Ptr(&child[0]), libcxxTreeValueOff+8, uint32(9))
+	src := make([]byte, libcxxTreeNodeSize)
+	Store(Ptr(&src[0]), libcxxTreeLeftOff, Ptr(&child[0]))
+	Store(Ptr(&src[0]), libcxxTreeValueOff+8, uint32(1))
+
+	dst := LibcxxTreeConstructFromTree(nil, &src[0], nil)
+	left := As[byte](Load[unsafe.Pointer](Ptr(dst), libcxxTreeLeftOff))
+	if left == nil {
+		t.Fatal("left")
+	}
+	if left == &child[0] {
+		t.Fatal("must copy, not alias")
+	}
+	if Load[uint32](Ptr(left), libcxxTreeValueOff+8) != 9 {
+		t.Fatal("child val")
+	}
+	if Load[unsafe.Pointer](Ptr(left), libcxxTreeParentOff) != Ptr(dst) {
+		t.Fatal("parent")
+	}
+}

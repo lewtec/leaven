@@ -284,6 +284,17 @@ func TestCxxTreeCall(t *testing.T) {
 	if _, a, ret, ok := cxxTreeCall("_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_", nil); !ok || ret || len(a) != 4 {
 		t.Fatalf("insert %v %d", ret, len(a))
 	}
+	getv := "_ZNSt3__111__tree_nodeINS_12__value_typeIPK8VariablejEEPvE11__get_valueB9nqn220108Ev"
+	if _, a, ret, ok := cxxTreeCall(getv, nil); !ok || !ret || len(a) != 1 {
+		t.Fatalf("get_value ret=%v n=%d", ret, len(a))
+	}
+	ctor := "_ZNSt3__16__treeINS_12__value_typeIPK8VariablejEENS_19__map_value_compareIS4_NS_4pairIKS4_jEENS_4lessIS4_EEEENS_9allocatorIS9_EEE21__construct_from_treeB9nqn220108IZNSF_21__copy_construct_treeB9nqn220108EPNS_11__tree_nodeIS5_PvEEEUlRKS9_E_EESK_SK_T_"
+	if _, a, ret, ok := cxxTreeCall(ctor, nil); !ok || !ret || len(a) != 3 {
+		t.Fatalf("construct_from_tree ret=%v n=%d", ret, len(a))
+	}
+	if isRbTreeDefaultCtor("_ZNSt3__13mapIPK8VariablejNS_4lessIS3_EENS_9allocatorINS_4pairIKS3_jEEEEEC1B9nqn220108Ev") {
+		t.Fatal("libc++ map ctor is not libstdc++ RbTreeInit")
+	}
 }
 
 func TestCxxIOCallLocaleCtor(t *testing.T) {
