@@ -531,8 +531,13 @@ func oursPutArea(sb *byte) []byte {
 }
 
 func stringbufOf(out *byte) *byte {
-	// +8 is rdbuf-from-oss. << this is already rdbuf() after
-	// always_inline operator<<; extras at +8 landed past the stringbuf.
+	if out == nil {
+		return nil
+	}
+	// Darwin: rdbuf-oss=8 (measured). Extras for inlined view().
+	if runtime.GOOS == "darwin" {
+		return As[byte](Off(Ptr(out), libcxxOStringSBOff))
+	}
 	return out
 }
 

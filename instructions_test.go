@@ -206,6 +206,14 @@ func TestCxxIOCallOstreamInsert(t *testing.T) {
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
 	}
+	ls := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_PKc"
+	if _, a, ret, ok := cxxIOCall(ls, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin lsB PKc ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	li := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_i"
+	if _, a, ret, ok := cxxIOCall(li, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin lsB int ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
 }
 
 func TestCxxIOCallGetline(t *testing.T) {

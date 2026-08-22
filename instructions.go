@@ -2494,6 +2494,10 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 	case strings.Contains(name, "lsINS_11char_traits") && strings.Contains(name, "PKc"):
 		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
+	// Darwin ABI tag: lsB9nqn220108IcNS_11char_traits…PKc
+	case strings.Contains(name, "St3__1") && strings.Contains(name, "lsB") &&
+		strings.Contains(name, "PKc"):
+		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 	// operator<<(ostream&, char)
 	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
 		return Sym(libc.OstreamPut).code(), cxxIOPut, true
@@ -2517,10 +2521,12 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")):
 		switch {
 		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"),
-			strings.HasSuffix(name, "Ej"):
+			strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "S7_m"),
+			strings.HasSuffix(name, "S7_y"), strings.HasSuffix(name, "S7_j"):
 			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
 		case strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
-			strings.HasSuffix(name, "Ex"):
+			strings.HasSuffix(name, "Ex"), strings.HasSuffix(name, "S7_i"),
+			strings.HasSuffix(name, "S7_l"), strings.HasSuffix(name, "S7_x"):
 			return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
 		}
 	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
