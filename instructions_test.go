@@ -330,6 +330,15 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(dtor, nil); !ok || ret || len(a) != 1 {
 		t.Fatalf("dtor %v %d", ret, len(a))
 	}
+	// Darwin libc++ ABI tag sits between the name and Ev (3strB… / C1B…).
+	dctor := "_ZNSt3__119basic_ostringstreamIcNS_11char_traitsIcEENS_9allocatorIcEEEC1B9nqn220108Ev"
+	if _, a, ret, ok := cxxIOCall(dctor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("darwin ctor ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	dstr := "_ZNKRSt3__119basic_ostringstreamIcNS_11char_traitsIcEENS_9allocatorIcEEE3strB9nqn220108Ev"
+	if _, a, ret, ok := cxxIOCall(dstr, nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("darwin str ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
 }
 
 func TestCxxNoopDtor(t *testing.T) {

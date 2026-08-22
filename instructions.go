@@ -2651,9 +2651,19 @@ func isStringbuf(name string) bool {
 	return strings.Contains(name, "15basic_stringbuf")
 }
 
+func hasCxxCtor(name string) bool {
+	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E") ||
+		strings.Contains(name, "C1B") || strings.Contains(name, "C2B")
+}
+
+func isCxxStrName(name string) bool {
+	return strings.Contains(name, "3strE") || strings.Contains(name, "3strB")
+}
+
 // isCxxStrSetter is str(const string&), not the sret getter str().
+// Darwin ABI tags sit in the name (3strB9nqn220108ERK…).
 func isCxxStrSetter(name string) bool {
-	return strings.Contains(name, "3strE") && strings.Contains(name, "RK")
+	return isCxxStrName(name) && strings.Contains(name, "RK")
 }
 
 // isRustAlloc is __rust_alloc / __rust_alloc_zeroed, not *_error_handler.
@@ -2702,12 +2712,14 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		switch {
 		case isCxxStrSetter(name):
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
-		case strings.Contains(name, "3strE"):
+		case isCxxStrName(name):
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
 		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
-		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev"):
+		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev") ||
+			(strings.Contains(name, "C1B") && strings.HasSuffix(name, "Ev")) ||
+			(strings.Contains(name, "C2B") && strings.HasSuffix(name, "Ev")):
 			return Sym(libc.StringstreamDefaultCtor).code(), cxxIOOStringStreamCtor, true
-		case strings.Contains(name, "C1E"), strings.Contains(name, "C2E"):
+		case hasCxxCtor(name):
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
 		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
 			// Prefer default-close if we might have dual keys; safe for both.
@@ -2718,11 +2730,11 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if isOstringstream(name) {
 		switch {
-		case strings.Contains(name, "C1E") || strings.Contains(name, "C2E"):
+		case hasCxxCtor(name):
 			return Sym(libc.OStringStreamCtor).code(), cxxIOOStringStreamCtor, true
 		case isCxxStrSetter(name):
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
-		case strings.Contains(name, "3strE"):
+		case isCxxStrName(name):
 			return Sym(libc.OStringStreamStr).code(), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
 			return Sym(libc.OStringStreamClose).code(), cxxIOClose, true
@@ -2734,7 +2746,7 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		switch {
 		case isCxxStrSetter(name):
 			return Sym(libc.StringbufStr).code(), cxxIOStringbufStr, true
-		case strings.Contains(name, "3strE"):
+		case isCxxStrName(name):
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "C1") || strings.Contains(name, "C2"):
 			return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
