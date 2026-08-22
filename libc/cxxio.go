@@ -43,6 +43,14 @@ const (
 	sbPbaseOff = 40
 	sbPptrOff  = 48
 	sbEpptrOff = 56
+	// stringbuf after 64-byte streambuf: string, high-water, openmode.
+	sbStrOff   = 64
+	sbHmOff    = 88
+	sbModeOff  = 96
+	iosModeIn  = 8
+	iosModeOut = 16
+	// libc++ ostringstream: 8-byte ostream primary (vptr), then __sb_.
+	libcxxOStringSBOff = 8
 )
 
 // standinCtype is libstdc++ ctype<char>. endl does
@@ -393,7 +401,7 @@ func CtypeWidenInit(this *byte) {
 // Keyed by object address; << goes here when present, else stdout (cout).
 var ostringStreams sync.Map // uintptr → *[]byte
 
-func ostringBuf(out *byte) *[]byte {
+func ostringBufExact(out *byte) *[]byte {
 	if out == nil {
 		return nil
 	}
@@ -403,14 +411,32 @@ func ostringBuf(out *byte) *[]byte {
 	return nil
 }
 
+func ostringBuf(out *byte) *[]byte {
+	if b := ostringBufExact(out); b != nil {
+		return b
+	}
+	if out == nil {
+		return nil
+	}
+	// str() is on the ostringstream; << stored the ostream at +16.
+	base := Addr(out)
+	for _, off := range []uintptr{16, 32} {
+		if v, ok := ostringStreams.Load(base + off); ok {
+			return v.(*[]byte)
+		}
+	}
+	return nil
+}
+
+func newOStringBuf() *[]byte {
+	return new([]byte)
+}
+
 func registerOString(at *byte, buf *[]byte) {
 	if at == nil || buf == nil {
 		return
 	}
 	ostringStreams.Store(Addr(at), buf)
-	// str() uses the ostringstream address; << may use this+16.
-	ostringStreams.Store(Addr(As[byte](Off(Ptr(at), -16))), buf)
-	ostringStreams.Store(Addr(As[byte](Off(Ptr(at), -32))), buf)
 }
 
 func unregisterOString(at *byte) {
@@ -418,10 +444,6 @@ func unregisterOString(at *byte) {
 		return
 	}
 	ostringStreams.Delete(Addr(at))
-	ostringStreams.Delete(Addr(As[byte](Off(Ptr(at), -16))))
-	ostringStreams.Delete(Addr(As[byte](Off(Ptr(at), -32))))
-	ostringStreams.Delete(Addr(at) + 16)
-	ostringStreams.Delete(Addr(at) + 32)
 }
 
 var stdoutStreams sync.Map // uintptr → struct{}
@@ -437,24 +459,93 @@ func writeOstream(out *byte, p []byte) {
 	if len(p) == 0 {
 		return
 	}
-	if b := ostringBuf(out); b != nil {
-		*b = append(*b, p...)
-		syncStreambufArea(out, *b)
-		return
-	}
 	if out != nil {
 		if _, ok := stdoutStreams.Load(Addr(out)); ok {
 			_, _ = os.Stdout.Write(p)
 			return
 		}
-		// Inlined ostringstream ctor never registered; gensym <<
-		// must not leak to stdout (that printed "1234" before FactMgr).
-		buf := append([]byte(nil), p...)
-		registerOString(out, &buf)
-		syncStreambufArea(out, buf)
+	} else {
+		_, _ = os.Stdout.Write(p)
 		return
 	}
-	_, _ = os.Stdout.Write(p)
+	// Side-table keys are stack addresses. A Go stack copy moves
+	// the object; put-area pointers are heap and survive in the
+	// copied fields. A reused stack slot can leave a stale key
+	// on a fresh (empty) object — ignore that key.
+	data := append([]byte(nil), liveOStringBytes(out)...)
+	data = append(data, p...)
+	b := newOStringBuf()
+	*b = append(*b, data...)
+	registerOString(out, b)
+	syncOStringAreas(out, data)
+}
+
+func liveOStringBytes(out *byte) []byte {
+	if out == nil {
+		return nil
+	}
+	obj := streambufBytes(stringbufOf(out))
+	if b := ostringBufExact(out); b != nil {
+		if len(obj) > 0 || len(*b) == 0 {
+			return *b
+		}
+	}
+	if len(obj) > 0 {
+		return obj
+	}
+	return nil
+}
+
+func stringbufOf(out *byte) *byte {
+	if out == nil {
+		return nil
+	}
+	if runtime.GOOS == "darwin" {
+		return As[byte](Off(Ptr(out), libcxxOStringSBOff))
+	}
+	return out
+}
+
+func streambufBytes(sb *byte) []byte {
+	if sb == nil {
+		return nil
+	}
+	pbase := Load[*byte](Ptr(sb), sbPbaseOff)
+	end := Load[*byte](Ptr(sb), sbPptrOff)
+	if hm := Load[*byte](Ptr(sb), sbHmOff); hm != nil && (end == nil || Addr(hm) > Addr(end)) {
+		end = hm
+	}
+	if pbase != nil && end != nil && Addr(end) > Addr(pbase) {
+		n := int(Addr(end) - Addr(pbase))
+		if n > 0 && n < 1<<20 {
+			return append([]byte(nil), Bytes(pbase, n)...)
+		}
+	}
+	return nil
+}
+
+func ostringData(out *byte) []byte {
+	if d := liveOStringBytes(out); len(d) > 0 {
+		return append([]byte(nil), d...)
+	}
+	if out == nil {
+		return nil
+	}
+	// str() on the ostringstream; << wrote the ostream at +16.
+	if d := liveOStringBytes(As[byte](Off(Ptr(out), 16))); len(d) > 0 {
+		return d
+	}
+	if b := ostringBuf(out); b != nil && len(*b) > 0 {
+		return append([]byte(nil), *b...)
+	}
+	return nil
+}
+
+func syncOStringAreas(out *byte, data []byte) {
+	if out == nil {
+		return
+	}
+	syncStreambufArea(stringbufOf(out), data)
 }
 
 func syncStreambufArea(sb *byte, data []byte) {
@@ -475,6 +566,18 @@ func syncStreambufArea(sb *byte, data []byte) {
 	Store(base, sbPbaseOff, buf)
 	Store(base, sbPptrOff, end)
 	Store(base, sbEpptrOff, end)
+	var src *byte
+	if n > 0 {
+		src = buf
+	}
+	str := As[byte](Off(base, sbStrOff))
+	// Do not Destroy: first << hits uninitialized stack and a
+	// leftover long-bit would Free a garbage pointer.
+	StdStringInit(str, src, int64(n))
+	// After __str_ (Init memsets 24 bytes). Inlined str() needs
+	// __mode_ & out and __hm_ >= pptr or it returns empty.
+	Store(base, sbHmOff, end)
+	Store[int32](base, sbModeOff, int32(iosModeIn|iosModeOut))
 }
 
 // stringstreamOstreamOff is the ostream subobject inside basic_stringstream
@@ -488,8 +591,7 @@ func OStringStreamCtor(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	buf := []byte{}
-	registerOString(this, &buf)
+	registerOString(this, newOStringBuf())
 	// Stand-in vptr only (first word); no ctype slot in this size.
 	Store(Ptr(this), 0, StandinVptr())
 	return unsafe.Pointer(this)
@@ -501,10 +603,9 @@ func StringstreamDefaultCtor(this *byte) unsafe.Pointer {
 	if this == nil {
 		return nil
 	}
-	buf := []byte{}
-	base := Addr(this)
-	ostringStreams.Store(base, &buf)
-	ostringStreams.Store(base+stringstreamOstreamOff, &buf)
+	b := newOStringBuf()
+	ostringStreams.Store(Addr(this), b)
+	ostringStreams.Store(Addr(this)+stringstreamOstreamOff, b)
 	return unsafe.Pointer(this)
 }
 
@@ -534,16 +635,7 @@ func OStringStreamStr(ret, this *byte) {
 	if ret == nil {
 		return
 	}
-	var data []byte
-	if b := ostringBuf(this); b != nil {
-		data = *b
-	} else if this != nil {
-		eback := Load[*byte](Ptr(this), sbEbackOff)
-		egptr := Load[*byte](Ptr(this), sbEgptrOff)
-		if eback != nil && egptr != nil && Addr(eback) < Addr(egptr) {
-			data = Bytes(eback, int(Addr(egptr)-Addr(eback)))
-		}
-	}
+	data := ostringData(this)
 	if runtime.GOOS == "darwin" {
 		var src *byte
 		if len(data) > 0 {
@@ -810,7 +902,7 @@ func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 		n = 0
 	}
 	base := Ptr(this)
-	Memset(this, 0, 32)
+	Memset(this, 0, 24)
 	if n <= libcxxSSO {
 		if libcxxAlternate() {
 			if n > 0 && s != nil {

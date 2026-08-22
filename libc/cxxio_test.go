@@ -402,6 +402,7 @@ func TestOstreamInsertWrites(t *testing.T) {
 	msg := []byte("/*\n")
 	var dummy [8]byte
 	MarkStdoutStream(unsafe.Pointer(&dummy[0]))
+	defer stdoutStreams.Delete(Addr(&dummy[0]))
 	got := OstreamInsert(&dummy[0], &msg[0], int64(len(msg)))
 	_ = w.Close()
 	os.Stdout = old
@@ -418,7 +419,8 @@ func TestOstreamInsertWrites(t *testing.T) {
 
 func TestWriteOstreamLazyGensym(t *testing.T) {
 	// Inlined ostringstream ctor: no table entry; << must not hit stdout.
-	var oss [112]byte
+	var oss [192]byte
+	defer OStringStreamClose(&oss[0])
 	OstreamInsertI64(&oss[0], 12)
 	OstreamInsertI64(&oss[0], 34)
 	ret := emptyCxxString()
@@ -426,13 +428,14 @@ func TestWriteOstreamLazyGensym(t *testing.T) {
 	if got := string(goCxxStringBytes(&ret[0])); got != "1234" {
 		t.Fatalf("lazy str %q", got)
 	}
-	OStringStreamClose(&oss[0])
 }
 
 func TestWriteOstreamLazyParentStr(t *testing.T) {
 	// << on the ostream subobject; str() on the ostringstream.
-	var ss [176]byte
+	var ss [192]byte
 	os := &ss[16]
+	defer OStringStreamClose(os)
+	defer OStringStreamClose(&ss[0])
 	OstreamLsCStr(os, &[]byte("g_\x00")[0])
 	OstreamInsertI64(os, 1)
 	ret := emptyCxxString()
@@ -440,22 +443,34 @@ func TestWriteOstreamLazyParentStr(t *testing.T) {
 	if got := string(goCxxStringBytes(&ret[0])); got != "g_1" {
 		t.Fatalf("parent str %q", got)
 	}
-	OStringStreamClose(os)
-	OStringStreamClose(&ss[0])
-	pbase := Load[*byte](Ptr(os), sbPbaseOff)
-	pptr := Load[*byte](Ptr(os), sbPptrOff)
+	sb := stringbufOf(os)
+	pbase := Load[*byte](Ptr(sb), sbPbaseOff)
+	pptr := Load[*byte](Ptr(sb), sbPptrOff)
 	if pbase == nil || pptr == nil || Addr(pbase) >= Addr(pptr) {
 		t.Fatal("empty put area")
 	}
 	if string(Bytes(pbase, int(Addr(pptr)-Addr(pbase)))) != "g_1" {
 		t.Fatalf("put area %q", Bytes(pbase, int(Addr(pptr)-Addr(pbase))))
 	}
+	if Load[*byte](Ptr(sb), sbHmOff) != pptr {
+		t.Fatal("hm")
+	}
+	if Load[int32](Ptr(sb), sbModeOff)&iosModeOut == 0 {
+		t.Fatalf("mode=%d", Load[int32](Ptr(sb), sbModeOff))
+	}
+	sp, sn := libcxxStringData(As[byte](Off(Ptr(sb), sbStrOff)))
+	if sn != 3 || string(Bytes(sp, int(sn))) != "g_1" {
+		t.Fatalf("__str_ %q", Bytes(sp, int(sn)))
+	}
+	OStringStreamClose(os)
+	OStringStreamClose(&ss[0])
 }
 
 func TestOStringStreamGensym(t *testing.T) {
 	// gensym: oss << basename << count; return oss.str()
-	var oss [112]byte
+	var oss [192]byte
 	OStringStreamCtor(&oss[0])
+	defer OStringStreamClose(&oss[0])
 	prefix := append([]byte("func_"), 0)
 	OstreamLsCStr(&oss[0], &prefix[0])
 	OstreamInsertI64(&oss[0], 1)
@@ -466,6 +481,22 @@ func TestOStringStreamGensym(t *testing.T) {
 		t.Fatalf("str %q", got)
 	}
 	OStringStreamClose(&oss[0])
+}
+
+func TestOStringStreamStrAfterMovedThis(t *testing.T) {
+	// Go stack copy changes &oss; put-area fields move with the object.
+	var oss [192]byte
+	OStringStreamCtor(&oss[0])
+	defer OStringStreamClose(&oss[0])
+	OstreamLsCStr(&oss[0], &[]byte("g_\x00")[0])
+	OstreamInsertI64(&oss[0], 2)
+	var moved [192]byte
+	copy(moved[:], oss[:])
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &moved[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "g_2" {
+		t.Fatalf("moved str %q", got)
+	}
 }
 
 func TestStringstreamDefaultNewCtrlVars(t *testing.T) {
