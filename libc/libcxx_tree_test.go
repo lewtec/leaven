@@ -26,17 +26,20 @@ func TestLibcxxTreeGetValueOff(t *testing.T) {
 
 func TestLibcxxTreeConstructSkipsLowChild(t *testing.T) {
 	src := make([]byte, libcxxTreeNodeSize)
-	Store(Ptr(&src[0]), libcxxTreeValueOff, unsafe.Pointer(uintptr(0x1000)))
-	Store(Ptr(&src[0]), libcxxTreeValueOff+8, uint32(7))
-	Store(Ptr(&src[0]), libcxxTreeRightOff, unsafe.Pointer(uintptr(3)))
+	// pair written at +0: left=key, right=unsigned 7.
+	Store(Ptr(&src[0]), 0, unsafe.Pointer(uintptr(0x1000)))
+	Store(Ptr(&src[0]), 8, uint32(7))
 	src[libcxxTreeBlackOff] = 1
 
 	dst := LibcxxTreeConstructFromTree(nil, &src[0], nil)
 	if dst == nil {
 		t.Fatal("dst")
 	}
+	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeLeftOff) != nil {
+		t.Fatal("must not walk key pointer as a child")
+	}
 	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeRightOff) != nil {
-		t.Fatal("right child 0x3 should be skipped")
+		t.Fatal("right child 0x7 should be skipped")
 	}
 	if Load[unsafe.Pointer](Ptr(dst), libcxxTreeValueOff) != unsafe.Pointer(uintptr(0x1000)) {
 		t.Fatal("key")

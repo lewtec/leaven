@@ -33,6 +33,20 @@ func libcxxTreeLoadPtr(n *byte, off int) *byte {
 	return As[byte](Load[unsafe.Pointer](Ptr(n), off))
 }
 
+// libcxxTreeIntChild is a non-nil pointer that cannot be a node
+// (unsigned map value written into __right_ / __left_).
+func libcxxTreeIntChild(p *byte) bool {
+	return p != nil && !libcxxTreePtr(p)
+}
+
+// libcxxTreeLooksLikeNode is a heap pointer whose __is_black_ is 0/1.
+func libcxxTreeLooksLikeNode(p *byte) bool {
+	if !libcxxTreePtr(p) {
+		return false
+	}
+	return Load[byte](Ptr(p), libcxxTreeBlackOff) <= 1
+}
+
 // LibcxxTreeGetValue is __tree_node::__get_value. Returns this+32, or nil
 // when this is not a user pointer (so a leftover unsigned in a child slot
 // does not SEGV).
@@ -45,7 +59,11 @@ func LibcxxTreeGetValue(this *byte) *byte {
 
 // LibcxxTreeConstructFromTree is __tree::__construct_from_tree.
 // tree and construct are unused (allocator / lambda); we malloc and
-// memcpy the pair ourselves. Child pointers below 4096 are skipped.
+// memcpy the pair ourselves.
+//
+// Inlined insert may write pair<K,V> at +0, so __right_ is a small
+// integer and __left_ is the key pointer. Do not walk those; copy the
+// pair onto dest+32 and emit a leaf.
 func LibcxxTreeConstructFromTree(tree, src, construct *byte) *byte {
 	_ = tree
 	_ = construct
@@ -61,19 +79,30 @@ func libcxxTreeCopy(src *byte, depth int) *byte {
 		return nil
 	}
 	Store(Ptr(n), libcxxTreeBlackOff, Load[byte](Ptr(src), libcxxTreeBlackOff))
+	left := libcxxTreeLoadPtr(src, libcxxTreeLeftOff)
+	right := libcxxTreeLoadPtr(src, libcxxTreeRightOff)
+	overlay := libcxxTreeIntChild(left) || libcxxTreeIntChild(right) ||
+		(right == nil && left != nil && !libcxxTreeLooksLikeNode(left))
+	valOff := libcxxTreeValueOff
+	if overlay {
+		valOff = 0
+	}
 	copy(
 		Bytes(As[byte](Off(Ptr(n), libcxxTreeValueOff)), libcxxTreeValueSize),
-		Bytes(As[byte](Off(Ptr(src), libcxxTreeValueOff)), libcxxTreeValueSize),
+		Bytes(As[byte](Off(Ptr(src), valOff)), libcxxTreeValueSize),
 	)
-	left := libcxxTreeCopy(libcxxTreeLoadPtr(src, libcxxTreeLeftOff), depth+1)
-	right := libcxxTreeCopy(libcxxTreeLoadPtr(src, libcxxTreeRightOff), depth+1)
-	Store(Ptr(n), libcxxTreeLeftOff, Ptr(left))
-	Store(Ptr(n), libcxxTreeRightOff, Ptr(right))
-	if left != nil {
-		Store(Ptr(left), libcxxTreeParentOff, Ptr(n))
+	if overlay {
+		return n
 	}
-	if right != nil {
-		Store(Ptr(right), libcxxTreeParentOff, Ptr(n))
+	nl := libcxxTreeCopy(left, depth+1)
+	nr := libcxxTreeCopy(right, depth+1)
+	Store(Ptr(n), libcxxTreeLeftOff, Ptr(nl))
+	Store(Ptr(n), libcxxTreeRightOff, Ptr(nr))
+	if nl != nil {
+		Store(Ptr(nl), libcxxTreeParentOff, Ptr(n))
+	}
+	if nr != nil {
+		Store(Ptr(nr), libcxxTreeParentOff, Ptr(n))
 	}
 	return n
 }
