@@ -67,6 +67,17 @@ func TestLibcxxStringAppendCStrMatch(t *testing.T) {
 	}
 }
 
+func TestLibcxxStringPlusMatch(t *testing.T) {
+	left := "_ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EEPKS6_RKS9_"
+	if !isLibcxxStringPlus(left) || !isLibcxxStringPlusCStrLeft(left) {
+		t.Fatal("cstr+str")
+	}
+	right := "_ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EERKS6_PKc"
+	if !isLibcxxStringPlus(right) || isLibcxxStringPlusCStrLeft(right) {
+		t.Fatal("str+cstr")
+	}
+}
+
 func TestLibcxxStringInsertCStrMatch(t *testing.T) {
 	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6insertEmPKc"
 	if !isLibcxxStringInsertCStr(name) {

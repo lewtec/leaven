@@ -999,6 +999,43 @@ func StdStringSubstr(this, other *byte, pos, n int64, alloc *byte) unsafe.Pointe
 	return StdStringInit(this, src, n)
 }
 
+func stdStringConcat(ret *byte, a, b []byte) {
+	if ret == nil {
+		return
+	}
+	n := len(a) + len(b)
+	buf := make([]byte, n)
+	copy(buf, a)
+	copy(buf[len(a):], b)
+	if runtime.GOOS == "darwin" {
+		var src *byte
+		if n > 0 {
+			src = &buf[0]
+		}
+		StdStringInit(ret, src, int64(n))
+		return
+	}
+	cxxStringAssign(ret, buf)
+}
+
+// StdStringPlusCStrLeft is operator+(char const*, string const&).
+func StdStringPlusCStrLeft(ret, cstr, s *byte) {
+	var left []byte
+	if cstr != nil {
+		left = []byte(GoString(cstr))
+	}
+	stdStringConcat(ret, left, goCxxStringBytes(s))
+}
+
+// StdStringPlusCStrRight is operator+(string const&, char const*).
+func StdStringPlusCStrRight(ret, s, cstr *byte) {
+	var right []byte
+	if cstr != nil {
+		right = []byte(GoString(cstr))
+	}
+	stdStringConcat(ret, goCxxStringBytes(s), right)
+}
+
 // StdStringAppendCStr is libc++ string::append(char const*) / append(char const*, n).
 // n<0 means strlen.
 func StdStringAppendCStr(s, cstr *byte, n int64) unsafe.Pointer {

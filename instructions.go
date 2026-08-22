@@ -1859,6 +1859,18 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				ptrArg(inst.Args, args, 1),
 				n,
 			}
+		} else if isLibcxxStringPlus(llvmName) && len(inst.Args) >= 3 &&
+			strings.Contains(llvmName, "PK") {
+			if isLibcxxStringPlusCStrLeft(llvmName) {
+				callee = Sym(libc.StdStringPlusCStrLeft).code()
+			} else {
+				callee = Sym(libc.StdStringPlusCStrRight).code()
+			}
+			args = []jen.Code{
+				ptrArg(inst.Args, args, 0),
+				ptrArg(inst.Args, args, 1),
+				ptrArg(inst.Args, args, 2),
+			}
 		} else if isLibcxxStringAppendCStr(llvmName) && len(inst.Args) >= 2 &&
 			(len(inst.Args) < 3 || !isPtrish(inst.Args[2].Type())) {
 			callee = Sym(libc.StdStringAppendCStr).code()
@@ -2586,6 +2598,19 @@ func isLocaleCtor(name string) bool {
 		return false
 	}
 	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
+}
+
+func isLibcxxStringPlus(name string) bool {
+	return strings.Contains(name, "St3__1plIc") && strings.Contains(name, "12basic_string")
+}
+
+// isLibcxxStringPlusCStrLeft is operator+(char const*, string const&).
+func isLibcxxStringPlusCStrLeft(name string) bool {
+	if !isLibcxxStringPlus(name) {
+		return false
+	}
+	pk, rk := strings.Index(name, "PK"), strings.Index(name, "RK")
+	return pk >= 0 && rk > pk
 }
 
 func isLibcxxStringErase(name string) bool {

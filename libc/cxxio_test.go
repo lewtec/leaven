@@ -105,6 +105,19 @@ func TestStdStringLongDefaultLayout(t *testing.T) {
 	StdStringDestroy(&obj[0])
 }
 
+func TestStdStringPlusCStr(t *testing.T) {
+	s := putTestCxxString("bar")
+	var left, right [32]byte
+	StdStringPlusCStrLeft(&left[0], &[]byte("foo\x00")[0], &s[0])
+	if got := string(goCxxStringBytes(&left[0])); got != "foobar" {
+		t.Fatalf("cstr+str %q", got)
+	}
+	StdStringPlusCStrRight(&right[0], &s[0], &[]byte("!\x00")[0])
+	if got := string(goCxxStringBytes(&right[0])); got != "bar!" {
+		t.Fatalf("str+cstr %q", got)
+	}
+}
+
 func TestStdStringSubstr(t *testing.T) {
 	var src, dst [32]byte
 	s := []byte("abcdef")
