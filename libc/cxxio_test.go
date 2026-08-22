@@ -346,7 +346,7 @@ func TestIstreamGetlineReadsLine(t *testing.T) {
 func TestStringbufStrThenExtract(t *testing.T) {
 	// Darwin CGOptions: stringstream(s) inlines as stringbuf::str; >> uses the parent.
 	s := putTestCxxString("42")
-	var ss [176]byte
+	ss := make([]byte, 176)
 	sb := &ss[16]
 	StringbufStr(sb, &s[0])
 	if StreambufSgetc(sb) != int32('4') {
@@ -384,7 +384,7 @@ func TestGoCxxStringBytesLibcxxShort(t *testing.T) {
 func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	// StringUtils::str2int: stringstream(s); [ss>>hex;] ss>>i
 	s := putTestCxxString("42")
-	var ss [128]byte
+	ss := make([]byte, 128)
 	StringstreamCtor(&ss[0], &s[0], 24)
 	var out int32 = -1
 	IstreamExtractI32(&ss[0], As[byte](Ptr(&out)))
@@ -394,7 +394,7 @@ func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	StringstreamClose(&ss[0])
 
 	s2 := putTestCxxString("0x2a")
-	var ss2 [128]byte
+	ss2 := make([]byte, 128)
 	StringstreamCtor(&ss2[0], &s2[0], 24)
 	IstreamApplyIosManip(&ss2[0], nil)
 	out = -1
