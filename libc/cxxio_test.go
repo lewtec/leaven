@@ -8,6 +8,14 @@ import (
 	"unsafe"
 )
 
+func TestOssVptrMinus24(t *testing.T) {
+	vp := OssVptr()
+	off := Load[int64](Off(vp, -24), 0)
+	if off != int64(libcxxOssIosOff) {
+		t.Fatalf("vbase %d want %d", off, libcxxOssIosOff)
+	}
+}
+
 func TestStandinVptrMinus24(t *testing.T) {
 	vp := StandinVptr()
 	if vp == nil {

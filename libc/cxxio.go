@@ -27,6 +27,11 @@ var streams sync.Map // uintptr → *fileStream
 // reconstruct libstdc++ layout beyond that slot.
 var ifstreamVT = [4]int64{}
 
+// ossVT vptr-24 is 112: libc++ ostringstream/stringstream ios sits
+// after ostream.base (8) + stringbuf (104). Inlined << sentry
+// reads rdstate at ios+32; offset 0 made that gptr (heap) and skip the write.
+var ossVT = [4]int64{libcxxOssIosOff, 0, 0, 0}
+
 const (
 	iosEofbit        = 2
 	iosFailbit       = 4
@@ -79,6 +84,11 @@ func CtypeWiden(this unsafe.Pointer, c byte) byte {
 // Declare-only VTTs store these so inlined dtors do not load nil-24.
 func StandinVptr() unsafe.Pointer {
 	return Off(Ptr(&ifstreamVT[0]), 3*8)
+}
+
+// OssVptr is the ostringstream/stringstream vptr (vbase offset 112).
+func OssVptr() unsafe.Pointer {
+	return Off(Ptr(&ossVT[0]), 3*8)
 }
 
 func setIfstreamABI(this *byte, fail, eof bool) {
@@ -628,8 +638,9 @@ func OStringStreamCtor(this *byte) unsafe.Pointer {
 		return nil
 	}
 	registerOString(this, newOStringBuf())
-	// Stand-in vptr only (first word); no ctype slot in this size.
-	Store(Ptr(this), 0, StandinVptr())
+	Store(Ptr(this), 0, OssVptr())
+	Store[int32](Ptr(this), iosStateOff, 0)
+	Store[int32](Ptr(this), libcxxOssIosOff+iosStateOff, 0)
 	// Inlined << char (new_ctrl_vars i/j/k) writes the put-area; give it room.
 	syncOStringAreas(this, nil)
 	reserveOStringPut(this, 64)
@@ -648,7 +659,9 @@ func StringstreamDefaultCtor(this *byte) unsafe.Pointer {
 	if runtime.GOOS == "darwin" {
 		ostringStreams.Store(Addr(this)+libcxxOStringSBOff, b)
 	}
-	Store(Ptr(this), 0, StandinVptr())
+	Store(Ptr(this), 0, OssVptr())
+	Store[int32](Ptr(this), iosStateOff, 0)
+	Store[int32](Ptr(this), libcxxOssIosOff+iosStateOff, 0)
 	syncOStringAreas(this, nil)
 	reserveOStringPut(this, 64)
 	return unsafe.Pointer(this)
