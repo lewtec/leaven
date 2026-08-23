@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -466,8 +467,12 @@ func runTimeout(t *testing.T, d time.Duration, dir, bin string, args ...string) 
 			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, clipEnds(buf.Bytes(), 4000))
 		}
 	case <-time.After(d):
+		if runtime.GOOS != "windows" {
+			_ = cmd.Process.Signal(syscall.SIGQUIT)
+			time.Sleep(400 * time.Millisecond)
+		}
 		_ = cmd.Process.Kill()
-		t.Fatalf("%s timeout after %s\n%s", filepath.Base(bin), d, tailBytes(buf.Bytes(), 4000))
+		t.Fatalf("%s timeout after %s\n%s", filepath.Base(bin), d, clipEnds(buf.Bytes(), 8000))
 	}
 	return buf.Bytes()
 }
