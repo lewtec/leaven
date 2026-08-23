@@ -2870,7 +2870,7 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 		case isCxxStrName(name):
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
 		case strings.Contains(name, "C1") || strings.Contains(name, "C2"):
-			return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
+			return Sym(libc.StringbufCtor).code(), cxxIOIosBase, true
 		}
 	}
 	if strings.Contains(name, "4failE") || strings.Contains(name, "4failB") {

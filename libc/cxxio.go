@@ -200,6 +200,18 @@ func StreambufCtor(this *byte) unsafe.Pointer {
 	return unsafe.Pointer(this)
 }
 
+// StringbufCtor is basic_stringbuf(openmode). Inlined stringstream
+// ctor calls this; new_ctrl_vars then << 'i' into the put-area.
+func StringbufCtor(this *byte) unsafe.Pointer {
+	if this == nil {
+		return nil
+	}
+	Store(Ptr(this), 0, StandinVptr())
+	registerOString(this, newOStringBuf())
+	reservePutArea(this, 64)
+	return unsafe.Pointer(this)
+}
+
 func filebufSetg(this, eback, gptr, egptr *byte) {
 	if this == nil {
 		return
@@ -645,11 +657,11 @@ func StringstreamDefaultCtor(this *byte) unsafe.Pointer {
 // reserveOStringPut leaves epptr past pptr so inlined sputc can write
 // without overflow (new_ctrl_vars: ss << 'i').
 func reserveOStringPut(out *byte, cap int) {
-	if out == nil || cap <= 0 {
-		return
-	}
-	sb := stringbufOf(out)
-	if sb == nil {
+	reservePutArea(stringbufOf(out), cap)
+}
+
+func reservePutArea(sb *byte, cap int) {
+	if sb == nil || cap <= 0 {
 		return
 	}
 	buf := Malloc[byte](int64(cap))

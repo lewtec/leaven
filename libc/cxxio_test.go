@@ -565,6 +565,23 @@ func TestOStringStreamStrAfterMovedThis(t *testing.T) {
 	}
 }
 
+func TestStringbufCtorPutArea(t *testing.T) {
+	var sb [104]byte
+	StringbufCtor(&sb[0])
+	pbase := Load[*byte](Ptr(&sb[0]), sbPbaseOff)
+	epptr := Load[*byte](Ptr(&sb[0]), sbEpptrOff)
+	if pbase == nil || epptr == nil || Addr(epptr) <= Addr(pbase) {
+		t.Fatal("no put capacity")
+	}
+	*pbase = 'j'
+	Store(Ptr(&sb[0]), sbPptrOff, As[byte](Off(Ptr(pbase), 1)))
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &sb[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "j" {
+		t.Fatalf("str %q", got)
+	}
+}
+
 func TestStringstreamCtrlVarChar(t *testing.T) {
 	// new_ctrl_vars: stringstream; << 'i'; str() — inlined sputc into ctor put-area.
 	var ss [160]byte

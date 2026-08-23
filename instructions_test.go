@@ -390,6 +390,10 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	if _, _, _, ok := cxxIOCall("_ZNKSt3__18ios_base9precisionEv", nil); ok {
 		t.Fatal("precision getter")
 	}
+	sbctor := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEEC1B9nqn220108Ej"
+	if _, a, ret, ok := cxxIOCall(sbctor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("stringbuf ctor ret=%v n=%d", ret, len(a))
+	}
 }
 
 func TestCxxNoopDtor(t *testing.T) {
