@@ -481,6 +481,27 @@ func TestWriteOstreamLazyParentStr(t *testing.T) {
 	OStringStreamClose(&ss[0])
 }
 
+func TestOStringStreamStrReadsPutAreaWhenTableEmpty(t *testing.T) {
+	// Ctor registers an empty side table. Inlined << fills the put-area
+	// only. str() must not return the empty table.
+	var oss [264]byte
+	OStringStreamCtor(&oss[0])
+	defer OStringStreamClose(&oss[0])
+	want := []byte("g_4")
+	syncOStringAreas(&oss[0], want)
+	if runtime.GOOS == "darwin" {
+		// Spare capacity: epptr past pptr, as native overflow does.
+		sb := stringbufOf(&oss[0])
+		pptr := Load[*byte](Ptr(sb), sbPptrOff)
+		Store(Ptr(sb), sbEpptrOff, As[byte](Off(Ptr(pptr), 8)))
+	}
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &oss[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "g_4" {
+		t.Fatalf("str %q", got)
+	}
+}
+
 func TestOStringStreamGensym(t *testing.T) {
 	// gensym: oss << basename << count; return oss.str()
 	var oss [192]byte

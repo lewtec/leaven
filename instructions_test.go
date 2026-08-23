@@ -380,6 +380,10 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(dstr, nil); !ok || ret || len(a) != 2 {
 		t.Fatalf("darwin str ret=%v n=%d ok=%v", ret, len(a), ok)
 	}
+	lsStr := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsB9nqn220108ERKNS_12basic_stringIcS2_NS_9allocatorIcEEEE"
+	if _, a, ret, ok := cxxIOCall(lsStr, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin << string ret=%v n=%d", ret, len(a))
+	}
 }
 
 func TestCxxNoopDtor(t *testing.T) {

@@ -493,10 +493,10 @@ func liveOStringBytes(out *byte) []byte {
 	if out == nil {
 		return nil
 	}
-	if b := ostringBufExact(out); b != nil {
+	if b := ostringBufExact(out); b != nil && len(*b) > 0 {
 		// Reused stack slot: Go zeros the new object; leftover key is stale.
 		// Darwin keeps a +8 alias whose object slice may not hold the put-area.
-		if runtime.GOOS != "darwin" && len(*b) > 0 && oursPutArea(out) == nil {
+		if runtime.GOOS != "darwin" && oursPutArea(out) == nil {
 			return nil
 		}
 		return *b
@@ -520,8 +520,15 @@ func oursPutArea(sb *byte) []byte {
 	if pbase == nil || pptr == nil || Addr(pptr) <= Addr(pbase) {
 		return nil
 	}
-	if Load[*byte](base, sbEpptrOff) != pptr || Load[*byte](base, sbEbackOff) != pbase {
+	epptr := Load[*byte](base, sbEpptrOff)
+	// Inlined overflow leaves epptr > pptr (spare capacity).
+	if epptr == nil || Addr(epptr) < Addr(pptr) {
 		return nil
+	}
+	if runtime.GOOS != "darwin" {
+		if epptr != pptr || Load[*byte](base, sbEbackOff) != pbase {
+			return nil
+		}
 	}
 	n := int(Addr(pptr) - Addr(pbase))
 	if n <= 0 || n >= 1<<20 {

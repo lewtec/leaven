@@ -2566,6 +2566,10 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 	// operator<<(ostream&, basic_string const&)
 	case strings.Contains(name, "lsIcSt11char_traits") && strings.Contains(name, "basic_string"):
 		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
+	case strings.Contains(name, "St3__1") && strings.Contains(name, "basic_ostream") &&
+		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")) &&
+		strings.Contains(name, "basic_string"):
+		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
 	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
 		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
 	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
