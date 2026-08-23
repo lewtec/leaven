@@ -396,8 +396,23 @@ func crossCheck(t *testing.T, native, ll string, args []string) {
 	}
 	got := runGoDir(t, dir, args...)
 	if !bytes.Equal(want, got) {
-		t.Fatalf("native vs leaven mismatch\n---- native (%d bytes) ----\n%s\n---- leaven (%d bytes) ----\n%s",
-			len(want), clipEnds(want, 2400), len(got), clipEnds(got, 2400))
+		i := 0
+		for i < len(want) && i < len(got) && want[i] == got[i] {
+			i++
+		}
+		a, b := i-80, i+80
+		if a < 0 {
+			a = 0
+		}
+		if b > len(want) {
+			b = len(want)
+		}
+		c := i + 80
+		if c > len(got) {
+			c = len(got)
+		}
+		t.Fatalf("native vs leaven mismatch at %d (native %d leaven %d)\n---- native ----\n%s\n---- leaven ----\n%s",
+			i, len(want), len(got), want[a:b], got[a:c])
 	}
 }
 
