@@ -384,6 +384,10 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(lsStr, nil); !ok || !ret || len(a) != 2 {
 		t.Fatalf("darwin << string ret=%v n=%d", ret, len(a))
 	}
+	lsChar := "_ZNSt3__1lsB9nqn220108INS_11char_traitsIcEEEERNS_13basic_ostreamIcT_EES6_c"
+	if _, a, ret, ok := cxxIOCall(lsChar, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin << char ret=%v n=%d", ret, len(a))
+	}
 	if _, a, ret, ok := cxxIOCall("_ZNSt3__18ios_base9precisionEl", nil); !ok || ret || len(a) != 2 {
 		t.Fatalf("precision set ret=%v n=%d", ret, len(a))
 	}

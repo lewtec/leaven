@@ -2602,7 +2602,9 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		case strings.HasSuffix(name, "Eb"), strings.HasSuffix(name, "S7_b"):
 			return Sym(libc.OstreamInsertBool).code(), cxxIOInsertBool, true
 		case strings.HasSuffix(name, "Ec"), strings.HasSuffix(name, "Ea"),
-			strings.HasSuffix(name, "S7_c"), strings.HasSuffix(name, "S7_a"):
+			strings.HasSuffix(name, "S7_c"), strings.HasSuffix(name, "S7_a"),
+			strings.HasSuffix(name, "S6_c"), strings.HasSuffix(name, "S5_c"),
+			strings.HasSuffix(name, "S4_c"), strings.HasSuffix(name, "S8_c"):
 			return Sym(libc.OstreamPut).code(), cxxIOPut, true
 		case strings.HasSuffix(name, "Eh"), strings.HasSuffix(name, "S7_h"):
 			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU8, true
