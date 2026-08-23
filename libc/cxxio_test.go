@@ -565,6 +565,26 @@ func TestOStringStreamStrAfterMovedThis(t *testing.T) {
 	}
 }
 
+func TestStringstreamCtrlVarChar(t *testing.T) {
+	// new_ctrl_vars: stringstream; << 'i'; str() — inlined sputc into ctor put-area.
+	var ss [160]byte
+	StringstreamDefaultCtor(&ss[0])
+	defer StringstreamDefaultClose(&ss[0])
+	sb := stringbufOf(&ss[0])
+	pbase := Load[*byte](Ptr(sb), sbPbaseOff)
+	epptr := Load[*byte](Ptr(sb), sbEpptrOff)
+	if pbase == nil || epptr == nil || Addr(epptr) <= Addr(pbase) {
+		t.Fatal("no put capacity")
+	}
+	*pbase = 'i'
+	Store(Ptr(sb), sbPptrOff, As[byte](Off(Ptr(pbase), 1)))
+	ret := emptyCxxString()
+	StringstreamStr(&ret[0], &ss[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "i" {
+		t.Fatalf("str %q", got)
+	}
+}
+
 func TestStringstreamDefaultNewCtrlVars(t *testing.T) {
 	// Variable::new_ctrl_vars: ss(); << 'i' via this+16; << n; str()
 	var ss [128]byte

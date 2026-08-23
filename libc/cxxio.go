@@ -525,10 +525,8 @@ func oursPutArea(sb *byte) []byte {
 	if epptr == nil || Addr(epptr) < Addr(pptr) {
 		return nil
 	}
-	if runtime.GOOS != "darwin" {
-		if epptr != pptr || Load[*byte](base, sbEbackOff) != pbase {
-			return nil
-		}
+	if runtime.GOOS != "darwin" && Load[*byte](base, sbEbackOff) != pbase {
+		return nil
 	}
 	n := int(Addr(pptr) - Addr(pbase))
 	if n <= 0 || n >= 1<<20 {
@@ -620,6 +618,9 @@ func OStringStreamCtor(this *byte) unsafe.Pointer {
 	registerOString(this, newOStringBuf())
 	// Stand-in vptr only (first word); no ctype slot in this size.
 	Store(Ptr(this), 0, StandinVptr())
+	// Inlined << char (new_ctrl_vars i/j/k) writes the put-area; give it room.
+	syncOStringAreas(this, nil)
+	reserveOStringPut(this, 64)
 	return unsafe.Pointer(this)
 }
 
@@ -632,7 +633,35 @@ func StringstreamDefaultCtor(this *byte) unsafe.Pointer {
 	b := newOStringBuf()
 	ostringStreams.Store(Addr(this), b)
 	ostringStreams.Store(Addr(this)+stringstreamOstreamOff, b)
+	if runtime.GOOS == "darwin" {
+		ostringStreams.Store(Addr(this)+libcxxOStringSBOff, b)
+	}
+	Store(Ptr(this), 0, StandinVptr())
+	syncOStringAreas(this, nil)
+	reserveOStringPut(this, 64)
 	return unsafe.Pointer(this)
+}
+
+// reserveOStringPut leaves epptr past pptr so inlined sputc can write
+// without overflow (new_ctrl_vars: ss << 'i').
+func reserveOStringPut(out *byte, cap int) {
+	if out == nil || cap <= 0 {
+		return
+	}
+	sb := stringbufOf(out)
+	if sb == nil {
+		return
+	}
+	buf := Malloc[byte](int64(cap))
+	if buf == nil {
+		return
+	}
+	end := As[byte](Off(Ptr(buf), cap))
+	filebufSetg(sb, buf, buf, buf)
+	base := Ptr(sb)
+	Store(base, sbPbaseOff, buf)
+	Store(base, sbPptrOff, buf)
+	Store(base, sbEpptrOff, end)
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
