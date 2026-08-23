@@ -384,6 +384,12 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(lsStr, nil); !ok || !ret || len(a) != 2 {
 		t.Fatalf("darwin << string ret=%v n=%d", ret, len(a))
 	}
+	if _, a, ret, ok := cxxIOCall("_ZNSt3__18ios_base9precisionEl", nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("precision set ret=%v n=%d", ret, len(a))
+	}
+	if _, _, _, ok := cxxIOCall("_ZNKSt3__18ios_base9precisionEv", nil); ok {
+		t.Fatal("precision getter")
+	}
 }
 
 func TestCxxNoopDtor(t *testing.T) {

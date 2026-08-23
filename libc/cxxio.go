@@ -736,18 +736,48 @@ func OstreamInsertBool(out *byte, v bool) *byte {
 	return out
 }
 
-// ostreamPrecision reads ios_base::_M_precision. With StandinVptr, vbase
-// offset is 0 so ios is at the ostream address; field 1 is i64 @+8.
-// Default precision is 6 (libstdc++). Bookkeeper sets 3 before stats.
+// libc++ ostringstream: ostream.base (8) + stringbuf (104) → ios @112.
+// ios_base: vptr@0, fmtflags@8, precision@16.
+const (
+	iosPrecisionOff    = 8  // libstdc++ ios at this
+	libcxxPrecOff      = 16 // ios_base::__precision_
+	libcxxOssIosOff    = 112
+	libcxxOssPrecOff   = libcxxOssIosOff + libcxxPrecOff
+)
+
+// ostreamPrecision reads ios_base precision. Default 6. Bookkeeper
+// sets 3 before stats (native Darwin prints 66.7 not 66.6667).
 func ostreamPrecision(out *byte) int {
 	if out == nil {
 		return 6
 	}
-	p := Load[int64](Ptr(out), 8)
-	if p <= 0 {
+	offs := []int{iosPrecisionOff}
+	if runtime.GOOS == "darwin" {
+		offs = []int{libcxxPrecOff, libcxxOssPrecOff, iosPrecisionOff}
+	}
+	for _, off := range offs {
+		p := Load[int64](Ptr(out), off)
+		if p > 0 && p <= 20 {
+			return int(p)
+		}
+	}
+	return 6
+}
+
+// IosPrecisionSet is ios_base::precision(streamsize).
+func IosPrecisionSet(this *byte, n int64) int64 {
+	if this == nil {
 		return 6
 	}
-	return int(p)
+	if n <= 0 {
+		n = 6
+	}
+	Store(Ptr(this), iosPrecisionOff, n)
+	if runtime.GOOS == "darwin" {
+		Store(Ptr(this), libcxxPrecOff, n)
+		Store(Ptr(this), libcxxOssPrecOff, n)
+	}
+	return n
 }
 
 // OstreamInsertF64 is operator<<(ostream&, double) / float.

@@ -405,6 +405,19 @@ func TestStringstreamStr2intDecAndHex(t *testing.T) {
 	StringstreamClose(&ss2[0])
 }
 
+func TestOstreamInsertF64UsesPrecision(t *testing.T) {
+	var oss [264]byte
+	OStringStreamCtor(&oss[0])
+	defer OStringStreamClose(&oss[0])
+	IosPrecisionSet(&oss[0], 3)
+	OstreamInsertF64(&oss[0], 66.6666667)
+	ret := emptyCxxString()
+	OStringStreamStr(&ret[0], &oss[0])
+	if got := string(goCxxStringBytes(&ret[0])); got != "66.7" {
+		t.Fatalf("prec3 %q", got)
+	}
+}
+
 func TestOstreamInsertWrites(t *testing.T) {
 	old := os.Stdout
 	r, w, err := os.Pipe()

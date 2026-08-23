@@ -2161,6 +2161,7 @@ const (
 	cxxIOFail
 	cxxIOUnderflow
 	cxxIOStringbufStr
+	cxxIOIosPrecision
 )
 
 // cxxIONamed maps any ifstream ctor/dtor/open/close, not just the
@@ -2537,6 +2538,15 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 			str = ptrArg(ir, args, 1)
 		}
 		return fn, []jen.Code{this, str}, false, true
+	case cxxIOIosPrecision:
+		this, n := jen.Nil(), jen.Lit(int64(6))
+		if len(args) > 0 {
+			this = ptrArg(ir, args, 0)
+		}
+		if len(args) > 1 {
+			n = jen.Int64().Call(args[1])
+		}
+		return fn, []jen.Code{this, n}, false, true
 	default:
 		return nil, nil, false, false
 	}
@@ -2638,6 +2648,16 @@ func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
 		}
 	}
 	return nil, 0, false
+}
+
+func isIosPrecision(name string) bool {
+	if strings.HasSuffix(name, "Ev") {
+		return false
+	}
+	if !strings.Contains(name, "9precisionE") && !strings.Contains(name, "9precisionB") {
+		return false
+	}
+	return strings.Contains(name, "8ios_base")
 }
 
 func isIosBaseCtor(name string) bool {
@@ -2799,6 +2819,9 @@ func cxxIOKind(name string) (*jen.Statement, int, bool) {
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
+	}
+	if isIosPrecision(name) {
+		return Sym(libc.IosPrecisionSet).code(), cxxIOIosPrecision, true
 	}
 	if isIosBaseCtor(name) {
 		return Sym(libc.IosBaseCtor).code(), cxxIOIosBase, true
