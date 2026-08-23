@@ -674,6 +674,11 @@ func reservePutArea(sb *byte, cap int) {
 	Store(base, sbPbaseOff, buf)
 	Store(base, sbPptrOff, buf)
 	Store(base, sbEpptrOff, end)
+	if runtime.GOOS == "darwin" {
+		// Inlined str()/view(): if (__mode_ & out) string(pbase(), __hm_).
+		Store(base, sbHmOff, buf)
+		Store[int32](base, sbModeOff, int32(iosModeOut))
+	}
 }
 
 // OStringStreamClose is basic_ostringstream dtor.
