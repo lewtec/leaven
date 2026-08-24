@@ -7,7 +7,8 @@
         "type state struct",
         "local_state",
         "func state_new() unsafe.Pointer",
-        "local_state = libc.Ptr(libc.Retain[byte](libc.As[byte](libc.Ptr(&new(struct {"
+        "local_state = libc.Ptr(libc.Retain(",
+        "new(struct {"
       ],
       "not_contains": [
         "var state **state"
