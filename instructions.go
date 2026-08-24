@@ -1859,8 +1859,7 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				ptrArg(inst.Args, args, 1),
 				n,
 			}
-		} else if isLibcxxStringPlus(llvmName) && len(inst.Args) >= 3 &&
-			strings.Contains(llvmName, "PK") {
+		} else if isLibcxxStringPlus(llvmName) && len(inst.Args) >= 3 {
 			if isLibcxxStringPlusCStrLeft(llvmName) {
 				callee = Sym(libc.StdStringPlusCStrLeft).code()
 			} else {
@@ -1930,11 +1929,11 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			callee = c
 			args = adj
 			typedPtr = retPtr
-		} else if strings.Contains(llvmName, "throw_bad_cast") {
+		} else if n, ok := parseCxx(llvmName); ok && (n.ident == "__throw_bad_cast" || n.ident == "throw_bad_cast") {
 			// Inlined getline path if failbit was not seen. Short text
 			// so CI does not omit the panic line.
 			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
-		} else if strings.Contains(llvmName, "ctypeIcE5widen") {
+		} else if n, ok := parseCxx(llvmName); ok && n.ident == "widen" && n.isClass("ctype") {
 			return one(assign(VariableName(inst), Sym(libc.CtypeWiden).Call(args...))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
@@ -1951,9 +1950,9 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			return one(assign(VariableName(inst), Sym(libc.RustRealloc).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_no_alloc_shim") {
 			return nil, nil
-		} else if llvmName == "_Znwm" || llvmName == "_Znam" {
+		} else if n, ok := parseCxx(llvmName); ok && n.recv == "" && (n.ident == "new" || n.ident == "new[]") {
 			return one(assign(VariableName(inst), Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), nil
-		} else if strings.HasPrefix(llvmName, "_Zdl") || strings.HasPrefix(llvmName, "_Zda") {
+		} else if n, ok := parseCxx(llvmName); ok && n.recv == "" && (n.ident == "delete" || n.ident == "delete[]") {
 			return one(Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))), nil
 		} else if _, ok := inst.Callee.(*ir.Func); ok {
 			callee = jen.Id(VariableName(inst.Callee.(value.Named)))
@@ -2229,66 +2228,45 @@ const (
 )
 
 func cxxTreeKind(name string) (*jen.Statement, int, bool) {
+	n, ok := parseCxx(name)
+	if !ok {
+		return nil, 0, false
+	}
 	switch {
-	case strings.Contains(name, "_Rb_tree_decrement"):
+	case n.ident == "_Rb_tree_decrement":
 		return Sym(libc.RbTreeDecrement).code(), cxxTreeWalk, true
-	case strings.Contains(name, "_Rb_tree_increment"):
+	case n.ident == "_Rb_tree_increment":
 		return Sym(libc.RbTreeIncrement).code(), cxxTreeWalk, true
-	case strings.Contains(name, "_Rb_tree_insert_and_rebalance"):
+	case n.ident == "_Rb_tree_insert_and_rebalance":
 		return Sym(libc.RbTreeInsertAndRebalance).code(), cxxTreeInsert, true
-	case strings.Contains(name, "_Rb_tree_rebalance_for_erase"):
+	case n.ident == "_Rb_tree_rebalance_for_erase":
 		return Sym(libc.RbTreeRebalanceForErase).code(), cxxTreeErase, true
-	case isRbTreeDefaultCtor(name):
+	case n.rbTreeDefaultCtor():
 		return Sym(libc.RbTreeInit).code(), cxxTreeInit, true
-	case isLibcxxTreeGetValue(name):
+	case n.libcxx && n.ident == "__get_value" && n.class() == "__tree_node":
 		return Sym(libc.LibcxxTreeGetValue).code(), cxxTreeWalk, true
-	case isLibcxxTreeConstructFromTree(name):
+	case n.libcxx && n.ident == "__construct_from_tree":
 		return Sym(libc.LibcxxTreeConstructFromTree).code(), cxxTreeCopy, true
-	case isLibcxxTreeNext(name):
+	case n.libcxx && (n.ident == "__tree_next" || n.ident == "__tree_next_iter"):
 		return Sym(libc.LibcxxTreeNext).code(), cxxTreeWalk, true
-	case isLibcxxTreePrev(name):
+	case n.libcxx && (n.ident == "__tree_prev" || n.ident == "__tree_prev_iter"):
 		return Sym(libc.LibcxxTreePrev).code(), cxxTreeWalk, true
-	case isLibcxxTreeMin(name):
+	case n.libcxx && n.ident == "__tree_min":
 		return Sym(libc.LibcxxTreeMin).code(), cxxTreeWalk, true
 	default:
 		return nil, 0, false
 	}
 }
 
-func isLibcxxTreeGetValue(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		strings.Contains(name, "11__tree_node") &&
-		strings.Contains(name, "11__get_value")
-}
-
-func isLibcxxTreeConstructFromTree(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		strings.Contains(name, "21__construct_from_tree")
-}
-
-func isLibcxxTreeNext(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		(strings.Contains(name, "11__tree_next") || strings.Contains(name, "16__tree_next_iter"))
-}
-
-func isLibcxxTreePrev(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		(strings.Contains(name, "11__tree_prev") || strings.Contains(name, "16__tree_prev_iter"))
-}
-
-func isLibcxxTreeMin(name string) bool {
-	return strings.Contains(name, "St3__1") && strings.Contains(name, "10__tree_min")
-}
-
 func isRbTreeDefaultCtor(name string) bool {
+	n, ok := parseCxx(name)
+	return ok && n.rbTreeDefaultCtor()
+}
+
+func (n cxx) rbTreeDefaultCtor() bool {
 	// libc++ map/__tree is not libstdc++ _Rb_tree (header at +8).
-	if strings.Contains(name, "St3__1") {
-		return false
-	}
-	if !strings.HasSuffix(name, "C1Ev") && !strings.HasSuffix(name, "C2Ev") {
-		return false
-	}
-	return strings.Contains(name, "St8_Rb_tree") || strings.Contains(name, "St3mapI")
+	return n.ctor && !n.libcxx && len(n.args) == 0 &&
+		(n.class() == "_Rb_tree" || n.class() == "map")
 }
 
 func cxxIONamed(name string) (*jen.Statement, bool) {
@@ -2308,12 +2286,8 @@ func cxxIONamed(name string) (*jen.Statement, bool) {
 // ios_base, __basic_file). Empty is honest; unsatisfied would panic
 // in the inlined ifstream dtor after fail() already succeeded.
 func cxxNoopDtor(name string) bool {
-	if !strings.Contains(name, "D0E") && !strings.Contains(name, "D1E") && !strings.Contains(name, "D2E") {
-		return false
-	}
-	return strings.Contains(name, "12__basic_file") ||
-		strings.Contains(name, "St6locale") ||
-		strings.Contains(name, "St8ios_base")
+	n, ok := parseCxx(name)
+	return ok && n.dtor && n.isClass("locale", "ios_base", "__basic_file")
 }
 
 func cxxIOCall(name string, args []jen.Code) (*jen.Statement, []jen.Code, bool, bool) {
@@ -2555,235 +2529,171 @@ func cxxIOCallIR(name string, ir []value.Value, args []jen.Code) (*jen.Statement
 // cxxOstreamOp is cout << / endl / put / flush. csmith OutputHeader
 // inlines some of these and calls the rest. Also gensym's ostringstream.
 func cxxOstreamOp(name string) (*jen.Statement, int, bool) {
-	switch {
-	case strings.Contains(name, "4endl"):
-		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
-	case strings.Contains(name, "basic_ostream") && strings.Contains(name, "EPFR") &&
-		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")):
-		// operator<<(ostream&(*)(ostream&)) — libc++ endl.
-		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
-	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "PKc"):
-		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
-	case strings.Contains(name, "lsINS_11char_traits") && strings.Contains(name, "PKc"):
-		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
-	// Darwin ABI tag: lsB9nqn220108IcNS_11char_traits…PKc
-	case strings.Contains(name, "St3__1") && strings.Contains(name, "lsB") &&
-		strings.Contains(name, "PKc"):
-		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
-	// operator<<(ostream&, char)
-	case strings.Contains(name, "lsISt11char_traits") && strings.HasSuffix(name, "ES5_c"):
-		return Sym(libc.OstreamPut).code(), cxxIOPut, true
-	// operator<<(ostream&, basic_string const&)
-	case strings.Contains(name, "lsIcSt11char_traits") && strings.Contains(name, "basic_string"):
-		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
-	case strings.Contains(name, "St3__1") && strings.Contains(name, "basic_ostream") &&
-		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")) &&
-		strings.Contains(name, "basic_string"):
-		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
-	case strings.Contains(name, "9_M_insertImE") || strings.Contains(name, "9_M_insertIyE"):
-		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
-	case strings.Contains(name, "9_M_insertIlE") || strings.Contains(name, "9_M_insertIxE"):
-		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
-	case strings.Contains(name, "So3putE"):
-		return Sym(libc.OstreamPut).code(), cxxIOPut, true
-	case strings.Contains(name, "So5flushE"):
-		return Sym(libc.OstreamFlush).code(), cxxIOFlush, true
-	case strings.Contains(name, "5ctypeIcE13_M_widen_init"):
-		return Sym(libc.CtypeWidenInit).code(), cxxIOCtypeInit, true
-	case strings.Contains(name, "SolsEPFRSoS_E"):
-		// operator<<(ostream&(*)(ostream&)) — csmith passes endl.
-		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
-	case strings.Contains(name, "St3__1") && strings.Contains(name, "basic_ostream") &&
-		(strings.Contains(name, "lsE") || strings.Contains(name, "lsB")):
-		switch {
-		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"),
-			strings.HasSuffix(name, "S7_d"), strings.HasSuffix(name, "S7_f"):
-			return Sym(libc.OstreamInsertF64).code(), cxxIOInsertF64, true
-		case strings.HasSuffix(name, "Eb"), strings.HasSuffix(name, "S7_b"):
-			return Sym(libc.OstreamInsertBool).code(), cxxIOInsertBool, true
-		case strings.HasSuffix(name, "Ec"), strings.HasSuffix(name, "Ea"),
-			strings.HasSuffix(name, "S7_c"), strings.HasSuffix(name, "S7_a"),
-			strings.HasSuffix(name, "S6_c"), strings.HasSuffix(name, "S5_c"),
-			strings.HasSuffix(name, "S4_c"), strings.HasSuffix(name, "S8_c"):
-			return Sym(libc.OstreamPut).code(), cxxIOPut, true
-		case strings.HasSuffix(name, "Eh"), strings.HasSuffix(name, "S7_h"):
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU8, true
-		case strings.HasSuffix(name, "Et"), strings.HasSuffix(name, "S7_t"):
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU16, true
-		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"),
-			strings.HasSuffix(name, "Ej"), strings.HasSuffix(name, "S7_m"),
-			strings.HasSuffix(name, "S7_y"), strings.HasSuffix(name, "S7_j"):
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
-		case strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
-			strings.HasSuffix(name, "Ex"), strings.HasSuffix(name, "Es"),
-			strings.HasSuffix(name, "S7_i"), strings.HasSuffix(name, "S7_l"),
-			strings.HasSuffix(name, "S7_x"), strings.HasSuffix(name, "S7_s"):
-			return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
-		}
-	case strings.HasPrefix(name, "_ZNSolsE") || strings.Contains(name, "NSolsE"):
-		switch {
-		case strings.HasSuffix(name, "PKc"):
-			return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
-		case strings.HasSuffix(name, "PKv"):
-			// operator<<(void const*)
-			return Sym(libc.OstreamInsertPtr).code(), cxxIOInsertPtr, true
-		// signed: char(a)/short(s)/int(i)/long(l)/long long(x)
-		case strings.HasSuffix(name, "Ea"), strings.HasSuffix(name, "Es"),
-			strings.HasSuffix(name, "Ei"), strings.HasSuffix(name, "El"),
-			strings.HasSuffix(name, "Ex"):
-			return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
-		// unsigned: zero-extend to u64 (Go uint64(intN(-1)) sign-extends).
-		case strings.HasSuffix(name, "Eh"): // unsigned char
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU8, true
-		case strings.HasSuffix(name, "Et"): // unsigned short
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU16, true
-		case strings.HasSuffix(name, "Ej"): // unsigned int
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU32, true
-		case strings.HasSuffix(name, "Em"), strings.HasSuffix(name, "Ey"):
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
-		case strings.HasSuffix(name, "Ed"), strings.HasSuffix(name, "Ef"):
-			return Sym(libc.OstreamInsertF64).code(), cxxIOInsertF64, true
-		case strings.HasSuffix(name, "Eb"):
-			return Sym(libc.OstreamInsertBool).code(), cxxIOInsertBool, true
-		case strings.HasSuffix(name, "Ec"):
-			return Sym(libc.OstreamPut).code(), cxxIOPut, true
-		}
+	n, ok := parseCxx(name)
+	if !ok {
+		return nil, 0, false
 	}
-	return nil, 0, false
+	if n.ident == "endl" && n.std {
+		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
+	}
+	if n.ident == "put" && n.isClass("basic_ostream") {
+		return Sym(libc.OstreamPut).code(), cxxIOPut, true
+	}
+	if n.ident == "flush" && n.isClass("basic_ostream") {
+		return Sym(libc.OstreamFlush).code(), cxxIOFlush, true
+	}
+	if n.ident == "_M_widen_init" && n.isClass("ctype") {
+		return Sym(libc.CtypeWidenInit).code(), cxxIOCtypeInit, true
+	}
+	if n.ident == "_M_insert" && n.isClass("basic_ostream") && len(n.args) == 1 {
+		return cxxOstreamInsertTy(n.args[0], n.libcxx)
+	}
+	arg, ok := n.streamArg()
+	if !ok {
+		return nil, 0, false
+	}
+	return cxxOstreamInsertTy(arg, n.libcxx)
 }
 
-func isIosPrecision(name string) bool {
-	if strings.HasSuffix(name, "Ev") {
-		return false
+func cxxOstreamInsertTy(arg cxxTy, libcxx bool) (*jen.Statement, int, bool) {
+	if arg.ident == "fnptr" {
+		return Sym(libc.OstreamEndl).code(), cxxIOEndl, true
 	}
-	if !strings.Contains(name, "9precisionE") && !strings.Contains(name, "9precisionB") {
-		return false
+	if arg.isCStr() {
+		return Sym(libc.OstreamLsCStr).code(), cxxIOLsCStr, true
 	}
-	return strings.Contains(name, "8ios_base")
+	if arg.isString() {
+		return Sym(libc.OstreamLsString).code(), cxxIOLsCStr, true
+	}
+	if arg.ptr && arg.ident == "void" {
+		return Sym(libc.OstreamInsertPtr).code(), cxxIOInsertPtr, true
+	}
+	if arg.ptr || arg.ref {
+		return nil, 0, false
+	}
+	switch arg.ident {
+	case "char":
+		return Sym(libc.OstreamPut).code(), cxxIOPut, true
+	case "signed char":
+		if libcxx {
+			return Sym(libc.OstreamPut).code(), cxxIOPut, true
+		}
+		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
+	case "unsigned char":
+		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU8, true
+	case "unsigned short":
+		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU16, true
+	case "unsigned int":
+		if libcxx {
+			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
+		}
+		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU32, true
+	case "unsigned long", "unsigned long long":
+		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
+	case "short", "int", "long", "long long":
+		return Sym(libc.OstreamInsertI64).code(), cxxIOInsertI64, true
+	case "float", "double":
+		return Sym(libc.OstreamInsertF64).code(), cxxIOInsertF64, true
+	case "bool":
+		return Sym(libc.OstreamInsertBool).code(), cxxIOInsertBool, true
+	default:
+		return nil, 0, false
+	}
+}
+
+func (n cxx) iosPrecisionSet() bool {
+	return n.ident == "precision" && n.isClass("ios_base") && len(n.args) == 1
 }
 
 func isIosBaseCtor(name string) bool {
-	if strings.Contains(name, "8ios_base") {
-		return strings.Contains(name, "C1") || strings.Contains(name, "C2") || strings.Contains(name, "7_M_init")
+	n, ok := parseCxx(name)
+	return ok && n.iosBaseInit()
+}
+
+func (n cxx) iosBaseInit() bool {
+	if n.ctor && n.isClass("ios_base") {
+		return true
 	}
-	return strings.Contains(name, "9basic_ios") && (strings.Contains(name, "4initE") || strings.Contains(name, "4initB"))
+	if n.ident == "_M_init" && n.isClass("ios_base") {
+		return true
+	}
+	return n.ident == "init" && n.isClass("basic_ios")
 }
 
 func isLocaleCtor(name string) bool {
-	if !strings.Contains(name, "St6locale") {
-		return false
-	}
-	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E")
+	n, ok := parseCxx(name)
+	return ok && n.ctor && n.isClass("locale")
 }
 
 func isLibcxxStringPlus(name string) bool {
-	return strings.Contains(name, "St3__1plIc") && strings.Contains(name, "12basic_string")
+	n, ok := parseCxx(name)
+	return ok && n.libcxxStringPlus()
+}
+
+func (n cxx) libcxxStringPlus() bool {
+	// Some libc++ operator+(string, char const*) encodings confuse
+	// substitutions (first arg demangles as char const&). The return
+	// type is still basic_string.
+	return n.libcxx && n.ident == "+" && n.hasCStr() && (n.hasString() || n.ret.isString())
 }
 
 // isLibcxxStringPlusCStrLeft is operator+(char const*, string const&).
 func isLibcxxStringPlusCStrLeft(name string) bool {
-	if !isLibcxxStringPlus(name) {
-		return false
-	}
-	pk, rk := strings.Index(name, "PK"), strings.Index(name, "RK")
-	return pk >= 0 && rk > pk
+	n, ok := parseCxx(name)
+	return ok && n.libcxxStringPlus() && len(n.args) >= 2 && n.args[0].isCStr()
 }
 
 func isLibcxxStringErase(name string) bool {
-	return strings.Contains(name, "NSt3__112basic_string") &&
-		(strings.Contains(name, "5eraseE") || strings.Contains(name, "5eraseB"))
+	n, ok := parseCxx(name)
+	return ok && n.libcxx && n.class() == "basic_string" && n.ident == "erase"
 }
 
 func isLibcxxStringAppendCStr(name string) bool {
-	if !strings.Contains(name, "NSt3__112basic_string") {
-		return false
-	}
-	if !strings.Contains(name, "6appendE") && !strings.Contains(name, "6appendB") {
-		return false
-	}
-	return strings.HasSuffix(name, "EPKc") || strings.HasSuffix(name, "EPKcm")
+	n, ok := parseCxx(name)
+	return ok && n.stringCStrMethod("append")
 }
 
 func isLibcxxStringInsertCStr(name string) bool {
-	if !strings.Contains(name, "NSt3__112basic_string") {
-		return false
-	}
-	if !strings.Contains(name, "6insertE") && !strings.Contains(name, "6insertB") {
-		return false
-	}
-	return strings.Contains(name, "PKc")
+	n, ok := parseCxx(name)
+	return ok && n.libcxx && n.class() == "basic_string" && n.ident == "insert" && n.hasCStr()
 }
 
 func isLibcxxStringPushBack(name string) bool {
-	// Method on basic_string, not vector<basic_string>::push_back.
-	if !strings.Contains(name, "NSt3__112basic_string") {
+	n, ok := parseCxx(name)
+	if !ok || !n.libcxx || n.class() != "basic_string" || n.ident != "push_back" {
 		return false
 	}
-	if !strings.Contains(name, "9push_backE") && !strings.Contains(name, "9push_backB") {
-		return false
-	}
-	return strings.HasSuffix(name, "c") || strings.HasSuffix(name, "w")
+	return len(n.args) == 1 && (n.args[0].ident == "char" || n.args[0].ident == "wchar_t")
 }
 
 func isLibcxxStringAssignCStr(name string) bool {
-	if !strings.Contains(name, "NSt3__112basic_string") {
+	n, ok := parseCxx(name)
+	return ok && n.stringCStrMethod("assign")
+}
+
+func (n cxx) stringCStrMethod(ident string) bool {
+	if !n.libcxx || n.class() != "basic_string" || n.ident != ident || len(n.args) < 1 || !n.args[0].isCStr() {
 		return false
 	}
-	if !strings.Contains(name, "6assignE") && !strings.Contains(name, "6assignB") {
-		return false
+	if len(n.args) == 1 {
+		return true
 	}
-	return strings.HasSuffix(name, "EPKc") || strings.HasSuffix(name, "EPKcm")
+	return len(n.args) == 2 && !n.args[1].ptr
 }
 
 func isLibcxxStringCompareCStr(name string) bool {
-	return strings.Contains(name, "St3__1") &&
-		strings.Contains(name, "12basic_string") &&
-		strings.Contains(name, "7compare") &&
-		strings.Contains(name, "PK")
+	n, ok := parseCxx(name)
+	return ok && n.libcxx && n.class() == "basic_string" && n.ident == "compare" && n.hasCStr()
 }
 
 func isLibcxxStringEqCStr(name string) bool {
-	if !strings.Contains(name, "St3__1") || !strings.Contains(name, "basic_string") {
-		return false
-	}
-	if !strings.Contains(name, "PK") {
-		return false
-	}
-	return strings.Contains(name, "eqI") || strings.Contains(name, "eqERK") ||
-		strings.Contains(name, "eqEPKc") || strings.Contains(name, "3eqE")
+	n, ok := parseCxx(name)
+	return ok && n.libcxx && n.ident == "==" && n.hasString() && n.hasCStr()
 }
 
 func isGetline(name string) bool {
-	return strings.Contains(name, "St7getline") ||
-		strings.Contains(name, "St3__17getline") ||
-		strings.HasPrefix(name, "_ZSt7getline")
-}
-
-func isStringstream(name string) bool {
-	return strings.Contains(name, "18basic_stringstream")
-}
-
-func isOstringstream(name string) bool {
-	return strings.Contains(name, "19basic_ostringstream")
-}
-
-func isStringbuf(name string) bool {
-	return strings.Contains(name, "15basic_stringbuf")
-}
-
-func hasCxxCtor(name string) bool {
-	return strings.Contains(name, "C1E") || strings.Contains(name, "C2E") ||
-		strings.Contains(name, "C1B") || strings.Contains(name, "C2B")
-}
-
-func isCxxStrName(name string) bool {
-	return strings.Contains(name, "3strE") || strings.Contains(name, "3strB")
-}
-
-// isCxxStrSetter is str(const string&), not the sret getter str().
-// Darwin ABI tags sit in the name (3strB9nqn220108ERK…).
-func isCxxStrSetter(name string) bool {
-	return isCxxStrName(name) && strings.Contains(name, "RK")
+	n, ok := parseCxx(name)
+	return ok && n.std && n.ident == "getline"
 }
 
 // isRustAlloc is __rust_alloc / __rust_alloc_zeroed, not *_error_handler.
@@ -2796,115 +2706,116 @@ func isRustAlloc(name string) bool {
 }
 
 func isIstreamExtractI32(name string) bool {
-	// basic_istream::operator>>(int&) — short mangling Si = basic_istream<char>.
-	return name == "_ZNSirsERi" || strings.HasSuffix(name, "rsERi")
+	n, ok := parseCxx(name)
+	return ok && n.istreamExtractI32()
+}
+
+func (n cxx) istreamExtractI32() bool {
+	return n.isClass("basic_istream") && n.ident == ">>" &&
+		len(n.args) == 1 && n.args[0].ident == "int" && n.args[0].ref
 }
 
 func isIstreamIosManip(name string) bool {
-	// operator>>(ios_base&(*)(ios_base&)) — used for std::hex in str2int.
-	return name == "_ZNSirsEPFRSt8ios_baseS0_E" ||
-		strings.Contains(name, "rsEPFRSt8ios_baseS0_E")
+	n, ok := parseCxx(name)
+	return ok && n.istreamIosManip()
+}
+
+func (n cxx) istreamIosManip() bool {
+	return n.isClass("basic_istream") && n.ident == ">>" &&
+		len(n.args) == 1 && n.args[0].ident == "fnptr"
 }
 
 func cxxIOKind(name string) (*jen.Statement, int, bool) {
-	if strings.Contains(name, "__ostream_insert") {
+	n, ok := parseCxx(name)
+	if !ok {
+		return nil, 0, false
+	}
+	if n.ident == "__ostream_insert" {
 		return Sym(libc.OstreamInsert).code(), cxxIOInsert, true
 	}
-	if isGetline(name) {
+	if n.std && n.ident == "getline" {
 		return Sym(libc.IstreamGetline).code(), cxxIOGetline, true
 	}
-	if isIstreamIosManip(name) {
+	if n.istreamIosManip() {
 		return Sym(libc.IstreamApplyIosManip).code(), cxxIOManip, true
 	}
-	if isIstreamExtractI32(name) {
+	if n.istreamExtractI32() {
 		return Sym(libc.IstreamExtractI32).code(), cxxIOExtractI32, true
 	}
 	if k, kind, ok := cxxOstreamOp(name); ok {
 		return k, kind, true
 	}
-	if isIosPrecision(name) {
+	if n.iosPrecisionSet() {
 		return Sym(libc.IosPrecisionSet).code(), cxxIOIosPrecision, true
 	}
-	if isIosBaseCtor(name) {
+	if n.iosBaseInit() {
 		return Sym(libc.IosBaseCtor).code(), cxxIOIosBase, true
 	}
-	if isLocaleCtor(name) {
+	if n.ctor && n.isClass("locale") {
 		return Sym(libc.LocaleCtor).code(), cxxIOIosBase, true
 	}
-	if isStringstream(name) {
+	switch n.class() {
+	case "basic_stringstream":
 		switch {
-		case isCxxStrSetter(name):
+		case n.ident == "str" && n.hasString():
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
-		case isCxxStrName(name):
+		case n.ident == "str":
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
-		// Default ctor before the string+mode overload (C1Ev vs C1ERKNS…).
-		case strings.HasSuffix(name, "C1Ev") || strings.HasSuffix(name, "C2Ev") ||
-			(strings.Contains(name, "C1B") && strings.HasSuffix(name, "Ev")) ||
-			(strings.Contains(name, "C2B") && strings.HasSuffix(name, "Ev")):
+		case n.ctor && len(n.args) == 0:
 			return Sym(libc.StringstreamDefaultCtor).code(), cxxIOOStringStreamCtor, true
-		case hasCxxCtor(name):
+		case n.ctor:
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
-		case strings.Contains(name, "D0E"), strings.Contains(name, "D1E"), strings.Contains(name, "D2E"):
-			// Prefer default-close if we might have dual keys; safe for both.
+		case n.dtor:
 			return Sym(libc.StringstreamDefaultClose).code(), cxxIOClose, true
-		default:
-			return nil, 0, false
 		}
-	}
-	if isOstringstream(name) {
+	case "basic_ostringstream":
 		switch {
-		case hasCxxCtor(name):
+		case n.ctor:
 			return Sym(libc.OStringStreamCtor).code(), cxxIOOStringStreamCtor, true
-		case isCxxStrSetter(name):
+		case n.ident == "str" && n.hasString():
 			return Sym(libc.StringstreamCtor).code(), cxxIOStringstreamCtor, true
-		case isCxxStrName(name):
+		case n.ident == "str":
 			return Sym(libc.OStringStreamStr).code(), cxxIOOStringStreamStr, true
-		case strings.Contains(name, "D0E") || strings.Contains(name, "D1E") || strings.Contains(name, "D2E"):
+		case n.dtor:
 			return Sym(libc.OStringStreamClose).code(), cxxIOClose, true
-		default:
-			return nil, 0, false
 		}
-	}
-	if isStringbuf(name) {
+	case "basic_stringbuf":
 		switch {
-		case isCxxStrSetter(name):
+		case n.ident == "str" && n.hasString():
 			return Sym(libc.StringbufStr).code(), cxxIOStringbufStr, true
-		case isCxxStrName(name):
+		case n.ident == "str":
 			return Sym(libc.StringstreamStr).code(), cxxIOOStringStreamStr, true
-		case strings.Contains(name, "C1") || strings.Contains(name, "C2"):
+		case n.ctor:
 			return Sym(libc.StringbufCtor).code(), cxxIOIosBase, true
 		}
 	}
-	if strings.Contains(name, "4failE") || strings.Contains(name, "4failB") {
+	if n.ident == "fail" && n.isClass("basic_ios", "ios_base") {
 		return Sym(libc.IosFail).code(), cxxIOFail, true
 	}
-	if strings.Contains(name, "13basic_filebuf") {
+	if n.isClass("basic_filebuf") {
 		switch {
-		case strings.Contains(name, "C1"), strings.Contains(name, "C2"):
+		case n.ctor:
 			return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
-		case strings.Contains(name, "4open"):
+		case n.ident == "open":
 			return Sym(libc.FilebufOpen).code(), cxxIOOpen, true
-		case strings.Contains(name, "10underflow"):
+		case n.ident == "underflow":
 			return Sym(libc.FilebufUnderflow).code(), cxxIOUnderflow, true
-		case strings.Contains(name, "5close"):
+		case n.ident == "close":
 			return Sym(libc.FilebufClose).code(), cxxIOClose, true
 		}
 	}
-	if strings.Contains(name, "15basic_streambuf") &&
-		(strings.Contains(name, "C1") || strings.Contains(name, "C2")) {
+	if n.ctor && n.isClass("basic_streambuf") {
 		return Sym(libc.StreambufCtor).code(), cxxIOIosBase, true
 	}
-	if !strings.Contains(name, "14basic_ifstream") {
-		return nil, 0, false
+	if n.isClass("basic_ifstream") {
+		switch {
+		case n.ctor, n.ident == "open":
+			return Sym(libc.IfstreamOpen).code(), cxxIOOpen, true
+		case n.dtor, n.ident == "close":
+			return Sym(libc.IfstreamClose).code(), cxxIOClose, true
+		}
 	}
-	switch {
-	case strings.Contains(name, "C1"), strings.Contains(name, "C2"), strings.Contains(name, "4open"):
-		return Sym(libc.IfstreamOpen).code(), cxxIOOpen, true
-	case strings.Contains(name, "D0"), strings.Contains(name, "D1"), strings.Contains(name, "D2"), strings.Contains(name, "5close"):
-		return Sym(libc.IfstreamClose).code(), cxxIOClose, true
-	default:
-		return nil, 0, false
-	}
+	return nil, 0, false
 }
 
 // libcCanon strips Darwin $ / sanitized suffixes so realpath$DARWIN_EXTSN
