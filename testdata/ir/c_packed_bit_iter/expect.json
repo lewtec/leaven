@@ -4,7 +4,8 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "type std___Bit_iterator_base_base [12]byte"
+        "type std___Bit_iterator_base_base struct",
+        "F0 [8]byte"
       ],
       "not_contains": [
         "F0 unsafe.Pointer",

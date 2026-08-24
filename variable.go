@@ -523,8 +523,19 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
+		st := v.Typ
 		elems := make([]jen.Code, len(v.Fields))
 		for i, c := range v.Fields {
+			if st != nil && !st.Packed && i < len(st.Fields) {
+				if ft, ok := st.Fields[i].(*types.StructType); ok && ft.Packed {
+					sz, err := llvmTypeSize(ft)
+					if err != nil {
+						return expr{}, err
+					}
+					elems[i] = jen.Index(jen.Lit(int(sz))).Byte().Values()
+					continue
+				}
+			}
 			e, err := FormatValue(c)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)

@@ -88,9 +88,13 @@ func TestPackedBitIteratorSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	// Packed struct is a byte blob so the parent stays 16 bytes (12+4).
+	// Named packed type keeps [8]byte ptr slots; parent embeds [12]byte
+	// so it is not padded to 16.
+	if !strings.Contains(out, "[8]byte") {
+		t.Fatalf("expected [8]byte packed ptr field:\n%s", out)
+	}
 	if !strings.Contains(out, "[12]byte") {
-		t.Fatalf("expected [12]byte packed iter:\n%s", out)
+		t.Fatalf("expected parent to embed [12]byte:\n%s", out)
 	}
 }
 
