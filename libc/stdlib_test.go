@@ -106,17 +106,6 @@ func TestReallocShrinkInPlace(t *testing.T) {
 	Free(r)
 }
 
-func TestRetainGoHeap(t *testing.T) {
-	p := new(byte)
-	*p = 9
-	if Retain(p) != p {
-		t.Fatal("Retain did not return p")
-	}
-	if _, ok := allocs.Load(uintptr(unsafe.Pointer(p))); !ok {
-		t.Fatal("Retain did not pin Go heap object")
-	}
-}
-
 func TestAllocaIsSlab(t *testing.T) {
 	p := Alloca[byte](1, 16)
 	if p == nil {

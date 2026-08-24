@@ -15,26 +15,9 @@ var (
 	allocatorMu sync.Mutex
 )
 
-// allocRec pins a Go-heap object whose only live handle may be a uintptr.
-// Slab malloc/alloca need no pin.
-type allocRec struct {
-	p any
-}
-
-var allocs sync.Map
-
 // slabLive tracks modernc blocks we still own. Double free is a no-op so
 // mismatched C++/Rust drop paths do not corrupt the freelist.
 var slabLive sync.Map // uintptr → struct{}
-
-// Retain keeps p reachable until the process exits or the caller drops it.
-// Only for leftover Go-heap objects. Slab malloc/alloca need no pin.
-func Retain[T any](p *T) *T {
-	if p != nil {
-		allocs.LoadOrStore(Addr(p), &allocRec{p: p})
-	}
-	return p
-}
 
 // Malloc allocates n bytes (C malloc). n==0 allocates 1 byte, like musl/gnulib.
 func Malloc[T any](n int64) *T {
