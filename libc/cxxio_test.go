@@ -116,12 +116,14 @@ func TestStdStringLongDefaultLayout(t *testing.T) {
 func TestStdToString(t *testing.T) {
 	var obj [32]byte
 	StdToString(&obj[0], 42)
-	if got := string(goCxxStringBytes(&obj[0])); got != "42" {
-		t.Fatalf("u %q", got)
+	dp, n := libcxxStringData(&obj[0])
+	if n != 2 || string(Bytes(dp, 2)) != "42" {
+		t.Fatalf("u n=%d %q", n, Bytes(dp, int(n)))
 	}
 	StdToStringI(&obj[0], -7)
-	if got := string(goCxxStringBytes(&obj[0])); got != "-7" {
-		t.Fatalf("i %q", got)
+	dp, n = libcxxStringData(&obj[0])
+	if n != 2 || string(Bytes(dp, 2)) != "-7" {
+		t.Fatalf("i n=%d %q", n, Bytes(dp, int(n)))
 	}
 }
 
