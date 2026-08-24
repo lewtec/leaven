@@ -15,8 +15,8 @@ var (
 	allocatorMu sync.Mutex
 )
 
-// allocRec pins a Go-heap object whose only live handle may be a uintptr
-// (tagged alloca via Retain). Not used for slab malloc.
+// allocRec pins a Go-heap object whose only live handle may be a uintptr.
+// Slab malloc/alloca need no pin.
 type allocRec struct {
 	p any
 }
@@ -28,7 +28,7 @@ var allocs sync.Map
 var slabLive sync.Map // uintptr → struct{}
 
 // Retain keeps p reachable until the process exits or the caller drops it.
-// Only for Go-heap objects (alloca→uintptr). Slab mallocs need no pin.
+// Only for leftover Go-heap objects. Slab malloc/alloca need no pin.
 func Retain[T any](p *T) *T {
 	if p != nil {
 		allocs.LoadOrStore(Addr(p), &allocRec{p: p})
@@ -60,6 +60,22 @@ func Calloc[T any](count, size int64) *T {
 	}
 	clear(Bytes(As[byte](unsafe.Pointer(p)), int(n)))
 	return As[T](unsafe.Pointer(p))
+}
+
+// Alloca is LLVM alloca on the modernc slab (mmap, not Go heap).
+// The pointer stays valid if stored in another slab block (C++
+// containers). count*size is the LLVM ABI demand; a single object
+// is also at least sizeof(T) so Go field access stays in-bounds.
+func Alloca[T any](count, size int64) *T {
+	n, ok := mulSize(count, size)
+	if !ok {
+		return nil
+	}
+	var z T
+	if sz := int64(unsafe.Sizeof(z)); n < sz {
+		n = sz
+	}
+	return Calloc[T](1, n)
 }
 
 // Realloc is C realloc. n==0 frees p and returns nil.
@@ -110,7 +126,7 @@ func Arc4randomBuf(buf *byte, n int64) {
 }
 
 // slabUsable is the modernc block size for p, or 0 if p is not ours
-// (stack, Go slice, already freed).
+// (Go slice, already freed).
 func slabUsable(p *byte) int {
 	if p == nil {
 		return 0

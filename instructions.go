@@ -162,34 +162,25 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		if err != nil {
 			return nil, err
 		}
-		name := VariableName(inst)
-		// Force align ≥8 so pointers never have LSB set (Rust niches / tagged
-		// ptrs). new([0]byte) and new(struct{}) can be 1-byte aligned.
-		allocAlign8 := func(elem *jen.Statement) *jen.Statement {
-			return emitPtr(addrOf(jen.New(jen.Struct(
-				jen.Id("_").Index(jen.Lit(0)).Uint64(),
-				jen.Id("v").Add(elem),
-				jen.Id("b").Byte(),
-			)).Dot("v")))
-		}
-		if inst.NElems == nil {
-			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
-			// Retain so GC won't free when only a uintptr handle remains.
-			if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-				return one(assign(name, emitAddr(Sym(libc.Retain[byte]).Call(jen.New(t))))), nil
-			}
-			// If T itself is a tagged pointer type (alloca of the pointer slot).
-			if isTaggedPointerType(inst.ElemType) {
-				return one(assign(name, allocAlign8(jen.Uintptr()))), nil
-			}
-			return one(assign(name, allocAlign8(t))), nil
-		}
-		nElems, err := translateOp(inst.NElems, "NElems")
+		sz, err := llvmTypeSize(inst.ElemType)
 		if err != nil {
 			return nil, err
 		}
-		// Dynamic array: pad length and pin first element (already slice-aligned).
-		return one(assign(name, emitPtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
+		name := VariableName(inst)
+		count := jen.Code(jen.Lit(1))
+		if inst.NElems != nil {
+			nElems, err := translateOp(inst.NElems, "NElems")
+			if err != nil {
+				return nil, err
+			}
+			count = jen.Int64().Call(nElems)
+		}
+		// Slab (mmap), not Go new: pointer stays valid in C++ containers.
+		alloc := Sym(libc.Alloca[byte]).Types(t).Call(count, jen.Lit(sz))
+		if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
+			return one(assign(name, emitAddr(alloc))), nil
+		}
+		return one(assign(name, emitPtr(alloc))), nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")
