@@ -8,8 +8,8 @@ import "unsafe"
 //	__right_    ptr  @8
 //	__parent_   ptr  @16
 //	__is_black_ i8   @24
-//	__value_    …    @32   pair<K,V> for map; CGContext::iv_bounds is
-//	                       pair<const Variable*, unsigned> (16 bytes).
+//	__value_    …    @32   pair<K,V> (16 bytes for Variable*→unsigned;
+//	                       larger for Statement*→Effect).
 //
 // Inlined insert can write the pair at +0, so __right_ becomes a small
 // integer (Darwin csmith crash: __construct_from_tree → __get_value(0x3)).
@@ -25,27 +25,36 @@ const (
 )
 
 func libcxxTreePtr(p *byte) bool {
-	a := uintptr(unsafe.Pointer(p))
+	return libcxxTreeAddr(uintptr(unsafe.Pointer(p)))
+}
+
+func libcxxTreeAddr(a uintptr) bool {
 	return a >= libcxxTreeMinAddr && a%8 == 0
 }
 
+func libcxxTreeLoadU(n *byte, off int) uintptr {
+	return uintptr(Load[unsafe.Pointer](Ptr(n), off))
+}
+
+func libcxxTreeNode(a uintptr) *byte {
+	if !libcxxTreeAddr(a) {
+		return nil
+	}
+	return As[byte](unsafe.Pointer(a))
+}
+
 func libcxxTreeLoadPtr(n *byte, off int) *byte {
-	return As[byte](Load[unsafe.Pointer](Ptr(n), off))
+	return libcxxTreeNode(libcxxTreeLoadU(n, off))
 }
 
-// libcxxTreeIntChild is a non-nil pointer that cannot be a node
-// (unsigned map value written into __right_ / __left_).
-func libcxxTreeIntChild(p *byte) bool {
-	return p != nil && !libcxxTreePtr(p)
-}
-
-// libcxxTreeRealChild is a node whose __parent_ points at parent.
-// A Variable* sitting in __left_ (pair overlaid at +0) fails this.
-func libcxxTreeRealChild(parent, child *byte) bool {
-	if !libcxxTreePtr(child) {
+// libcxxTreeRealChildU is a node whose __parent_ points at parent.
+// A Variable* or leftover unsigned in __left_/__right_ fails this.
+func libcxxTreeRealChildU(parent *byte, child uintptr) bool {
+	c := libcxxTreeNode(child)
+	if c == nil {
 		return false
 	}
-	return libcxxTreeLoadPtr(child, libcxxTreeParentOff) == parent
+	return libcxxTreeLoadU(c, libcxxTreeParentOff) == uintptr(unsafe.Pointer(parent))
 }
 
 // LibcxxTreeGetValue is __tree_node::__get_value. Returns this+32, or nil
@@ -71,33 +80,45 @@ func LibcxxTreeConstructFromTree(tree, src, construct *byte) *byte {
 	return libcxxTreeCopy(src, 0)
 }
 
+func libcxxTreeOverlay(src *byte, leftU, rightU uintptr) bool {
+	// Integer leftover (0x3, 0x7) first — do not deref it.
+	if leftU != 0 && !libcxxTreeAddr(leftU) {
+		return true
+	}
+	if rightU != 0 && !libcxxTreeAddr(rightU) {
+		return true
+	}
+	if leftU != 0 && !libcxxTreeRealChildU(src, leftU) {
+		return true
+	}
+	if rightU != 0 && !libcxxTreeRealChildU(src, rightU) {
+		return true
+	}
+	return false
+}
+
 func libcxxTreeCopy(src *byte, depth int) *byte {
 	if depth > 64 || !libcxxTreePtr(src) {
 		return nil
 	}
-	n := Calloc[byte](1, int64(libcxxTreeNodeSize))
+	leftU := libcxxTreeLoadU(src, libcxxTreeLeftOff)
+	rightU := libcxxTreeLoadU(src, libcxxTreeRightOff)
+	overlay := libcxxTreeOverlay(src, leftU, rightU)
+	_, destN, valOff, valN := libcxxTreeCopySpan(src, overlay)
+	n := Calloc[byte](1, int64(destN))
 	if n == nil {
 		return nil
 	}
 	Store(Ptr(n), libcxxTreeBlackOff, Load[byte](Ptr(src), libcxxTreeBlackOff))
-	left := libcxxTreeLoadPtr(src, libcxxTreeLeftOff)
-	right := libcxxTreeLoadPtr(src, libcxxTreeRightOff)
-	overlay := libcxxTreeIntChild(left) || libcxxTreeIntChild(right) ||
-		(left != nil && !libcxxTreeRealChild(src, left)) ||
-		(right != nil && !libcxxTreeRealChild(src, right))
-	valOff := libcxxTreeValueOff
-	if overlay {
-		valOff = 0
-	}
 	copy(
-		Bytes(As[byte](Off(Ptr(n), libcxxTreeValueOff)), libcxxTreeValueSize),
-		Bytes(As[byte](Off(Ptr(src), valOff)), libcxxTreeValueSize),
+		Bytes(As[byte](Off(Ptr(n), libcxxTreeValueOff)), valN),
+		Bytes(As[byte](Off(Ptr(src), valOff)), valN),
 	)
 	if overlay {
 		return n
 	}
-	nl := libcxxTreeCopy(left, depth+1)
-	nr := libcxxTreeCopy(right, depth+1)
+	nl := libcxxTreeCopy(libcxxTreeNode(leftU), depth+1)
+	nr := libcxxTreeCopy(libcxxTreeNode(rightU), depth+1)
 	Store(Ptr(n), libcxxTreeLeftOff, Ptr(nl))
 	Store(Ptr(n), libcxxTreeRightOff, Ptr(nr))
 	if nl != nil {
@@ -109,32 +130,60 @@ func libcxxTreeCopy(src *byte, depth int) *byte {
 	return n
 }
 
+// libcxxTreeCopySpan is how much of src to memcpy onto dest+32.
+// Slab nodes use the real malloc size so map<Statement*, Effect>
+// (Effect has a vector at +24) is not truncated to 16 bytes.
+// Go-slice fixtures and other non-slab pointers keep the 16-byte pair.
+func libcxxTreeCopySpan(src *byte, overlay bool) (srcN, destN, valOff, valN int) {
+	srcN = slabUsable(src)
+	valOff = libcxxTreeValueOff
+	if overlay {
+		valOff = 0
+	}
+	if srcN < libcxxTreeNodeSize {
+		return srcN, libcxxTreeNodeSize, valOff, libcxxTreeValueSize
+	}
+	destN = srcN
+	if overlay {
+		destN = libcxxTreeValueOff + srcN
+	}
+	valN = destN - libcxxTreeValueOff
+	if overlay {
+		if valN > srcN {
+			valN = srcN
+		}
+	} else if valN > srcN-libcxxTreeValueOff {
+		valN = srcN - libcxxTreeValueOff
+	}
+	return srcN, destN, valOff, valN
+}
+
 func libcxxTreeMin(x *byte) *byte {
 	for {
-		left := libcxxTreeLoadPtr(x, libcxxTreeLeftOff)
-		if !libcxxTreeRealChild(x, left) {
+		left := libcxxTreeLoadU(x, libcxxTreeLeftOff)
+		if !libcxxTreeRealChildU(x, left) {
 			return x
 		}
-		x = left
+		x = libcxxTreeNode(left)
 	}
 }
 
 func libcxxTreeMax(x *byte) *byte {
 	for {
-		right := libcxxTreeLoadPtr(x, libcxxTreeRightOff)
-		if !libcxxTreeRealChild(x, right) {
+		right := libcxxTreeLoadU(x, libcxxTreeRightOff)
+		if !libcxxTreeRealChildU(x, right) {
 			return x
 		}
-		x = right
+		x = libcxxTreeNode(right)
 	}
 }
 
 func libcxxTreeIsLeftChild(x *byte) bool {
 	p := libcxxTreeLoadPtr(x, libcxxTreeParentOff)
-	if !libcxxTreePtr(p) {
+	if p == nil {
 		return false
 	}
-	return libcxxTreeLoadPtr(p, libcxxTreeLeftOff) == x
+	return libcxxTreeLoadU(p, libcxxTreeLeftOff) == uintptr(unsafe.Pointer(x))
 }
 
 // LibcxxTreeNext is std::__tree_next. Bad child pointers (overlay
@@ -143,9 +192,9 @@ func LibcxxTreeNext(x *byte) *byte {
 	if !libcxxTreePtr(x) {
 		return nil
 	}
-	right := libcxxTreeLoadPtr(x, libcxxTreeRightOff)
-	if libcxxTreeRealChild(x, right) {
-		return libcxxTreeMin(right)
+	right := libcxxTreeLoadU(x, libcxxTreeRightOff)
+	if libcxxTreeRealChildU(x, right) {
+		return libcxxTreeMin(libcxxTreeNode(right))
 	}
 	for i := 0; libcxxTreePtr(x) && !libcxxTreeIsLeftChild(x) && i < 64; i++ {
 		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)
@@ -162,9 +211,10 @@ func LibcxxTreePrev(x *byte) *byte {
 	if !libcxxTreePtr(x) {
 		return nil
 	}
-	left := libcxxTreeLoadPtr(x, libcxxTreeLeftOff)
-	if libcxxTreeRealChild(x, left) || (libcxxTreePtr(left) && libcxxTreeLoadPtr(left, libcxxTreeParentOff) == x) {
-		return libcxxTreeMax(left)
+	left := libcxxTreeLoadU(x, libcxxTreeLeftOff)
+	c := libcxxTreeNode(left)
+	if libcxxTreeRealChildU(x, left) || (c != nil && libcxxTreeLoadU(c, libcxxTreeParentOff) == uintptr(unsafe.Pointer(x))) {
+		return libcxxTreeMax(c)
 	}
 	for i := 0; libcxxTreePtr(x) && libcxxTreeIsLeftChild(x) && i < 64; i++ {
 		x = libcxxTreeLoadPtr(x, libcxxTreeParentOff)

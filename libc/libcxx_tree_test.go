@@ -104,3 +104,26 @@ func TestLibcxxTreeConstructCopiesChild(t *testing.T) {
 		t.Fatal("parent")
 	}
 }
+
+func TestLibcxxTreeConstructCopiesLargeValue(t *testing.T) {
+	// map<Statement*, Effect>: value is much bigger than pair<K,unsigned>.
+	const n = 128
+	src := Calloc[byte](1, n)
+	if src == nil {
+		t.Fatal("calloc")
+	}
+	sb := Bytes(src, n)
+	for i := libcxxTreeValueOff; i < n; i++ {
+		sb[i] = byte(i)
+	}
+	dst := LibcxxTreeConstructFromTree(nil, src, nil)
+	if dst == nil {
+		t.Fatal("dst")
+	}
+	db := Bytes(dst, n)
+	for i := libcxxTreeValueOff; i < n; i++ {
+		if db[i] != byte(i) {
+			t.Fatalf("off %d: got %d", i, db[i])
+		}
+	}
+}

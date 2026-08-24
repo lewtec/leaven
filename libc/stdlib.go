@@ -109,6 +109,24 @@ func Arc4randomBuf(buf *byte, n int64) {
 	}
 }
 
+// slabUsable is the modernc block size for p, or 0 if p is not ours
+// (stack, Go slice, already freed).
+func slabUsable(p *byte) int {
+	if p == nil {
+		return 0
+	}
+	u := Addr(p)
+	if u <= 1 {
+		return 0
+	}
+	allocatorMu.Lock()
+	defer allocatorMu.Unlock()
+	if _, ok := slabLive.Load(u); !ok {
+		return 0
+	}
+	return memory.UintptrUsableSize(u)
+}
+
 // Free is C free(p). All heap traffic (malloc, RustAlloc, operator new with
 // align≤16) shares the modernc slab.
 func Free(p *byte) {
