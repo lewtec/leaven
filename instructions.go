@@ -172,6 +172,12 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 				jen.Id("b").Byte(),
 			)).Dot("v")))
 		}
+		// Pin alloca objects. C++ copies the address into malloc'd
+		// vector/map slots that Go does not scan; the SSA name then
+		// dies and sweep reports a zombie (Darwin seed 42, 208-byte span).
+		retain := func(p *jen.Statement) *jen.Statement {
+			return emitPtr(Sym(libc.Retain[byte]).Call(emitAs(jen.Byte(), p)))
+		}
 		if inst.NElems == nil {
 			// Alloca of T yields a pointer; tagged union pointers stay uintptr.
 			// Retain so GC won't free when only a uintptr handle remains.
@@ -180,16 +186,16 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			// If T itself is a tagged pointer type (alloca of the pointer slot).
 			if isTaggedPointerType(inst.ElemType) {
-				return one(assign(name, allocAlign8(jen.Uintptr()))), nil
+				return one(assign(name, retain(allocAlign8(jen.Uintptr())))), nil
 			}
-			return one(assign(name, allocAlign8(t))), nil
+			return one(assign(name, retain(allocAlign8(t)))), nil
 		}
 		nElems, err := translateOp(inst.NElems, "NElems")
 		if err != nil {
 			return nil, err
 		}
 		// Dynamic array: pad length and pin first element (already slice-aligned).
-		return one(assign(name, emitPtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0)))))), nil
+		return one(assign(name, retain(emitPtr(addrOf(jen.Make(jen.Index().Add(t), bin(nElems, "+", jen.Lit(1))).Index(jen.Lit(0))))))), nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")
