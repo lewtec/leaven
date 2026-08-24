@@ -2720,7 +2720,7 @@ func isStdToString(name string) bool {
 // overload; the IR sret string is the first argument.
 func stdToStringKind(name string) (signed bool, ok bool) {
 	n, ok := parseCxx(name)
-	if !ok || !n.std || n.ident != "to_string" || n.recv != "" || len(n.args) != 1 {
+	if !ok || !n.libcxx || n.ident != "to_string" || n.recv != "" || len(n.args) != 1 {
 		return false, false
 	}
 	if n.args[0].ptr || n.args[0].ref {

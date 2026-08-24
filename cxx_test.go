@@ -137,6 +137,9 @@ func TestParseCxxToString(t *testing.T) {
 	if isStdToString("printf") {
 		t.Fatal("printf")
 	}
+	if isStdToString("_ZSt9to_stringm") {
+		t.Fatal("libstdc++ to_string")
+	}
 }
 
 func TestParseCxxRejectsC(t *testing.T) {
