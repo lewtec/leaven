@@ -106,15 +106,26 @@ func TestReallocShrinkInPlace(t *testing.T) {
 	Free(r)
 }
 
-func TestAllocaIsSlab(t *testing.T) {
+func TestAllocaStack(t *testing.T) {
 	p := Alloca[byte](1, 16)
 	if p == nil {
 		t.Fatal("Alloca")
 	}
-	if slabUsable(p) < 16 {
-		t.Fatal("Alloca not on slab")
+	if slabUsable(p) != 0 {
+		t.Fatal("alloca must not share the malloc slab")
 	}
 	*p = 3
+	q := Alloca[byte](1, 16)
+	if q == nil || Addr(q) == Addr(p) {
+		t.Fatal("nested")
+	}
+	AllocaFree(q)
+	r := Alloca[byte](1, 16)
+	if Addr(r) != Addr(q) {
+		t.Fatal("LIFO reuse")
+	}
+	AllocaFree(r)
+	AllocaFree(p)
 }
 
 func TestRustAllocSlabFreeRoundTrip(t *testing.T) {

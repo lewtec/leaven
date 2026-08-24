@@ -45,10 +45,10 @@ func Calloc[T any](count, size int64) *T {
 	return As[T](unsafe.Pointer(p))
 }
 
-// Alloca is LLVM alloca on the modernc slab (mmap, not Go heap).
-// Codegen defers Free so the block dies with the function.
-// count*size is the LLVM ABI demand; a single object is also
-// at least sizeof(T) so Go field access stays in-bounds.
+// Alloca is LLVM alloca: mmap bump stack, not the malloc slab.
+// Sharing malloc's freelist zeroed a still-referenced object
+// (Darwin seed 42: Expression vptr=0, virtual call at +0x50).
+// Codegen defers AllocaFree (LIFO, same as C stack).
 func Alloca[T any](count, size int64) *T {
 	n, ok := mulSize(count, size)
 	if !ok {
@@ -58,7 +58,89 @@ func Alloca[T any](count, size int64) *T {
 	if sz := int64(unsafe.Sizeof(z)); n < sz {
 		n = sz
 	}
-	return Calloc[T](1, n)
+	p := stackAlloc(int(n))
+	if p == 0 {
+		return nil
+	}
+	return As[T](unsafe.Pointer(p))
+}
+
+// AllocaFree pops one Alloca. Must be LIFO (defer).
+func AllocaFree(p *byte) {
+	if p == nil {
+		return
+	}
+	stackPop(Addr(p))
+}
+
+const (
+	stackAlign = 16
+	stackChunk = 1 << 20
+)
+
+type stackMark struct {
+	base, length uintptr
+	off          int
+}
+
+var (
+	stkMu     sync.Mutex
+	stkBase   uintptr
+	stkLen    int
+	stkOff    int
+	stkMarks  []stackMark
+	stkChunks []uintptr
+)
+
+func stackGrow(need int) bool {
+	n := stackChunk
+	if need > n {
+		n = (need + stackAlign - 1) / stackAlign * stackAlign
+	}
+	allocatorMu.Lock()
+	p, err := allocator.UintptrMalloc(n)
+	allocatorMu.Unlock()
+	if err != nil || p == 0 {
+		return false
+	}
+	stkChunks = append(stkChunks, p)
+	stkBase = p
+	stkLen = n
+	stkOff = 0
+	return true
+}
+
+func stackAlloc(n int) uintptr {
+	if n < 1 {
+		n = 1
+	}
+	n = (n + stackAlign - 1) / stackAlign * stackAlign
+	stkMu.Lock()
+	defer stkMu.Unlock()
+	if stkOff+n > stkLen && !stackGrow(n) {
+		return 0
+	}
+	stkMarks = append(stkMarks, stackMark{base: stkBase, length: uintptr(stkLen), off: stkOff})
+	p := stkBase + uintptr(stkOff)
+	clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), n))
+	stkOff += n
+	return p
+}
+
+func stackPop(u uintptr) {
+	stkMu.Lock()
+	defer stkMu.Unlock()
+	if len(stkMarks) == 0 {
+		return
+	}
+	m := stkMarks[len(stkMarks)-1]
+	if m.base+uintptr(m.off) != u {
+		return
+	}
+	stkMarks = stkMarks[:len(stkMarks)-1]
+	stkBase = m.base
+	stkLen = int(m.length)
+	stkOff = m.off
 }
 
 // Realloc is C realloc. n==0 frees p and returns nil.

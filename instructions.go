@@ -175,8 +175,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			count = jen.Int64().Call(nElems)
 		}
-		// Slab malloc, freed on function return. Capture the block,
-		// not name — name can be reused.
+		// Bump stack, not malloc. Capture the block, not name.
 		mem := name + "_mem"
 		alloc := Sym(libc.Alloca[byte]).Types(t).Call(count, jen.Lit(sz))
 		handle := emitPtr(jen.Id(mem))
@@ -186,7 +185,7 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 		return []jen.Code{
 			jen.Id(mem).Op(":=").Add(alloc),
 			assign(name, handle),
-			jen.Defer().Add(Sym(libc.Free).Call(emitAs(Qual[byte](), emitPtr(jen.Id(mem))))),
+			jen.Defer().Add(Sym(libc.AllocaFree).Call(emitAs(Qual[byte](), emitPtr(jen.Id(mem))))),
 		}, nil
 
 	case *ir.InstAnd:

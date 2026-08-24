@@ -9,7 +9,7 @@
         "func state_new() unsafe.Pointer",
         "local_state_mem := libc.Alloca[",
         "local_state = libc.Ptr(local_state_mem)",
-        "defer libc.Free("
+        "defer libc.AllocaFree("
       ],
       "not_contains": [
         "var state **state"
