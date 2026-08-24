@@ -1008,6 +1008,30 @@ func libcxxIsLong(s *byte) bool {
 	return Load[byte](Ptr(s), 0)&libcxxLongBit != 0
 }
 
+// StdToString is std::to_string(unsigned long) and the other unsigned
+// integer overloads. ret is the LLVM sret string.
+func StdToString(ret *byte, v uint64) {
+	var buf [32]byte
+	stdToStringCopy(ret, strconv.AppendUint(buf[:0], v, 10))
+}
+
+// StdToStringI is std::to_string(long) and the other signed overloads.
+func StdToStringI(ret *byte, v int64) {
+	var buf [32]byte
+	stdToStringCopy(ret, strconv.AppendInt(buf[:0], v, 10))
+}
+
+func stdToStringCopy(ret *byte, digits []byte) {
+	if ret == nil {
+		return
+	}
+	var src *byte
+	if len(digits) > 0 {
+		src = &digits[0]
+	}
+	StdStringInit(ret, src, int64(len(digits)))
+}
+
 // StdStringInit is libc++ basic_string::__init(char const*, size_t).
 func StdStringInit(this *byte, s *byte, n int64) unsafe.Pointer {
 	if this == nil {

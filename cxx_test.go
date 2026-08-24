@@ -121,6 +121,24 @@ func TestParseCxxNewDelete(t *testing.T) {
 	}
 }
 
+func TestParseCxxToString(t *testing.T) {
+	n, ok := parseCxx("_ZNSt3__19to_stringEm")
+	if !ok || n.ident != "to_string" || n.recv != "" || !n.std {
+		t.Fatalf("%+v ok=%v", n, ok)
+	}
+	signed, ok := stdToStringKind("_ZNSt3__19to_stringEm")
+	if !ok || signed {
+		t.Fatalf("unsigned long signed=%v ok=%v", signed, ok)
+	}
+	signed, ok = stdToStringKind("_ZNSt3__19to_stringEl")
+	if !ok || !signed {
+		t.Fatalf("long signed=%v ok=%v", signed, ok)
+	}
+	if isStdToString("printf") {
+		t.Fatal("printf")
+	}
+}
+
 func TestParseCxxRejectsC(t *testing.T) {
 	if _, ok := parseCxx("printf"); ok {
 		t.Fatal("printf")

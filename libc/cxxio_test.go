@@ -113,6 +113,18 @@ func TestStdStringLongDefaultLayout(t *testing.T) {
 	StdStringDestroy(&obj[0])
 }
 
+func TestStdToString(t *testing.T) {
+	var obj [32]byte
+	StdToString(&obj[0], 42)
+	if got := string(goCxxStringBytes(&obj[0])); got != "42" {
+		t.Fatalf("u %q", got)
+	}
+	StdToStringI(&obj[0], -7)
+	if got := string(goCxxStringBytes(&obj[0])); got != "-7" {
+		t.Fatalf("i %q", got)
+	}
+}
+
 func TestStdStringPlusCStr(t *testing.T) {
 	s := putTestCxxString("bar")
 	var left, right [32]byte

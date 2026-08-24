@@ -1923,6 +1923,21 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			isPtrish(inst.Args[0].Type()) && isPtrish(inst.Args[1].Type()) {
 			callee = Sym(libc.StdStringEqCStr).code()
 			args = []jen.Code{ptrArg(inst.Args, args, 0), ptrArg(inst.Args, args, 1)}
+		} else if signed, ok := stdToStringKind(llvmName); ok && len(inst.Args) >= 2 {
+			// sret string, then the integer.
+			if signed {
+				callee = Sym(libc.StdToStringI).code()
+				args = []jen.Code{
+					ptrArg(inst.Args, args, 0),
+					jen.Int64().Call(jen.Add(args[1])),
+				}
+			} else {
+				callee = Sym(libc.StdToString).code()
+				args = []jen.Code{
+					ptrArg(inst.Args, args, 0),
+					jen.Uint64().Call(jen.Add(args[1])),
+				}
+			}
 		} else if c, adj, retPtr, ok := cxxIOCallIR(llvmName, inst.Args, args); ok {
 			callee = c
 			args = adj
@@ -2694,6 +2709,32 @@ func isLibcxxStringEqCStr(name string) bool {
 func isGetline(name string) bool {
 	n, ok := parseCxx(name)
 	return ok && n.std && n.ident == "getline"
+}
+
+func isStdToString(name string) bool {
+	_, ok := stdToStringKind(name)
+	return ok
+}
+
+// stdToStringKind is std::to_string on an integer. signed is the C++
+// overload; the IR sret string is the first argument.
+func stdToStringKind(name string) (signed bool, ok bool) {
+	n, ok := parseCxx(name)
+	if !ok || !n.std || n.ident != "to_string" || n.recv != "" || len(n.args) != 1 {
+		return false, false
+	}
+	if n.args[0].ptr || n.args[0].ref {
+		return false, false
+	}
+	switch n.args[0].ident {
+	case "unsigned int", "unsigned long", "unsigned long long",
+		"unsigned short", "unsigned char":
+		return false, true
+	case "int", "long", "long long", "short", "signed char":
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 // isRustAlloc is __rust_alloc / __rust_alloc_zeroed, not *_error_handler.
