@@ -237,10 +237,24 @@ func wholeVarAccess(v value.Value, elem types.Type) bool {
 	return types.Equal(g.ContentType, elem)
 }
 
+// llvmPtrBits is an LLVM pointer that may hold a C heap address or a
+// dangling alloca. Store it as uintptr so the write barrier does not
+// mark a freed Go object (Darwin seed 42).
+func llvmPtrBits(elem types.Type) bool {
+	_, ok := elem.(*types.PointerType)
+	return ok && !isTaggedPointerType(elem)
+}
+
 func overlayMem(addr *jen.Statement, addrTy, elem types.Type) (*jen.Statement, error) {
-	t, err := TypeSpec(elem)
-	if err != nil {
-		return nil, err
+	var t *jen.Statement
+	if llvmPtrBits(elem) {
+		t = jen.Uintptr()
+	} else {
+		var err error
+		t, err = TypeSpec(elem)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if isTaggedPointerType(addrTy) {
 		addr = emitUP(addr)
@@ -274,12 +288,18 @@ func typedLoad(src expr, srcVal value.Value, elem types.Type) (*jen.Statement, e
 	if err != nil {
 		return nil, err
 	}
+	if llvmPtrBits(elem) {
+		return emitUP(slot), nil
+	}
 	return slot, nil
 }
 
 func typedStore(dst expr, dstVal value.Value, elem types.Type, src jen.Code) (*jen.Statement, error) {
 	if dst.base != nil && wholeVarAccess(dstVal, elem) {
 		return dst.store(src), nil
+	}
+	if llvmPtrBits(elem) {
+		src = jen.Uintptr().Call(emitUP(src))
 	}
 	slot, err := overlayMem(dst.code, dstVal.Type(), elem)
 	if err != nil {
