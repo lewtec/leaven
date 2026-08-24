@@ -204,6 +204,21 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 		return Qual[unsafe.Pointer](), nil
 
 	case *types.StructType:
+		// Packed LLVM size is not a multiple of the field alignment
+		// (<{ ptr, ptr, ptr, i8 }> is 25, Go would pad the type to 32).
+		// A parent then puts the next field at 40 instead of 32
+		// (libc++ __tree_node value / Darwin seed 42 write barrier).
+		// Field GEPs already use llvmFieldOffset; emit the ABI size as bytes.
+		if t.Packed {
+			sz, err := llvmTypeSize(t)
+			if err != nil {
+				return nil, err
+			}
+			if sz == 0 {
+				return jen.Struct(), nil
+			}
+			return jen.Index(jen.Lit(int(sz))).Byte(), nil
+		}
 		var fields []jen.Code
 		for i, field := range t.Fields {
 			// Drop LLVM ZSTs (empty structs / PhantomData). Go struct{}
@@ -213,17 +228,7 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			}
 			var fieldType *jen.Statement
 			var err error
-			if t.Packed && packedMixesPtrAndInt(t) {
-				// <{ ptr, i32 }>: Go {uintptr,int32} is 16 bytes (align 8);
-				// LLVM packed is 12. Use [8]byte for the ptr slot so the
-				// struct is 12 bytes and parent layouts (vector<bool>) match.
-				// Field access is via unsafe address (see _Bit_iterator_base).
-				if _, ok := field.(*types.PointerType); ok {
-					fieldType = jen.Index(jen.Lit(8)).Byte()
-				} else {
-					fieldType, err = TypeSpec(field)
-				}
-			} else if structFieldUintptr(t, field) {
+			if structFieldUintptr(t, field) {
 				// This slot may hold a tagged non-pointer (union payload or
 				// packed ptr+int). Do not put it in a GC pointer field.
 				fieldType = jen.Uintptr()

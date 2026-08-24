@@ -88,9 +88,31 @@ func TestPackedBitIteratorSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	// Expect [8]byte for packed ptr slot, not uintptr (align 8 → size 16).
-	if !strings.Contains(out, "[8]byte") {
-		t.Fatalf("expected [8]byte packed ptr field:\n%s", out)
+	// Packed struct is a byte blob so the parent stays 16 bytes (12+4).
+	if !strings.Contains(out, "[12]byte") {
+		t.Fatalf("expected [12]byte packed iter:\n%s", out)
+	}
+}
+
+func TestPackedTreeNodeParentLayout(t *testing.T) {
+	src := `
+%end = type { ptr }
+%base = type <{ %end, ptr, ptr, i8 }>
+%uni = type { { ptr, i32 } }
+%node = type { %base, [7 x i8], %uni }
+@g = global %node zeroinitializer
+`
+	m, err := parseIR("t.ll", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Compile(&buf, m, "main"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[25]byte") {
+		t.Fatalf("packed base should be [25]byte:\n%s", out)
 	}
 }
 
