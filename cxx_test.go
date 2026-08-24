@@ -84,6 +84,25 @@ func TestParseCxxCtorStr(t *testing.T) {
 	}
 }
 
+func TestParseCxxTreeValueType(t *testing.T) {
+	small := "_ZNSt3__16__treeINS_12__value_typeIPK8VariablejEENS_19__map_value_compareIS4_NS_4pairIKS4_jEENS_4lessIS4_EEEENS_9allocatorIS9_EEE21__construct_from_treeB9nqn220108IZNSF_21__copy_construct_treeB9nqn220108EPNS_11__tree_nodeIS5_PvEEEUlRKS9_E_EESK_SK_T_"
+	n, ok := parseCxx(small)
+	if !ok || n.valV != "unsigned int" || !n.trivialTreeValue() {
+		t.Fatalf("small %+v ok=%v", n, ok)
+	}
+	if _, _, _, ok := cxxTreeCall(small, nil); !ok {
+		t.Fatal("still map unsigned pair")
+	}
+	effect := "_ZNSt3__16__treeINS_12__value_typeIPK9Statement6EffectEENS_19__map_value_compareIS4_NS_4pairIKS4_S5_EENS_4lessIS4_EEEENS_9allocatorISA_EEE21__construct_from_treeEv"
+	n, ok = parseCxx(effect)
+	if ok && n.ident == "__construct_from_tree" && n.trivialTreeValue() {
+		t.Fatalf("Effect must not be memcpy'd %+v", n)
+	}
+	if _, _, _, mapped := cxxTreeCall(effect, nil); mapped {
+		t.Fatal("Effect construct_from_tree mapped")
+	}
+}
+
 func TestParseCxxTreeNext(t *testing.T) {
 	n, ok := parseCxx("_ZNSt3__1L11__tree_nextIPNS_16__tree_node_baseIPvEEEET_S6_")
 	if !ok || !n.libcxx || n.ident != "__tree_next" {

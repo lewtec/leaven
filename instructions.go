@@ -2245,7 +2245,9 @@ func cxxTreeKind(name string) (*jen.Statement, int, bool) {
 		return Sym(libc.RbTreeInit).code(), cxxTreeInit, true
 	case n.libcxx && n.ident == "__get_value" && n.class() == "__tree_node":
 		return Sym(libc.LibcxxTreeGetValue).code(), cxxTreeWalk, true
-	case n.libcxx && n.ident == "__construct_from_tree":
+	case n.libcxx && n.ident == "__construct_from_tree" && n.trivialTreeValue():
+		// memcpy is only honest for pair<K, unsigned>. Effect owns a
+		// vector; a shallow copy hangs Darwin seed 42 in vector::clear.
 		return Sym(libc.LibcxxTreeConstructFromTree).code(), cxxTreeCopy, true
 	case n.libcxx && (n.ident == "__tree_next" || n.ident == "__tree_next_iter"):
 		return Sym(libc.LibcxxTreeNext).code(), cxxTreeWalk, true

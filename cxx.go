@@ -15,7 +15,8 @@ type cxx struct {
 	args   []cxxTy
 	ret    cxxTy
 	std    bool
-	libcxx bool // std::__1
+	libcxx bool   // std::__1
+	valV   string // V in __tree<__value_type<K,V>>
 }
 
 type cxxTy struct {
@@ -85,6 +86,9 @@ func fromCxxName(a demangle.AST) cxx {
 		if c.recv == "" {
 			c.recv = cxxClassOf(n.Scope)
 		}
+		if c.valV == "" {
+			c.valV = cxxValueV(n.Scope)
+		}
 		c.markScope(n)
 		return c
 	case *demangle.Operator:
@@ -145,6 +149,40 @@ func cxxClassOf(a demangle.AST) string {
 		return cxxClassOf(n.Name)
 	default:
 		return ""
+	}
+}
+
+// cxxValueV is V in __value_type<K, V>, used to tell a trivially
+// copyable map pair (unsigned) from Effect (owns a vector).
+func cxxValueV(a demangle.AST) string {
+	switch n := a.(type) {
+	case *demangle.Template:
+		if cxxClassOf(n.Name) == "__value_type" && len(n.Args) >= 2 {
+			return cxxFromTy(n.Args[1]).ident
+		}
+		for _, arg := range n.Args {
+			if s := cxxValueV(arg); s != "" {
+				return s
+			}
+		}
+	case *demangle.Qualified:
+		if s := cxxValueV(n.Name); s != "" {
+			return s
+		}
+		return cxxValueV(n.Scope)
+	case *demangle.TaggedName:
+		return cxxValueV(n.Name)
+	}
+	return ""
+}
+
+func (n cxx) trivialTreeValue() bool {
+	switch n.valV {
+	case "unsigned int", "unsigned long", "unsigned long long",
+		"int", "long", "long long", "unsigned short", "bool":
+		return true
+	default:
+		return false
 	}
 }
 
