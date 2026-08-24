@@ -175,12 +175,19 @@ func TranslateInstruction(inst ir.Instruction) ([]jen.Code, error) {
 			}
 			count = jen.Int64().Call(nElems)
 		}
-		// Slab (mmap), not Go new: pointer stays valid in C++ containers.
+		// Slab malloc, freed on function return. Capture the block,
+		// not name — name can be reused.
+		mem := name + "_mem"
 		alloc := Sym(libc.Alloca[byte]).Types(t).Call(count, jen.Lit(sz))
+		handle := emitPtr(jen.Id(mem))
 		if pt, ok := inst.Type().(*types.PointerType); ok && isTaggedPointerType(pt) {
-			return one(assign(name, emitAddr(alloc))), nil
+			handle = emitAddr(jen.Id(mem))
 		}
-		return one(assign(name, emitPtr(alloc))), nil
+		return []jen.Code{
+			jen.Id(mem).Op(":=").Add(alloc),
+			assign(name, handle),
+			jen.Defer().Add(Sym(libc.Free).Call(emitAs(Qual[byte](), emitPtr(jen.Id(mem))))),
+		}, nil
 
 	case *ir.InstAnd:
 		x, err := translateOp(inst.X, "left operand")

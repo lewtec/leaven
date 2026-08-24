@@ -46,9 +46,9 @@ func Calloc[T any](count, size int64) *T {
 }
 
 // Alloca is LLVM alloca on the modernc slab (mmap, not Go heap).
-// The pointer stays valid if stored in another slab block (C++
-// containers). count*size is the LLVM ABI demand; a single object
-// is also at least sizeof(T) so Go field access stays in-bounds.
+// Codegen defers Free so the block dies with the function.
+// count*size is the LLVM ABI demand; a single object is also
+// at least sizeof(T) so Go field access stays in-bounds.
 func Alloca[T any](count, size int64) *T {
 	n, ok := mulSize(count, size)
 	if !ok {
