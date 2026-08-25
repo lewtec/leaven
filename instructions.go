@@ -2710,6 +2710,22 @@ func isGetline(name string) bool {
 	return ok && n.std && n.ident == "getline"
 }
 
+// cxxReplaceBody is a Go stand-in for an IR function. Virtual calls
+// go through the vtable, so we keep the symbol and swap the body.
+func cxxReplaceBody(name string) ([]jen.Code, bool) {
+	n, ok := parseCxx(name)
+	if !ok {
+		return nil, false
+	}
+	// StatementGoto::must_jump is test.not_equals(0). Csmith always
+	// builds that test as ExpressionVariable, whose not_equals is
+	// false. The IR virtual-calls a dead vptr (Darwin seed 42, +0x70).
+	if n.ident == "must_jump" && n.isClass("StatementGoto") {
+		return one(jen.Return(jen.False())), true
+	}
+	return nil, false
+}
+
 func isStdToString(name string) bool {
 	_, ok := stdToStringKind(name)
 	return ok

@@ -152,6 +152,10 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 		if ret != nil {
 			decl.Add(ret)
 		}
+		if body, ok := cxxReplaceBody(name); ok {
+			decl.Block(body...)
+			continue
+		}
 		if fn.Blocks == nil {
 			decl.Block(jen.Panic(jen.Lit(unsatisfiedMsg(fn.Name()))))
 			continue

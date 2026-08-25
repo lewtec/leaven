@@ -121,6 +121,16 @@ func TestParseCxxNewDelete(t *testing.T) {
 	}
 }
 
+func TestCxxReplaceBodyGotoMustJump(t *testing.T) {
+	body, ok := cxxReplaceBody("_ZNK13StatementGoto9must_jumpEv")
+	if !ok || len(body) != 1 {
+		t.Fatalf("ok=%v n=%d", ok, len(body))
+	}
+	if _, ok := cxxReplaceBody("_ZNK5Block9must_jumpEv"); ok {
+		t.Fatal("Block::must_jump stays IR")
+	}
+}
+
 func TestParseCxxToString(t *testing.T) {
 	n, ok := parseCxx("_ZNSt3__19to_stringEm")
 	if !ok || n.ident != "to_string" || n.recv != "" || !n.std {
