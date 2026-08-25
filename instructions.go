@@ -2465,9 +2465,6 @@ func cxxOstreamInsertTy(arg cxxTy, libcxx bool) (*jen.Statement, int, bool) {
 	case "unsigned short":
 		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU16, true
 	case "unsigned int":
-		if libcxx {
-			return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true
-		}
 		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU32, true
 	case "unsigned long", "unsigned long long":
 		return Sym(libc.OstreamInsertU64).code(), cxxIOInsertU64, true

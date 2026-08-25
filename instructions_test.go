@@ -238,6 +238,15 @@ func TestCxxIOCallOstreamInsert(t *testing.T) {
 	if _, a, ret, ok := cxxIOCall(lt, nil); !ok || !ret || len(a) != 2 {
 		t.Fatalf("libcxx <<ushort ret=%v n=%d ok=%v", ret, len(a), ok)
 	}
+	// unsigned int is 32-bit; uint64(int32(-6)) prints 2^64-6.
+	uj := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_j"
+	if _, kind, ok := cxxOstreamOp(uj); !ok || kind != cxxIOInsertU32 {
+		t.Fatalf("libcxx <<uint kind=%d ok=%v", kind, ok)
+	}
+	um := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE9_M_insertIjEERS4_T_"
+	if _, kind, ok := cxxOstreamOp(um); !ok || kind != cxxIOInsertU32 {
+		t.Fatalf("libcxx _M_insert<uint> kind=%d ok=%v", kind, ok)
+	}
 }
 
 func TestCxxIOCallGetline(t *testing.T) {
