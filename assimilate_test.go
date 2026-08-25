@@ -37,8 +37,8 @@ func testAssimilateCsmith(t *testing.T) {
 	clang := miseWhich(t, "clang", "conda:clang@22.1.8")
 	clangxx := miseWhich(t, "clang++", "conda:clangxx@22.1.8")
 	logLibcxxOStringLayout(t, clangxx)
-	cmake := miseWhich(t, "cmake", "cmake@4.4.1")
-	ninja := miseWhich(t, "ninja", "ninja@1.13.2")
+	cmake := miseWhich(t, "cmake", "conda:cmake@4.4.1")
+	ninja := miseWhich(t, "ninja", "conda:ninja@1.13.2")
 	m4 := miseWhich(t, "m4", "conda:m4@1.4.20")
 	link := llvmLink22(t)
 
