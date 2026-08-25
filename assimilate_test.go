@@ -618,7 +618,7 @@ std::string probe(const char* b) {
 		return
 	}
 	var keep []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, "probe") ||
 			strings.Contains(line, "ostringstream") ||
 			strings.Contains(line, "stringbuf") ||
@@ -669,7 +669,7 @@ unsigned probe(std::map<const Variable*, unsigned> m, const Variable* v) {
 		return
 	}
 	var keep []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, "__tree_node") ||
 			strings.Contains(line, "__tree_end_node") ||
 			strings.Contains(line, "__get_value") ||
@@ -716,7 +716,7 @@ std::string probe() {
 		return
 	}
 	var keep []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, "call ") &&
 			(strings.Contains(line, "stringstream") ||
 				strings.Contains(line, "stringbuf") ||
