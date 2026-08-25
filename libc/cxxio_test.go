@@ -113,6 +113,22 @@ func TestStdStringLongDefaultLayout(t *testing.T) {
 	StdStringDestroy(&obj[0])
 }
 
+func TestStdStringDestroySize(t *testing.T) {
+	// libc++ string is 24 bytes; a 32-byte wipe hits the next object.
+	var buf [32]byte
+	for i := 24; i < 32; i++ {
+		buf[i] = 0xab
+	}
+	s := []byte("hi")
+	StdStringInit(&buf[0], &s[0], 2)
+	StdStringDestroy(&buf[0])
+	for i := 24; i < 32; i++ {
+		if buf[i] != 0xab {
+			t.Fatalf("byte %d = %#x, want 0xab", i, buf[i])
+		}
+	}
+}
+
 func TestStdToString(t *testing.T) {
 	var obj [32]byte
 	StdToString(&obj[0], 42)

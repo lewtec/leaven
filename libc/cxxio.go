@@ -1347,7 +1347,7 @@ func StdStringDestroy(this *byte) unsafe.Pointer {
 			Free(p)
 		}
 	}
-	Memset(this, 0, 32)
+	Memset(this, 0, 24)
 	return unsafe.Pointer(this)
 }
 
