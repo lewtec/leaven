@@ -34,6 +34,11 @@ func Addr[T any](p *T) uintptr {
 	return uintptr(unsafe.Pointer(p))
 }
 
+// PtrMask is llvm.ptrmask. mask is i64 so a constant -16 is a legal Go arg.
+func PtrMask(p unsafe.Pointer, mask int64) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(p) & uintptr(mask))
+}
+
 // Off is (char *)p + n.
 func Off(p unsafe.Pointer, n int) unsafe.Pointer {
 	return unsafe.Add(p, n)

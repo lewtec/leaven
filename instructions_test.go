@@ -1,6 +1,143 @@
 package leaven
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dave/jennifer/jen"
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/constant"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/ir/value"
+)
+
+func TestLibcLookupDarwinSuffix(t *testing.T) {
+	if _, ok := libcLookup("realpath$DARWIN_EXTSN"); !ok {
+		t.Fatal("realpath$DARWIN_EXTSN")
+	}
+	if _, ok := libcLookup("realpath_DARWIN_EXTSN"); !ok {
+		t.Fatal("realpath_DARWIN_EXTSN")
+	}
+	if _, ok := libcLookup("realpath"); !ok {
+		t.Fatal("realpath")
+	}
+	if _, ok := libcLookup("fstat"); !ok {
+		t.Fatal("fstat")
+	}
+	if _, ok := libcLookup("fstat$INODE64"); !ok {
+		t.Fatal("fstat$INODE64")
+	}
+	if _, ok := libcLookup("lseek"); !ok {
+		t.Fatal("lseek")
+	}
+	if _, ok := libcLookup("lseek$UNIX2003"); !ok {
+		t.Fatal("lseek$UNIX2003")
+	}
+	if _, ok := libcLookup("close$NOCANCEL"); !ok {
+		t.Fatal("close$NOCANCEL")
+	}
+	if _, ok := libcLookup("close_NOCANCEL"); !ok {
+		t.Fatal("close_NOCANCEL")
+	}
+	if _, ok := libcLookup("wmemchr"); !ok {
+		t.Fatal("wmemchr")
+	}
+	if _, ok := libcLookup("__assert_rtn"); !ok {
+		t.Fatal("__assert_rtn")
+	}
+	substr := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_"
+	if _, ok := libcLookup(substr); ok {
+		t.Fatal("C++ names are trampolines, not libcLookup")
+	}
+	if _, ok := cxxReplaceBody(ir.NewFunc(substr, types.Void)); !ok {
+		t.Fatal("string substr ctor")
+	}
+}
+
+func TestLibcxxStringEraseMatch(t *testing.T) {
+	if !isLibcxxStringErase("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE5eraseEmm") {
+		t.Fatal("erase")
+	}
+}
+
+func TestLibcxxStringAppendCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc"
+	if !isLibcxxStringAppendCStr(name) {
+		t.Fatal("append")
+	}
+	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendERKS5_") {
+		t.Fatal("append string is not cstr")
+	}
+	if isLibcxxStringAppendCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKcS7_") {
+		t.Fatal("append iterator pair is not cstr")
+	}
+}
+
+func TestLibcxxStringPlusMatch(t *testing.T) {
+	left := "_ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EEPKS6_RKS9_"
+	if !isLibcxxStringPlus(left) || !isLibcxxStringPlusCStrLeft(left) {
+		t.Fatal("cstr+str")
+	}
+	right := "_ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EERKS6_PKc"
+	if !isLibcxxStringPlus(right) || isLibcxxStringPlusCStrLeft(right) {
+		t.Fatal("str+cstr")
+	}
+}
+
+func TestLibcxxStringInsertCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6insertEmPKc"
+	if !isLibcxxStringInsertCStr(name) {
+		t.Fatal("insert")
+	}
+}
+
+func TestLibcxxStringPushBackMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE9push_backEc"
+	if !isLibcxxStringPushBack(name) {
+		t.Fatal("push_back")
+	}
+	vec := "_ZNSt3__16vectorINS_12basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEENS4_IS6_EEE9push_backERKS6_"
+	if isLibcxxStringPushBack(vec) {
+		t.Fatal("vector push_back is not string push_back")
+	}
+}
+
+func TestLibcxxStringAssignCStrMatch(t *testing.T) {
+	name := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKc"
+	if !isLibcxxStringAssignCStr(name) {
+		t.Fatal("assign")
+	}
+}
+
+func TestLibcxxStringCompareCStrMatch(t *testing.T) {
+	name := "_ZNKSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7compareEmmPKcm"
+	if !isLibcxxStringCompareCStr(name) {
+		t.Fatal("compare")
+	}
+}
+
+func TestLibcxxStringEqCStrMatch(t *testing.T) {
+	name := "_ZNSt3__1eqIcNS_11char_traitsIcEENS_9allocatorIcEEEEbRKNS_12basic_stringIT_T0_T1_EEPKS6_"
+	if !isLibcxxStringEqCStr(name) {
+		t.Fatal("eq")
+	}
+	if isLibcxxStringEqCStr("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_") {
+		t.Fatal("ctor is not eq")
+	}
+}
+
+func TestLibcReturnsTypedPtrDarwinSuffix(t *testing.T) {
+	for _, name := range []string{"realpath", "realpath$DARWIN_EXTSN", "realpath_DARWIN_EXTSN"} {
+		if !libcReturnsTypedPtr(libcCanon(name)) {
+			t.Fatalf("typedPtr %s", name)
+		}
+	}
+	if libcReturnsTypedPtr(libcCanon("_NSGetArgc")) {
+		t.Fatal("_NSGetArgc must not wrap")
+	}
+	if libcReturnsTypedPtr(libcCanon("mmap64_INODE64")) {
+		t.Fatal("mmap64 must not wrap")
+	}
+}
 
 func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	name := "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1ERKNSt7__cxx1112basic_stringIcS2_SaIcEEE"
@@ -13,6 +150,41 @@ func TestCxxIOCallIfstreamStringCtor(t *testing.T) {
 	}
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
+	}
+	libcxx := "_ZNSt3__114basic_ifstreamIcNS_11char_traitsIcEEEC1B9nqn220108EPKc"
+	if _, _, _, ok := cxxIOCall(libcxx, nil); !ok {
+		t.Fatal("libcxx ifstream C1B")
+	}
+	fail := "_ZNKSt3__19basic_iosIcNS_11char_traitsIcEEE4failB9nqn220108Ev"
+	if _, _, ret, ok := cxxIOCall(fail, nil); !ok || ret {
+		t.Fatal("libcxx fail")
+	}
+	open := "_ZNSt3__113basic_filebufIcNS_11char_traitsIcEEE4openEPKcj"
+	if _, _, _, ok := cxxIOCall(open, nil); !ok {
+		t.Fatal("filebuf open")
+	}
+	ctor := "_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev"
+	if _, _, _, ok := cxxIOCall(ctor, nil); !ok {
+		t.Fatal("streambuf ctor")
+	}
+}
+
+func TestCxxIOCallStringbufStr(t *testing.T) {
+	set := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEE3strERKNS_12basic_stringIcS2_S3_EE"
+	fn, args, retPtr, ok := cxxIOCall(set, nil)
+	if !ok || fn == nil || retPtr || len(args) != 2 {
+		t.Fatalf("str setter %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if _, ok := cxxIONamed(set); !ok {
+		t.Fatal("named setter")
+	}
+	get := "_ZNKSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEE3strEv"
+	if _, a, ret, ok := cxxIOCall(get, nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("str getter ret=%v n=%d", ret, len(a))
+	}
+	ctor := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEEC2Ev"
+	if _, _, _, ok := cxxIOCall(ctor, nil); !ok {
+		t.Fatal("stringbuf ctor")
 	}
 }
 
@@ -31,6 +203,14 @@ func TestCxxOstreamOpEndl(t *testing.T) {
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
 	}
+	libcxx := "_ZNSt3__14endlB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_"
+	if _, _, _, ok := cxxIOCall(libcxx, nil); !ok {
+		t.Fatal("libcxx endl")
+	}
+	uls := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEm"
+	if _, a, ret, ok := cxxIOCall(uls, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<ulong ret=%v n=%d", ret, len(a))
+	}
 }
 
 func TestCxxIOCallOstreamInsert(t *testing.T) {
@@ -42,6 +222,31 @@ func TestCxxIOCallOstreamInsert(t *testing.T) {
 	if _, ok := cxxIONamed(name); !ok {
 		t.Fatal("named miss")
 	}
+	ls := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_PKc"
+	if _, a, ret, ok := cxxIOCall(ls, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin lsB PKc ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	li := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_i"
+	if _, a, ret, ok := cxxIOCall(li, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin lsB int ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	ld := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEd"
+	if _, a, ret, ok := cxxIOCall(ld, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<double ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	lt := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEt"
+	if _, a, ret, ok := cxxIOCall(lt, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("libcxx <<ushort ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	// unsigned int is 32-bit; uint64(int32(-6)) prints 2^64-6.
+	uj := "_ZNSt3__1lsB9nqn220108IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_j"
+	if _, kind, ok := cxxOstreamOp(uj); !ok || kind != cxxIOInsertU32 {
+		t.Fatalf("libcxx <<uint kind=%d ok=%v", kind, ok)
+	}
+	um := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE9_M_insertIjEERS4_T_"
+	if _, kind, ok := cxxOstreamOp(um); !ok || kind != cxxIOInsertU32 {
+		t.Fatalf("libcxx _M_insert<uint> kind=%d ok=%v", kind, ok)
+	}
 }
 
 func TestCxxIOCallGetline(t *testing.T) {
@@ -50,11 +255,35 @@ func TestCxxIOCallGetline(t *testing.T) {
 	if !ok || fn == nil || !retPtr || len(args) != 2 {
 		t.Fatalf("getline %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
 	}
-	if _, ok := cxxIONamed(name); !ok {
-		t.Fatal("named miss")
+	if _, ok := cxxIONamed(name); ok {
+		t.Fatal("namedRef must not rewrite getline")
 	}
 	if !isGetline(name) {
 		t.Fatal("isGetline")
+	}
+}
+
+func TestCxxIOCallLibcxxGetline(t *testing.T) {
+	name := "_ZNSt3__17getlineB9nqn220108IcNS_11char_traitsIcEENS_9allocatorIcEEEERNS_13basic_istreamIT_T0_EES9_RNS_12basic_stringIS6_S7_T1_EE"
+	fn, args, retPtr, ok := cxxIOCall(name, nil)
+	if !ok || fn == nil || !retPtr || len(args) != 2 {
+		t.Fatalf("libcxx getline %v args=%d ret=%v ok=%v", fn, len(args), retPtr, ok)
+	}
+	if !isGetline(name) {
+		t.Fatal("isGetline libcxx")
+	}
+}
+
+func TestCxxIOCallIRGetlineSkipsIntArgs(t *testing.T) {
+	name := "_ZNSt3__17getlineB9nqn220108IcNS_11char_traitsIcEENS_9allocatorIcEEEERNS_13basic_istreamIT_T0_EES9_RNS_12basic_stringIS6_S7_T1_EE"
+	i64 := types.NewInt(64)
+	ir := []value.Value{constant.NewInt(i64, 1), constant.NewInt(i64, 2)}
+	_, _, _, ok := cxxIOCallIR(name, ir, []jen.Code{jen.Lit(1), jen.Lit(2)})
+	if ok {
+		t.Fatal("getline with i64 args")
+	}
+	if _, ok := cxxIONamed(name); ok {
+		t.Fatal("namedRef must not rewrite getline")
 	}
 }
 
@@ -68,6 +297,20 @@ func TestCxxTreeCall(t *testing.T) {
 	}
 	if _, a, ret, ok := cxxTreeCall("_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_", nil); !ok || ret || len(a) != 4 {
 		t.Fatalf("insert %v %d", ret, len(a))
+	}
+	getv := "_ZNSt3__111__tree_nodeINS_12__value_typeIPK8VariablejEEPvE11__get_valueB9nqn220108Ev"
+	if _, a, ret, ok := cxxTreeCall(getv, nil); !ok || !ret || len(a) != 1 {
+		t.Fatalf("get_value ret=%v n=%d", ret, len(a))
+	}
+	ctor := "_ZNSt3__16__treeINS_12__value_typeIPK8VariablejEENS_19__map_value_compareIS4_NS_4pairIKS4_jEENS_4lessIS4_EEEENS_9allocatorIS9_EEE21__construct_from_treeB9nqn220108IZNSF_21__copy_construct_treeB9nqn220108EPNS_11__tree_nodeIS5_PvEEEUlRKS9_E_EESK_SK_T_"
+	if _, a, ret, ok := cxxTreeCall(ctor, nil); !ok || !ret || len(a) != 3 {
+		t.Fatalf("construct_from_tree ret=%v n=%d", ret, len(a))
+	}
+	if isRbTreeDefaultCtor("_ZNSt3__13mapIPK8VariablejNS_4lessIS3_EENS_9allocatorINS_4pairIKS3_jEEEEEC1B9nqn220108Ev") {
+		t.Fatal("libc++ map ctor is not libstdc++ RbTreeInit")
+	}
+	if _, a, ret, ok := cxxTreeCall("_ZNSt3__1L11__tree_nextIPNS_16__tree_node_baseIPvEEEET_S6_", nil); !ok || !ret || len(a) != 1 {
+		t.Fatalf("tree_next ret=%v n=%d", ret, len(a))
 	}
 }
 
@@ -99,6 +342,9 @@ func TestCxxIOCallIosBaseCtor(t *testing.T) {
 	}
 	if !isIosBaseCtor("_ZNSt8ios_base7_M_initEv") {
 		t.Fatal("_M_init")
+	}
+	if !isIosBaseCtor("_ZNSt3__18ios_baseC2Ev") {
+		t.Fatal("libcxx ios_base")
 	}
 }
 
@@ -138,6 +384,33 @@ func TestCxxIOCallOstringstream(t *testing.T) {
 	dtor := "_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEED1Ev"
 	if _, a, ret, ok := cxxIOCall(dtor, nil); !ok || ret || len(a) != 1 {
 		t.Fatalf("dtor %v %d", ret, len(a))
+	}
+	// Darwin libc++ ABI tag sits between the name and Ev (3strB… / C1B…).
+	dctor := "_ZNSt3__119basic_ostringstreamIcNS_11char_traitsIcEENS_9allocatorIcEEEC1B9nqn220108Ev"
+	if _, a, ret, ok := cxxIOCall(dctor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("darwin ctor ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	dstr := "_ZNKRSt3__119basic_ostringstreamIcNS_11char_traitsIcEENS_9allocatorIcEEE3strB9nqn220108Ev"
+	if _, a, ret, ok := cxxIOCall(dstr, nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("darwin str ret=%v n=%d ok=%v", ret, len(a), ok)
+	}
+	lsStr := "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsB9nqn220108ERKNS_12basic_stringIcS2_NS_9allocatorIcEEEE"
+	if _, a, ret, ok := cxxIOCall(lsStr, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin << string ret=%v n=%d", ret, len(a))
+	}
+	lsChar := "_ZNSt3__1lsB9nqn220108INS_11char_traitsIcEEEERNS_13basic_ostreamIcT_EES6_c"
+	if _, a, ret, ok := cxxIOCall(lsChar, nil); !ok || !ret || len(a) != 2 {
+		t.Fatalf("darwin << char ret=%v n=%d", ret, len(a))
+	}
+	if _, a, ret, ok := cxxIOCall("_ZNSt3__18ios_base9precisionEl", nil); !ok || ret || len(a) != 2 {
+		t.Fatalf("precision set ret=%v n=%d", ret, len(a))
+	}
+	if _, _, _, ok := cxxIOCall("_ZNKSt3__18ios_base9precisionEv", nil); ok {
+		t.Fatal("precision getter")
+	}
+	sbctor := "_ZNSt3__115basic_stringbufIcNS_11char_traitsIcEENS_9allocatorIcEEEC1B9nqn220108Ej"
+	if _, a, ret, ok := cxxIOCall(sbctor, nil); !ok || ret || len(a) != 1 {
+		t.Fatalf("stringbuf ctor ret=%v n=%d", ret, len(a))
 	}
 }
 

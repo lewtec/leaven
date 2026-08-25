@@ -88,8 +88,64 @@ func TestPackedBitIteratorSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	// Expect [8]byte for packed ptr slot, not uintptr (align 8 → size 16).
+	// Named packed type keeps [8]byte ptr slots; parent embeds [12]byte
+	// so it is not padded to 16.
 	if !strings.Contains(out, "[8]byte") {
 		t.Fatalf("expected [8]byte packed ptr field:\n%s", out)
+	}
+	if !strings.Contains(out, "[12]byte") {
+		t.Fatalf("expected parent to embed [12]byte:\n%s", out)
+	}
+}
+
+func TestPackedTreeNodeParentLayout(t *testing.T) {
+	src := `
+%end = type { ptr }
+%base = type <{ %end, ptr, ptr, i8 }>
+%uni = type { { ptr, i32 } }
+%node = type { %base, [7 x i8], %uni }
+@g = global %node zeroinitializer
+`
+	m, err := parseIR("t.ll", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Compile(&buf, m, "main"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[25]byte") {
+		t.Fatalf("packed base should be [25]byte:\n%s", out)
+	}
+}
+
+func TestTreeNodeValueGEPOffset(t *testing.T) {
+	// libc++ __tree_node: packed 25-byte base + 7 pad + union at LLVM +32.
+	// Go pads the base to 32 so .F2 would be +40.
+	src := `
+%end = type { ptr }
+%base = type <{ %end, ptr, ptr, i8 }>
+%uni = type { { ptr, i32 } }
+%node = type { %base, [7 x i8], %uni }
+define ptr @getv(ptr %p) {
+  %v = getelementptr inbounds nuw %node, ptr %p, i32 0, i32 2
+  ret ptr %v
+}
+`
+	m, err := parseIR("t.ll", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Compile(&buf, m, "main"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, ".F2") {
+		t.Fatalf("value GEP used Go .F2 (offset 40):\n%s", out)
+	}
+	if !strings.Contains(out, "32") {
+		t.Fatalf("value GEP missing LLVM offset 32:\n%s", out)
 	}
 }

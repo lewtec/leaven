@@ -20,7 +20,7 @@ func setErrno(e int32) { atomic.StoreInt32(&errnoTLS, e) }
 // fd table: 0/1/2 = stdin/out/err; others are opened files.
 var (
 	fdMu   sync.Mutex
-	fdTab  = map[int32]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
+	fdTab        = map[int32]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
 	fdNext int32 = 3
 )
 
@@ -75,6 +75,44 @@ func Open(path *byte, flags int32, mode ...int32) int32 {
 // Open64 is open64 — same as Open.
 func Open64(path *byte, flags int32, mode ...int32) int32 {
 	return Open(path, flags, mode...)
+}
+
+// Fcntl is fcntl(2). The libc fd is looked up, then the host fcntl
+// runs on that *os.File (unix.FcntlInt via SyscallConn).
+func Fcntl(fd int32, cmd int32, args ...any) int32 {
+	f := fdGet(fd)
+	if f == nil {
+		setErrno(9) // EBADF
+		return -1
+	}
+	arg := 0
+	if len(args) > 0 {
+		arg = fcntlArg(args[0])
+	}
+	return fcntlFile(f, int(cmd), arg)
+}
+
+func fcntlArg(v any) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case int32:
+		return int(x)
+	case int64:
+		return int(x)
+	case uint32:
+		return int(x)
+	case uint64:
+		return int(x)
+	case uintptr:
+		return int(x)
+	case *byte:
+		return int(uintptr(unsafe.Pointer(x)))
+	case unsafe.Pointer:
+		return int(uintptr(x))
+	default:
+		return 0
+	}
 }
 
 // Close is close(fd).
@@ -148,21 +186,50 @@ func Sigaltstack(ss, oss *byte) int32 {
 	return 0
 }
 
-// Mmap64 is mmap64. Anonymous maps use Malloc; MAP_FAILED is (void*)-1.
-func Mmap64(addr *byte, length int64, prot, flags, fd int32, offset int64) *byte {
-	_, _, _, _ = addr, prot, flags, offset
+func mmapAddr(v any) uintptr {
+	switch x := v.(type) {
+	case nil:
+		return 0
+	case uintptr:
+		return x
+	case uint64:
+		return uintptr(x)
+	case int64:
+		return uintptr(x)
+	case int:
+		return uintptr(x)
+	case unsafe.Pointer:
+		return uintptr(x)
+	case *byte:
+		return uintptr(unsafe.Pointer(x))
+	default:
+		return 0
+	}
+}
+
+// Mmap64 is mmap64. addr is taken as an integer so a non-heap
+// MAP_FIXED address is not a Go *byte the GC can nil.
+func Mmap64(addr any, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
+	_, _, _ = prot, flags, offset
+	if p := mmapAddr(addr); p != 0 {
+		return unsafe.Pointer(p)
+	}
 	if length <= 0 {
 		setErrno(22)
-		return (*byte)(unsafe.Pointer(^uintptr(0)))
+		return unsafe.Pointer(^uintptr(0))
 	}
-	// File maps: still allocate; content not filled (rare at startup).
 	_ = fd
 	p := Malloc[byte](length)
 	if p == nil {
 		setErrno(12) // ENOMEM
-		return (*byte)(unsafe.Pointer(^uintptr(0)))
+		return unsafe.Pointer(^uintptr(0))
 	}
-	return p
+	return unsafe.Pointer(p)
+}
+
+// Mmap is mmap(2). Same as Mmap64.
+func Mmap(addr any, length int64, prot, flags, fd int32, offset int64) unsafe.Pointer {
+	return Mmap64(addr, length, prot, flags, fd, offset)
 }
 
 // Munmap is munmap(2).
@@ -202,6 +269,66 @@ func Getpid() int32 { return 1 }
 func Getenv(name *byte) *byte {
 	_ = name
 	return nil
+}
+
+var (
+	nsArgc     int32
+	nsArgv     unsafe.Pointer
+	nsEnviron  [1]*byte
+	nsEnvironP = unsafe.Pointer(&nsEnviron[0])
+	nsInitOnce sync.Once
+)
+
+func nsInit() {
+	nsInitOnce.Do(func() {
+		nsArgv = Argv()
+		nsArgc = int32(len(os.Args))
+	})
+}
+
+// NSGetArgc is Darwin _NSGetArgc. Returns *int.
+func NSGetArgc() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&nsArgc)
+}
+
+// NSGetArgv is Darwin _NSGetArgv. Returns char ***.
+func NSGetArgv() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&nsArgv)
+}
+
+// NSGetEnviron is Darwin _NSGetEnviron. Returns char *** (empty).
+func NSGetEnviron() unsafe.Pointer {
+	return unsafe.Pointer(&nsEnvironP)
+}
+
+// NSGetProgname is Darwin _NSGetProgname. Returns char **.
+func NSGetProgname() unsafe.Pointer {
+	nsInit()
+	return unsafe.Pointer(&argvPin[0])
+}
+
+// StrerrorR is POSIX strerror_r (XSI: returns 0 or -1). Darwin rustc
+// uses this for errno text; a short message in buf is enough.
+func StrerrorR(errnum int32, buf *byte, buflen int64) int32 {
+	if buf == nil || buflen <= 0 {
+		setErrno(22) // EINVAL
+		return -1
+	}
+	msg := "error"
+	if errnum == 0 {
+		msg = "success"
+	}
+	dst := Bytes(buf, int(buflen))
+	n := copy(dst, msg)
+	if n < len(dst) {
+		dst[n] = 0
+		return 0
+	}
+	dst[len(dst)-1] = 0
+	setErrno(34) // ERANGE
+	return -1
 }
 
 // Getcwd is getcwd(3).
@@ -383,4 +510,23 @@ func Getrandom(buf *byte, buflen int64, flags int32) int64 {
 		return -1
 	}
 	return int64(n)
+}
+
+// Getentropy is getentropy(2). n must be ≤ 256.
+func Getentropy(buf *byte, n int64) int32 {
+	if n > 256 {
+		setErrno(22) // EINVAL
+		return -1
+	}
+	if n <= 0 {
+		return 0
+	}
+	if buf == nil {
+		setErrno(14) // EFAULT
+		return -1
+	}
+	if Getrandom(buf, n, 0) < 0 {
+		return -1
+	}
+	return 0
 }

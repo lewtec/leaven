@@ -19,6 +19,9 @@ func TestPointerKit(t *testing.T) {
 	if Addr(&buf[0]) != uintptr(p) {
 		t.Fatal("addr")
 	}
+	if uintptr(PtrMask(unsafe.Pointer(uintptr(255)), -16)) != 240 {
+		t.Fatal("ptrmask")
+	}
 	if Off(p, 4) != Ptr(&buf[4]) {
 		t.Fatal("off")
 	}

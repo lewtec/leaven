@@ -42,10 +42,10 @@ func Signal(sig int32, handler int64) int64 {
 	return 0
 }
 
-// Sysconf is sysconf(3). Linux _SC_PAGESIZE is 30.
+// Sysconf is sysconf(3). Darwin _SC_PAGESIZE is 29; Linux is 30.
 func Sysconf(name int32) int64 {
 	switch name {
-	case 30: // _SC_PAGESIZE
+	case 29, 30: // _SC_PAGESIZE
 		return 4096
 	default:
 		return -1
@@ -54,6 +54,9 @@ func Sysconf(name int32) int64 {
 
 // PthreadSelf is pthread_self. Single-threaded: fixed non-zero id.
 func PthreadSelf() int64 { return 1 }
+
+// PthreadSetnameNp is Darwin pthread_setname_np(name) or POSIX (thread, name).
+func PthreadSetnameNp(_ ...any) int32 { return 0 }
 
 // PthreadGetattrNp fills a dummy attr (stack base/size via getstack).
 func PthreadGetattrNp(thread int64, attr *byte) int32 {
@@ -65,11 +68,10 @@ func PthreadGetattrNp(thread int64, attr *byte) int32 {
 func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 	_ = attr
 	if stackaddr != nil {
-		const base = uintptr(1) << 48
-		Store(Ptr(stackaddr), 0, unsafe.Pointer(base))
+		Store(Ptr(stackaddr), 0, dummyStackAddr())
 	}
 	if stacksize != nil {
-		Store[uint64](Ptr(stacksize), 0, 8<<20) // 8 MiB
+		Store[uint64](Ptr(stacksize), 0, dummyStackSize)
 	}
 	return 0
 }
@@ -77,6 +79,47 @@ func PthreadAttrGetstack(attr, stackaddr *byte, stacksize *byte) int32 {
 // PthreadAttrDestroy is a no-op for the dummy attr.
 func PthreadAttrDestroy(attr *byte) int32 {
 	_ = attr
+	return 0
+}
+
+const dummyStackSize = 8 << 20 // 8 MiB
+
+var dummyStack [dummyStackSize]byte
+
+func dummyStackAddr() unsafe.Pointer { return unsafe.Pointer(&dummyStack[0]) }
+
+// PthreadGetStackaddrNp is Darwin pthread_get_stackaddr_np.
+// Darwin returns the top of the stack (highest address); rustc subtracts
+// get_stacksize_np to find the bottom before mmap MAP_FIXED of the guard.
+func PthreadGetStackaddrNp(thread int64) unsafe.Pointer {
+	_ = thread
+	return unsafe.Pointer(uintptr(dummyStackAddr()) + dummyStackSize)
+}
+
+// PthreadGetStacksizeNp is Darwin pthread_get_stacksize_np.
+func PthreadGetStacksizeNp(thread int64) int64 {
+	_ = thread
+	return dummyStackSize
+}
+
+// Single-threaded: mutex/attr calls succeed and do nothing.
+func PthreadMutexattrInit(attr *byte) int32    { _ = attr; return 0 }
+func PthreadMutexattrDestroy(attr *byte) int32 { _ = attr; return 0 }
+func PthreadMutexattrSettype(attr *byte, typ int32) int32 {
+	_, _ = attr, typ
+	return 0
+}
+func PthreadMutexInit(m, attr *byte) int32 { _, _ = m, attr; return 0 }
+func PthreadMutexDestroy(m *byte) int32    { _ = m; return 0 }
+func PthreadMutexLock(m *byte) int32       { _ = m; return 0 }
+func PthreadMutexUnlock(m *byte) int32     { _ = m; return 0 }
+func PthreadMutexTrylock(m *byte) int32    { _ = m; return 0 }
+
+// PthreadThreadidNp is Darwin pthread_threadid_np. Writes 1 into *id.
+func PthreadThreadidNp(_ any, id *byte) int32 {
+	if id != nil {
+		Store[uint64](Ptr(id), 0, 1)
+	}
 	return 0
 }
 

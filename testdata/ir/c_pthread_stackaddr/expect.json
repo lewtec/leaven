@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.PthreadGetStackaddrNp",
+        "libc.PthreadGetStacksizeNp"
+      ],
+      "not_contains": [
+        "unsatisfied: pthread_get_stackaddr_np",
+        "unsatisfied: pthread_get_stacksize_np"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

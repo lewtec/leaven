@@ -106,16 +106,26 @@ func TestReallocShrinkInPlace(t *testing.T) {
 	Free(r)
 }
 
-func TestRetainGoHeap(t *testing.T) {
-	// Retain is still for alloca→uintptr pins (Go new), not slab malloc.
-	p := new(byte)
-	*p = 9
-	if Retain(p) != p {
-		t.Fatal("Retain did not return p")
+func TestAllocaStack(t *testing.T) {
+	p := Alloca[byte](1, 16)
+	if p == nil {
+		t.Fatal("Alloca")
 	}
-	if _, ok := allocs.Load(uintptr(unsafe.Pointer(p))); !ok {
-		t.Fatal("Retain did not pin Go heap object")
+	if slabUsable(p) != 0 {
+		t.Fatal("alloca must not share the malloc slab")
 	}
+	*p = 3
+	q := Alloca[byte](1, 16)
+	if q == nil || Addr(q) == Addr(p) {
+		t.Fatal("nested")
+	}
+	AllocaFree(q)
+	r := Alloca[byte](1, 16)
+	if Addr(r) != Addr(q) {
+		t.Fatal("LIFO reuse")
+	}
+	AllocaFree(r)
+	AllocaFree(p)
 }
 
 func TestRustAllocSlabFreeRoundTrip(t *testing.T) {

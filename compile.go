@@ -105,12 +105,16 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	for _, fn := range m.Funcs {
 		collectFuncLocalNames(fn)
 		name := VariableName(fn)
-		if fn.Blocks == nil && hasRuntimeDef(name) {
-			continue
-		}
 
 		if fn.Blocks != nil {
 			fixMalloc(fn)
+		}
+
+		// C++ trampolines before TypeSpec so llvm.* metadata params
+		// (noalias.scope.decl) are still skipped by hasRuntimeDef.
+		replace, replaceOK := cxxReplaceBody(fn)
+		if !replaceOK && fn.Blocks == nil && hasRuntimeDef(name) {
+			continue
 		}
 
 		// Only package main gets a Go program entry point from C main.
@@ -146,6 +150,15 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 				}
 				ret = retType
 			}
+		}
+
+		if replaceOK {
+			decl := f.Func().Id(name).Params(params...)
+			if ret != nil {
+				decl.Add(ret)
+			}
+			decl.Block(replace...)
+			continue
 		}
 
 		decl := f.Func().Id(name).Params(params...)

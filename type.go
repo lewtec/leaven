@@ -185,14 +185,12 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 			// Bitfields and other non-power-of-two widths (e.g. i24) map to the
 			// next wider Go integer type (int16/int32/int64).
 			return goIntType(t.BitSize), nil
-		case t.BitSize == 128:
-			// rustc i128/u128 and TypeId. Two limbs, not int64.
+		case t.BitSize <= 128:
+			// rustc i128 and odd widths (i104 in std::sys::backtrace).
 			return Qual[libc.I128](), nil
-		case t.BitSize == 256:
-			// rustc core::fmt::num::__fmt_inner widens u128 to i256.
+		case t.BitSize <= 256:
 			return Qual[libc.I256](), nil
 		default:
-			// LLVM bitfield loads can be i104 etc.; Go has no wider fixed ints.
 			return nil, fmt.Errorf("%w: i%d", errUnsupportedIntWidth, t.BitSize)
 		}
 
@@ -219,12 +217,19 @@ func TypeDefinition(t types.Type) (*jen.Statement, error) {
 				// <{ ptr, i32 }>: Go {uintptr,int32} is 16 bytes (align 8);
 				// LLVM packed is 12. Use [8]byte for the ptr slot so the
 				// struct is 12 bytes and parent layouts (vector<bool>) match.
-				// Field access is via unsafe address (see _Bit_iterator_base).
 				if _, ok := field.(*types.PointerType); ok {
 					fieldType = jen.Index(jen.Lit(8)).Byte()
 				} else {
 					fieldType, err = TypeSpec(field)
 				}
+			} else if nested, ok := field.(*types.StructType); ok && nested.Packed {
+				// Packed member would pad to its alignment (25→32) and
+				// shift later fields (libc++ __tree_node value at 40 not 32).
+				sz, e := llvmTypeSize(nested)
+				if e != nil {
+					return nil, e
+				}
+				fieldType = jen.Index(jen.Lit(int(sz))).Byte()
 			} else if structFieldUintptr(t, field) {
 				// This slot may hold a tagged non-pointer (union payload or
 				// packed ptr+int). Do not put it in a GC pointer field.
@@ -272,6 +277,9 @@ func TypeSpec(t types.Type) (*jen.Statement, error) {
 
 // goIntBits rounds an LLVM integer width up to a Go integer width
 // (8, 16, 32, or 64). Widths above 64 stay as-is for the caller to reject.
+func isWide128(bits uint64) bool { return bits > 64 && bits <= 128 }
+func isWide256(bits uint64) bool { return bits > 128 && bits <= 256 }
+
 func goIntBits(bits uint64) uint64 {
 	switch {
 	case bits <= 8:
@@ -317,30 +325,9 @@ func TypeName(t types.Type) string {
 		return ""
 	}
 
-	// Sanitize remaining punctuation from LLVM/clang/rustc type names
-	// (std::__cxx11::basic_string, smallvec::SmallVec<[usize; 2]>, etc.).
-	r := strings.NewReplacer(
-		".", "_", "-", "_", ":", "_",
-		"<", "_", ">", "_", ",", "_",
-		" ", "_", "*", "p",
-		";", "_", "[", "_", "]", "_",
-		"(", "_", ")", "_",
-		"'", "_", "\"", "_",
-		"/", "_", "\\", "_",
-		"=", "_", "+", "_", "&", "_",
-		"|", "_", "!", "_", "?", "_",
-		"@", "_", "#", "_", "%", "_",
-		"^", "_", "~", "_", "`", "_",
-	)
-	name = r.Replace(name)
-	if name == "" {
+	name = sanitizeIdent(name)
+	if name == "" || name == "_" {
 		return ""
-	}
-	if c := name[0]; '0' <= c && c <= '9' {
-		name = "T" + name
-	}
-	if invalidNames[name] {
-		name = "_" + name
 	}
 	return name
 }
@@ -464,6 +451,23 @@ func isZeroSizeType(t types.Type) bool {
 }
 
 // llvmFieldOffset is the ABI byte offset of field i in st.
+// structGEPNeedsByteOff is true when Go field offsets diverge from
+// LLVM: packed structs, or an unpacked parent of a packed member
+// (libc++ __tree_node: 25-byte packed base + [7 x i8] pad + union;
+// Go pads the base to 32 so .F2 is 40, LLVM F2 is 32).
+func structGEPNeedsByteOff(st *types.StructType) bool {
+	if st.Packed {
+		return true
+	}
+	for _, f := range st.Fields {
+		n, ok := f.(*types.StructType)
+		if ok && (n.Packed || structGEPNeedsByteOff(n)) {
+			return true
+		}
+	}
+	return false
+}
+
 func llvmFieldOffset(st *types.StructType, i int64) (int64, error) {
 	if i < 0 || int(i) >= len(st.Fields) {
 		return 0, fmt.Errorf("%w: field %d", errUnsupportedIndexType, i)

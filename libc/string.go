@@ -1,6 +1,9 @@
 package libc
 
-import "bytes"
+import (
+	"bytes"
+	"runtime"
+)
 
 // Memmove copies length bytes from src to dst. The blocks of memory may
 // overlap.
@@ -80,4 +83,28 @@ func Memchr(s *byte, c int32, n int64) *byte {
 		return nil
 	}
 	return &b[i]
+}
+
+// Wmemchr is C wmemchr. wchar_t is 4 bytes except on Windows (2).
+func Wmemchr(s *byte, c int32, n int64) *byte {
+	if s == nil || n <= 0 {
+		return nil
+	}
+	width := 4
+	if runtime.GOOS == "windows" {
+		width = 2
+	}
+	for i := int64(0); i < n; i++ {
+		off := int(i) * width
+		var w int32
+		if width == 2 {
+			w = int32(Load[uint16](Ptr(s), off))
+		} else {
+			w = Load[int32](Ptr(s), off)
+		}
+		if w == c {
+			return As[byte](Off(Ptr(s), off))
+		}
+	}
+	return nil
 }

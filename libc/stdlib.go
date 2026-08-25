@@ -15,26 +15,9 @@ var (
 	allocatorMu sync.Mutex
 )
 
-// allocRec pins a Go-heap object whose only live handle may be a uintptr
-// (tagged alloca via Retain). Not used for slab malloc.
-type allocRec struct {
-	p any
-}
-
-var allocs sync.Map
-
 // slabLive tracks modernc blocks we still own. Double free is a no-op so
 // mismatched C++/Rust drop paths do not corrupt the freelist.
 var slabLive sync.Map // uintptr → struct{}
-
-// Retain keeps p reachable until the process exits or the caller drops it.
-// Only for Go-heap objects (alloca→uintptr). Slab mallocs need no pin.
-func Retain[T any](p *T) *T {
-	if p != nil {
-		allocs.LoadOrStore(Addr(p), &allocRec{p: p})
-	}
-	return p
-}
 
 // Malloc allocates n bytes (C malloc). n==0 allocates 1 byte, like musl/gnulib.
 func Malloc[T any](n int64) *T {
@@ -60,6 +43,104 @@ func Calloc[T any](count, size int64) *T {
 	}
 	clear(Bytes(As[byte](unsafe.Pointer(p)), int(n)))
 	return As[T](unsafe.Pointer(p))
+}
+
+// Alloca is LLVM alloca: mmap bump stack, not the malloc slab.
+// Sharing malloc's freelist zeroed a still-referenced object
+// (Darwin seed 42: Expression vptr=0, virtual call at +0x50).
+// Codegen defers AllocaFree (LIFO, same as C stack).
+func Alloca[T any](count, size int64) *T {
+	n, ok := mulSize(count, size)
+	if !ok {
+		return nil
+	}
+	var z T
+	if sz := int64(unsafe.Sizeof(z)); n < sz {
+		n = sz
+	}
+	p := stackAlloc(int(n))
+	if p == 0 {
+		return nil
+	}
+	return As[T](unsafe.Pointer(p))
+}
+
+// AllocaFree pops one Alloca. Must be LIFO (defer).
+func AllocaFree(p *byte) {
+	if p == nil {
+		return
+	}
+	stackPop(Addr(p))
+}
+
+const (
+	stackAlign = 16
+	stackChunk = 1 << 20
+)
+
+type stackMark struct {
+	base, length uintptr
+	off          int
+}
+
+var (
+	stkMu     sync.Mutex
+	stkBase   uintptr
+	stkLen    int
+	stkOff    int
+	stkMarks  []stackMark
+	stkChunks []uintptr
+)
+
+func stackGrow(need int) bool {
+	n := stackChunk
+	if need > n {
+		n = (need + stackAlign - 1) / stackAlign * stackAlign
+	}
+	allocatorMu.Lock()
+	p, err := allocator.UintptrMalloc(n)
+	allocatorMu.Unlock()
+	if err != nil || p == 0 {
+		return false
+	}
+	stkChunks = append(stkChunks, p)
+	stkBase = p
+	stkLen = n
+	stkOff = 0
+	return true
+}
+
+func stackAlloc(n int) uintptr {
+	if n < 1 {
+		n = 1
+	}
+	n = (n + stackAlign - 1) / stackAlign * stackAlign
+	stkMu.Lock()
+	defer stkMu.Unlock()
+	if stkOff+n > stkLen && !stackGrow(n) {
+		return 0
+	}
+	stkMarks = append(stkMarks, stackMark{base: stkBase, length: uintptr(stkLen), off: stkOff})
+	p := stkBase + uintptr(stkOff)
+	clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), n))
+	stkOff += n
+	return p
+}
+
+func stackPop(u uintptr) {
+	stkMu.Lock()
+	defer stkMu.Unlock()
+	if len(stkMarks) == 0 {
+		return
+	}
+	m := stkMarks[len(stkMarks)-1]
+	if m.base+uintptr(m.off) != u {
+		return
+	}
+	stkMarks = stkMarks[:len(stkMarks)-1]
+	stkBase = m.base
+	stkLen = int(m.length)
+	stkOff = m.off
 }
 
 // Realloc is C realloc. n==0 frees p and returns nil.
@@ -107,6 +188,24 @@ func Arc4randomBuf(buf *byte, n int64) {
 	if _, err := rand.Read(Bytes(buf, int(n))); err != nil {
 		panic(err)
 	}
+}
+
+// slabUsable is the modernc block size for p, or 0 if p is not ours
+// (Go slice, already freed).
+func slabUsable(p *byte) int {
+	if p == nil {
+		return 0
+	}
+	u := Addr(p)
+	if u <= 1 {
+		return 0
+	}
+	allocatorMu.Lock()
+	defer allocatorMu.Unlock()
+	if _, ok := slabLive.Load(u); !ok {
+		return 0
+	}
+	return memory.UintptrUsableSize(u)
 }
 
 // Free is C free(p). All heap traffic (malloc, RustAlloc, operator new with

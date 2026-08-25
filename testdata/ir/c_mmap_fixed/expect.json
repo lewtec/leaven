@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Mmap64"
+      ],
+      "not_contains": [
+        "unsatisfied: mmap64"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

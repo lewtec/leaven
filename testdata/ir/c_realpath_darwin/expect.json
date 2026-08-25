@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "name": "package-p",
+      "package": "p",
+      "contains": [
+        "libc.Ptr",
+        "libc.Realpath"
+      ],
+      "not_contains": [
+        "unsatisfied: realpath",
+        "func realpath"
+      ]
+    }
+  ],
+  "run": {
+    "stdout_contains": [],
+    "majors": ["22"]
+  }
+}

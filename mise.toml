@@ -1,16 +1,29 @@
 [tools]
 # Install: mise install
 # Compilers for testdata/ir (`go generate .` → internal/genir via mise exec).
-"conda:clang" = ["14.0.6", "22.1.8"]
-"conda:clangxx" = ["14.0.6", "22.1.8"]
+# clang 14 has no windows-arm64 conda build. IR tests use committed .ll.
+"conda:clang" = [
+  { version = "14.0.6", os = ["linux", "macos", "windows/x64"] },
+  "22.1.8",
+]
+"conda:clangxx" = [
+  { version = "14.0.6", os = ["linux", "macos", "windows/x64"] },
+  "22.1.8",
+]
 "conda:llvm-tools" = "22.1.8"
+# Darwin only: Apple ld rejects conda's -lto_library path.
+"conda:lld" = { version = "22.1.8", os = ["macos"] }
 "conda:rust" = "1.97.1"
 # Assimilate harness: cmake+ninja+m4 for csmith; cargo (via rust) for rhai.
-"conda:csmith" = "2.3.0"
-"conda:m4" = "1.4.20"
-"conda:cmake" = "4.4.1"
-"conda:ninja" = "1.13.2"
+# conda-forge csmith has no linux-aarch64 / osx-arm64 / win-arm64 build.
+"conda:csmith" = { version = "2.3.0", os = ["linux/x64", "windows/x64"] }
+"github:actions-precompiled/csmith-bin" = { version = "csmith-2.3.0", os = ["linux/arm64", "macos/arm64"] }
+# No Windows conda package.
+"conda:m4" = { version = "1.4.20", os = ["linux", "macos"] }
+"conda:cmake" = { version = "4.4.1", os = ["linux", "macos", "windows/x64"] }
+"conda:ninja" = { version = "1.13.2", os = ["linux", "macos", "windows/x64"] }
 go = "1.26.5"
+"go:golang.org/x/tools/cmd/goimports" = "0.30.0"
 "github:lucasew/workspaced" = "0.14.3"
 
 [tasks.test]

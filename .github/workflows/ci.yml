@@ -48,6 +48,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Cache workspaced sources
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/workspaced/sources
+          key: workspaced-src-${{ runner.os }}-${{ hashFiles('workspaced.lock.json') }}
+
       - name: Set up tools (mise)
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 

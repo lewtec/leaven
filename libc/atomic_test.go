@@ -2,6 +2,18 @@ package libc
 
 import "testing"
 
+func TestAtomicAddI8(t *testing.T) {
+	var b [4]byte
+	b[1] = 3
+	got := AtomicAddI8(&b[1], 255) // wrap -1
+	if got != 2 || b[1] != 2 {
+		t.Fatalf("add -1: new=%d cell=%d", got, b[1])
+	}
+	if b[0] != 0 || b[2] != 0 {
+		t.Fatalf("neighbors %v", b)
+	}
+}
+
 func TestAtomicSwapI8(t *testing.T) {
 	var b [8]byte
 	// Put the target byte at every alignment offset.

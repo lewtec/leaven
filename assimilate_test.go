@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -20,27 +22,43 @@ func TestAssimilate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: assimilate is cmake + cargo")
 	}
+	if runtime.GOOS != "windows" {
+		syncProjects(t)
+	}
 	t.Run("csmith", testAssimilateCsmith)
 	t.Run("rhai", testAssimilateRhai)
 }
 
 func testAssimilateCsmith(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("conda m4 is not packaged for Windows")
+	}
 	root := requireProject(t, "csmith", "src/RandomProgramGenerator.cpp")
 	clang := miseWhich(t, "clang", "conda:clang@22.1.8")
 	clangxx := miseWhich(t, "clang++", "conda:clangxx@22.1.8")
-	cmake := miseWhich(t, "cmake", "cmake@4.4.1")
-	ninja := miseWhich(t, "ninja", "ninja@1.13.2")
+	logLibcxxOStringLayout(t, clangxx)
+	cmake := miseWhich(t, "cmake", "conda:cmake@4.4.1")
+	ninja := miseWhich(t, "ninja", "conda:ninja@1.13.2")
 	m4 := miseWhich(t, "m4", "conda:m4@1.4.20")
 	link := llvmLink22(t)
 
 	build := t.TempDir()
 	// -O0 so libstdc++ stays calls (ifstream, map, <<) we map in libc.
 	// Debug keeps -g; v22 skips #dbg_* records.
-	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, []string{
+	cflags, cxxflags := "-O0", "-O0 -fno-exceptions"
+	extra := []string{
 		"-DCMAKE_BUILD_TYPE=Debug",
-		"-DCMAKE_C_FLAGS=-O0",
-		"-DCMAKE_CXX_FLAGS=-O0 -fno-exceptions",
-	})
+		"-DBUILD_SHARED_LIBS=OFF",
+	}
+	if sdk := darwinSDK(); sdk != "" {
+		extra = append(extra, "-DCMAKE_OSX_SYSROOT="+sdk)
+		if ld := lldPath(); ld != "" {
+			cflags += " -fuse-ld=" + ld
+			cxxflags += " -fuse-ld=" + ld
+		}
+	}
+	extra = append(extra, "-DCMAKE_C_FLAGS="+cflags, "-DCMAKE_CXX_FLAGS="+cxxflags)
+	cmakeConfigure(t, cmake, ninja, clang, clangxx, m4, root, build, extra)
 	cmakeBuild(t, cmake, ninja, build, "csmith")
 
 	native := filepath.Join(build, "src", "csmith")
@@ -51,11 +69,14 @@ func testAssimilateCsmith(t *testing.T) {
 	ll := filepath.Join(build, "csmith.ll")
 	emitIRFromCompileCommands(t, build, ll, link)
 	// Seed 1 is the small smoke case. Seed 42 emits ~50× more C (multi-func,
-	// deep blocks, bitfields, pointer chains) — still the generator binary,
-	// but exercises more of its IR paths under leaven.
+	// deep blocks, bitfields, pointer chains). 7, 100, and 12345 are extra
+	// generator-stdout matches so a single lucky seed cannot hide drift.
 	for _, args := range [][]string{
 		{"-s", "1"},
+		{"-s", "7"},
 		{"-s", "42"},
+		{"-s", "100"},
+		{"-s", "12345"},
 	} {
 		args := args
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -65,14 +86,20 @@ func testAssimilateCsmith(t *testing.T) {
 }
 
 func testAssimilateRhai(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rustc windows-msvc needs link.exe; mise clang path is not a Windows linker")
+	}
 	root := requireProject(t, "rhai", "Cargo.toml")
 	clang, sysroot, libdir := clang22LinkEnv(t)
 	clangxx := filepath.Join(filepath.Dir(clang), "clang++")
+	rustflags := "-C debuginfo=0 -C linker=" + clang + " -C link-arg=-L" + libdir
+	if sysroot != "" {
+		rustflags += " -C link-arg=--sysroot=" + sysroot
+	}
 	env := append(os.Environ(),
 		"CC="+clang,
 		"CXX="+clangxx,
-		"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="+clang,
-		"RUSTFLAGS=-C debuginfo=0 -C linker="+clang+" -C link-arg=--sysroot="+sysroot+" -C link-arg=-L"+libdir,
+		"RUSTFLAGS="+rustflags,
 	)
 
 	build := exec.Command("mise", "exec", "--", "cargo", "build", "--release", "--bin", "rhai-run")
@@ -160,8 +187,8 @@ func testAssimilateRhai(t *testing.T) {
 			if err := os.WriteFile(script, []byte(p.src), 0644); err != nil {
 				t.Fatal(err)
 			}
-			want := runTimeout(t, 30*time.Second, native, script)
-			got := runTimeout(t, 3*time.Minute, bin, script)
+			want := runTimeout(t, 30*time.Second, "", native, script)
+			got := runTimeout(t, 3*time.Minute, "", bin, script)
 			if !bytes.Equal(want, got) {
 				t.Fatalf("native vs leaven mismatch\n---- native (%d) ----\n%s\n---- leaven (%d) ----\n%s",
 					len(want), tailBytes(want, 1500), len(got), tailBytes(got, 1500))
@@ -332,7 +359,14 @@ func splitQuoted(s string) []string {
 
 func crossCheck(t *testing.T, native, ll string, args []string) {
 	t.Helper()
-	want := runTimeout(t, 15*time.Second, native, args...)
+	// csmith reads platform.info from cwd. Write it so leaven's
+	// remapped getline can parse sizes if ifstream ctor was inlined.
+	info := []byte("integer size = 4\npointer size = 8\n")
+	if err := os.WriteFile("platform.info", info, 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove("platform.info")
+	want := runTimeout(t, 15*time.Second, "", native, args...)
 
 	m, err := parseIRFile(ll)
 	if err != nil {
@@ -366,8 +400,23 @@ func crossCheck(t *testing.T, native, ll string, args []string) {
 	}
 	got := runGoDir(t, dir, args...)
 	if !bytes.Equal(want, got) {
-		t.Fatalf("native vs leaven mismatch\n---- native (%d bytes) ----\n%s\n---- leaven (%d bytes) ----\n%s",
-			len(want), tailBytes(want, 2000), len(got), tailBytes(got, 2000))
+		i := 0
+		for i < len(want) && i < len(got) && want[i] == got[i] {
+			i++
+		}
+		a, b := i-80, i+80
+		if a < 0 {
+			a = 0
+		}
+		if b > len(want) {
+			b = len(want)
+		}
+		c := i + 80
+		if c > len(got) {
+			c = len(got)
+		}
+		t.Fatalf("native vs leaven mismatch at %d (native %d leaven %d)\n---- native ----\n%s\n---- leaven ----\n%s",
+			i, len(want), len(got), want[a:b], got[a:c])
 	}
 }
 
@@ -396,12 +445,17 @@ func runGoDir(t *testing.T, dir string, args ...string) []byte {
 		t.Fatalf("go build timeout\n%s", tailBytes(buf.Bytes(), 4000))
 	}
 	// -O0 csmith Go is much slower than native; seed=1 can exceed 30s.
-	return runTimeout(t, 3*time.Minute, bin, args...)
+	return runTimeout(t, 3*time.Minute, dir, bin, args...)
 }
 
-func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byte {
+func runTimeout(t *testing.T, d time.Duration, dir, bin string, args ...string) []byte {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
+	if dir != "" {
+		cmd.Dir = dir
+		_ = os.WriteFile(filepath.Join(dir, "platform.info"),
+			[]byte("integer size = 4\npointer size = 8\n"), 0644)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -413,11 +467,15 @@ func runTimeout(t *testing.T, d time.Duration, bin string, args ...string) []byt
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, tailBytes(buf.Bytes(), 4000))
+			t.Fatalf("%s: %v\n%s", filepath.Base(bin), err, clipEnds(buf.Bytes(), 4000))
 		}
 	case <-time.After(d):
+		if runtime.GOOS != "windows" {
+			_ = cmd.Process.Signal(syscall.SIGQUIT)
+			time.Sleep(400 * time.Millisecond)
+		}
 		_ = cmd.Process.Kill()
-		t.Fatalf("%s timeout after %s\n%s", filepath.Base(bin), d, tailBytes(buf.Bytes(), 4000))
+		t.Fatalf("%s timeout after %s\n%s", filepath.Base(bin), d, clipEnds(buf.Bytes(), 8000))
 	}
 	return buf.Bytes()
 }
@@ -444,11 +502,32 @@ func syncProjects(t *testing.T) {
 	if _, err := exec.LookPath("mise"); err != nil {
 		t.Fatal("mise not on PATH")
 	}
-	cmd := exec.Command("mise", "exec", "--", "workspaced", "codebase", "apply")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
+	var out []byte
+	var err error
+	for i, wait := range []time.Duration{0, 20 * time.Second, 60 * time.Second, 120 * time.Second} {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		cmd := exec.Command("mise", "exec", "--", "workspaced", "codebase", "apply")
+		out, err = cmd.CombinedOutput()
+		if err == nil {
+			return
+		}
+		if !githubFetchRetry(string(out)) {
+			break
+		}
+		t.Logf("workspaced apply retry %d after %s", i+1, wait)
 	}
+	t.Fatalf("workspaced codebase apply: %v\n%s", err, tailBytes(out, 2000))
+}
+
+func githubFetchRetry(out string) bool {
+	for _, s := range []string{"403", "429", "502", "503", "504"} {
+		if strings.Contains(out, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func llvmLink22(t *testing.T) string {
@@ -460,9 +539,203 @@ func clang22LinkEnv(t *testing.T) (clang, sysroot, libdir string) {
 	t.Helper()
 	clang = miseWhich(t, "clang", "conda:clang@22.1.8")
 	prefix := filepath.Dir(filepath.Dir(clang))
-	sysroot = filepath.Join(prefix, "x86_64-conda-linux-gnu", "sysroot")
 	libdir = filepath.Join(prefix, "lib")
+	sysroot = condaLinuxSysroot(prefix)
+	if sysroot != "" {
+		if _, err := os.Stat(sysroot); err != nil {
+			t.Fatalf("conda sysroot %s: %v", sysroot, err)
+		}
+	}
 	return clang, sysroot, libdir
+}
+
+func logLibcxxOStringLayout(t *testing.T, clangxx string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "layout.cpp")
+	const code = `#include <sstream>
+#include <cstdio>
+int main() {
+  std::ostringstream oss;
+  std::ostream* os = &oss;
+  auto* sb = oss.rdbuf();
+  std::printf("sizeof_oss=%zu sizeof_sb=%zu sizeof_os=%zu sizeof_str=%zu\n",
+    sizeof(oss), sizeof(*sb), sizeof(std::ostream), sizeof(std::string));
+  std::printf("os-oss=%td sb-oss=%td\n",
+    (char*)(void*)os - (char*)&oss, (char*)(void*)sb - (char*)&oss);
+  return 0;
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Fatalf("layout.cpp: %v", err)
+	}
+	bin := filepath.Join(dir, "layout")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions", src, "-o", bin)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("layout compile: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	run := exec.Command(bin)
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Logf("layout run: %v\n%s", err, out)
+		return
+	}
+	t.Logf("libcxx ostringstream layout:\n%s", out)
+	logLibcxxGensymIR(t, clangxx, dir)
+	logLibcxxTreeIR(t, clangxx, dir)
+	logLibcxxCtrlVarIR(t, clangxx, dir)
+}
+
+func logLibcxxGensymIR(t *testing.T, clangxx, dir string) {
+	t.Helper()
+	src := filepath.Join(dir, "probe.cpp")
+	const code = `#include <sstream>
+#include <string>
+std::string probe(const char* b) {
+  std::ostringstream ss;
+  ss << b;
+  ss << 1;
+  return ss.str();
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Logf("probe.cpp: %v", err)
+		return
+	}
+	ll := filepath.Join(dir, "probe.ll")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions",
+		"-emit-llvm", "-S", src, "-o", ll)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("probe ir: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	raw, err := os.ReadFile(ll)
+	if err != nil {
+		t.Logf("read probe.ll: %v", err)
+		return
+	}
+	var keep []string
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if strings.Contains(line, "probe") ||
+			strings.Contains(line, "ostringstream") ||
+			strings.Contains(line, "stringbuf") ||
+			strings.Contains(line, "ostream_insert") ||
+			strings.Contains(line, "3strE") ||
+			strings.Contains(line, "lsEm") ||
+			strings.Contains(line, "getelementptr") && (strings.Contains(line, "i64 8") ||
+				strings.Contains(line, "i32 8") ||
+				strings.Contains(line, "i64 40") ||
+				strings.Contains(line, "i64 48") ||
+				strings.Contains(line, "i64 88") ||
+				strings.Contains(line, "i64 96")) {
+			keep = append(keep, line)
+			if len(keep) >= 80 {
+				break
+			}
+		}
+	}
+	t.Logf("gensym probe ir (%d lines):\n%s", len(keep), strings.Join(keep, "\n"))
+}
+
+func logLibcxxTreeIR(t *testing.T, clangxx, dir string) {
+	t.Helper()
+	src := filepath.Join(dir, "treeprobe.cpp")
+	const code = `#include <map>
+struct Variable { int x; };
+unsigned probe(std::map<const Variable*, unsigned> m, const Variable* v) {
+  m[v] = 3;
+  auto c = m;
+  return c[v];
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Logf("treeprobe.cpp: %v", err)
+		return
+	}
+	ll := filepath.Join(dir, "treeprobe.ll")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions",
+		"-emit-llvm", "-S", src, "-o", ll)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("treeprobe ir: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	raw, err := os.ReadFile(ll)
+	if err != nil {
+		t.Logf("read treeprobe.ll: %v", err)
+		return
+	}
+	var keep []string
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if strings.Contains(line, "__tree_node") ||
+			strings.Contains(line, "__tree_end_node") ||
+			strings.Contains(line, "__get_value") ||
+			strings.Contains(line, "__construct_from_tree") ||
+			strings.Contains(line, "__tree_next") ||
+			strings.Contains(line, "__tree_min") ||
+			strings.Contains(line, "3mapI") {
+			keep = append(keep, line)
+			if len(keep) >= 100 {
+				break
+			}
+		}
+	}
+	t.Logf("tree probe ir (%d lines):\n%s", len(keep), strings.Join(keep, "\n"))
+}
+
+func logLibcxxCtrlVarIR(t *testing.T, clangxx, dir string) {
+	t.Helper()
+	src := filepath.Join(dir, "ctrlprobe.cpp")
+	const code = `#include <sstream>
+#include <string>
+std::string probe() {
+  std::stringstream ss;
+  char name = 'i';
+  ss << name;
+  return ss.str();
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+		t.Logf("ctrlprobe.cpp: %v", err)
+		return
+	}
+	ll := filepath.Join(dir, "ctrlprobe.ll")
+	args := append(clangNativeFlags(), "-O0", "-std=c++20", "-fno-exceptions",
+		"-emit-llvm", "-S", src, "-o", ll)
+	cmd := exec.Command(clangxx, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("ctrlprobe ir: %v\n%s", err, tailBytes(out, 2000))
+		return
+	}
+	raw, err := os.ReadFile(ll)
+	if err != nil {
+		t.Logf("read ctrlprobe.ll: %v", err)
+		return
+	}
+	var keep []string
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if strings.Contains(line, "call ") &&
+			(strings.Contains(line, "stringstream") ||
+				strings.Contains(line, "stringbuf") ||
+				strings.Contains(line, "lsB") ||
+				strings.Contains(line, "lsE") ||
+				strings.Contains(line, "3str") ||
+				strings.Contains(line, "sputc") ||
+				strings.Contains(line, "overflow") ||
+				strings.Contains(line, "xsputn")) {
+			keep = append(keep, line)
+			if len(keep) >= 40 {
+				break
+			}
+		}
+	}
+	t.Logf("ctrl-var probe calls (%d):\n%s", len(keep), strings.Join(keep, "\n"))
 }
 
 func miseWhich(t *testing.T, bin, tool string) string {
@@ -491,6 +764,15 @@ func tailBytes(b []byte, n int) string {
 // clipEnds keeps the panic line (start) and the caller (end). tailBytes
 // alone dropped the first ~800 bytes of csmith go-run panics.
 func clipEnds(b []byte, n int) string {
+	for _, m := range []string{"panic:", "fatal error:", "runtime error:", "signal SIG"} {
+		if i := bytes.Index(b, []byte(m)); i >= 0 {
+			rest := b[i:]
+			if len(rest) > n {
+				rest = rest[:n]
+			}
+			return string(rest)
+		}
+	}
 	if len(b) <= n {
 		return string(b)
 	}

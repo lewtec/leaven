@@ -47,21 +47,42 @@ func collectModuleNames(m *ir.Module) {
 	}
 }
 
+// identPunct maps LLVM/rustc punctuation to `_` so names are Go identifiers.
+// rustc on Darwin uses `$` in symbol names (gofmt: illegal character U+0024).
+var identPunct = strings.NewReplacer(
+	".", "_", "-", "_", "$", "_",
+	":", "_", "<", "_", ">", "_",
+	",", "_", " ", "_", "*", "p",
+	";", "_", "[", "_", "]", "_",
+	"(", "_", ")", "_", "'", "_",
+	"\"", "_", "/", "_", "\\", "_",
+	"=", "_", "+", "_", "&", "_",
+	"|", "_", "!", "_", "?", "_",
+	"@", "_", "#", "_", "%", "_",
+	"^", "_", "~", "_", "`", "_",
+)
+
+func sanitizeIdent(name string) string {
+	name = identPunct.Replace(name)
+	if name == "" {
+		return "_"
+	}
+	if c := name[0]; '0' <= c && c <= '9' {
+		name = "v" + name
+	}
+	if invalidNames[name] {
+		name = "_" + name
+	}
+	return name
+}
+
 // rawIdentName sanitizes an LLVM name to a Go identifier without clash renames.
 func rawIdentName(v value.Named) string {
 	name := v.Name()
 	if name == "" {
 		return "v" + strings.TrimPrefix(v.Ident(), "%")
 	}
-	if c := name[0]; '0' <= c && c <= '9' {
-		name = "v" + name
-	}
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, "-", "_")
-	if invalidNames[name] {
-		name = "_" + name
-	}
-	return name
+	return sanitizeIdent(name)
 }
 
 // funcLocalNames disambiguates Go names inside one function (%0 and %v0
@@ -160,12 +181,7 @@ func BlockName(v value.Value) string {
 	if _, err := strconv.ParseInt(name, 10, 64); err == nil {
 		return "block" + name
 	}
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, "-", "_")
-	if invalidNames[name] {
-		name = "_" + name
-	}
-	return name
+	return sanitizeIdent(name)
 }
 
 // invalidNames are Go keywords and predeclared ids that cannot be used as names.
@@ -187,14 +203,8 @@ var invalidNames = map[string]bool{
 }
 
 func namedRef(name string) (*jen.Statement, bool) {
-	if ref, ok := libraryFunctions[name]; ok {
+	if ref, ok := libcLookup(name); ok {
 		return ref.code(), true
-	}
-	if c, ok := cxxIONamed(name); ok {
-		return c, true
-	}
-	if c, ok := cxxTreeNamed(name); ok {
-		return c, true
 	}
 	if c := rustRuntime(name); c != nil {
 		return c, true
@@ -206,13 +216,20 @@ func namedRef(name string) (*jen.Statement, bool) {
 // llvm.* intrinsic that translateCall handles. Declare-only IR symbols with
 // no runtime def become panic/zero stubs.
 func hasRuntimeDef(name string) bool {
-	if _, ok := libraryFunctions[name]; ok {
+	if _, ok := libcLookup(name); ok {
 		return true
 	}
 	if _, ok := libraryGlobals[name]; ok {
 		return true
 	}
 	if _, ok := namedRef(name); ok {
+		return true
+	}
+	if isGetline(name) || isLibcxxStringEqCStr(name) || isLibcxxStringCompareCStr(name) ||
+		isLibcxxStringErase(name) || isLibcxxStringAppendCStr(name) ||
+		isLibcxxStringAssignCStr(name) || isLibcxxStringPushBack(name) ||
+		isLibcxxStringInsertCStr(name) || isStdToString(name) {
+		// These are emitted as trampolines in writeModule (cxxReplaceBody).
 		return true
 	}
 	return llvmCallHandled(name)
@@ -445,10 +462,10 @@ func formatExpr(v value.Value) (expr, error) {
 		return formatExpr(v.Constant)
 
 	case *constant.Int:
-		if v.Typ.BitSize == 128 {
+		if isWide128(v.Typ.BitSize) {
 			return val(i128Lit(v.X)), nil
 		}
-		if v.Typ.BitSize == 256 {
+		if isWide256(v.Typ.BitSize) {
 			return val(i256Lit(v.X)), nil
 		}
 		if v.Typ.BitSize > 64 {
@@ -501,8 +518,19 @@ func formatExpr(v value.Value) (expr, error) {
 		if err != nil {
 			return expr{}, fmt.Errorf("error translating type (%v): %w", v.Typ, err)
 		}
+		st := v.Typ
 		elems := make([]jen.Code, len(v.Fields))
 		for i, c := range v.Fields {
+			if st != nil && !st.Packed && i < len(st.Fields) {
+				if ft, ok := st.Fields[i].(*types.StructType); ok && ft.Packed {
+					sz, err := llvmTypeSize(ft)
+					if err != nil {
+						return expr{}, err
+					}
+					elems[i] = jen.Index(jen.Lit(int(sz))).Byte().Values()
+					continue
+				}
+			}
 			e, err := FormatValue(c)
 			if err != nil {
 				return expr{}, fmt.Errorf("error translating field %d (%v): %w", i, c, err)
@@ -558,10 +586,10 @@ func zeroOf(typ types.Type) (expr, error) {
 		if t.BitSize == 1 {
 			return val(jen.False()), nil
 		}
-		if t.BitSize == 128 {
+		if isWide128(t.BitSize) {
 			return val(Qual[libc.I128]().Values()), nil
 		}
-		if t.BitSize == 256 {
+		if isWide256(t.BitSize) {
 			return val(Qual[libc.I256]().Values()), nil
 		}
 		return val(jen.Lit(0)), nil
@@ -737,7 +765,7 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	if toType.BitSize == 128 {
+	if isWide128(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I128FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
@@ -746,7 +774,7 @@ func formatZExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		return Sym(libc.I128FromU64).Call(jen.Uint64().Call(src)), nil
 	}
-	if toType.BitSize == 256 {
+	if isWide256(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I256FromU64).Call(jen.Map(jen.Bool()).Uint64().Values(jen.Dict{
 				jen.True():  jen.Lit(1),
@@ -779,7 +807,7 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error translating source (%v): %w", from, err)
 	}
-	if toType.BitSize == 128 {
+	if isWide128(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I128FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
@@ -788,7 +816,7 @@ func formatSExt(from value.Value, to types.Type) (*jen.Statement, error) {
 		}
 		return Sym(libc.I128FromI64).Call(jen.Int64().Call(src)), nil
 	}
-	if toType.BitSize == 256 {
+	if isWide256(toType.BitSize) {
 		if fromType, ok := from.Type().(*types.IntType); ok && fromType.BitSize == 1 {
 			return Sym(libc.I256FromI64).Call(jen.Map(jen.Bool()).Int64().Values(jen.Dict{
 				jen.True():  jen.Lit(-1),
@@ -1032,7 +1060,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 	}
 
 	if ci, ok := v.(*constant.Int); ok {
-		if ci.Typ.BitSize == 128 || ci.Typ.BitSize == 256 {
+		if isWide128(ci.Typ.BitSize) || isWide256(ci.Typ.BitSize) {
 			return result, nil
 		}
 		if ci.Typ.BitSize > 64 {
@@ -1088,7 +1116,7 @@ func FormatUnsigned(v value.Value) (*jen.Statement, error) {
 
 	switch t := v.Type().(type) {
 	case *types.IntType:
-		if t.BitSize == 128 || t.BitSize == 256 {
+		if isWide128(t.BitSize) || isWide256(t.BitSize) {
 			return result, nil
 		}
 		if t.BitSize > 8 {
