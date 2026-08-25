@@ -105,9 +105,6 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 	for _, fn := range m.Funcs {
 		collectFuncLocalNames(fn)
 		name := VariableName(fn)
-		if fn.Blocks == nil && hasRuntimeDef(name) {
-			continue
-		}
 
 		if fn.Blocks != nil {
 			fixMalloc(fn)
@@ -148,13 +145,23 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			}
 		}
 
+		// C++ replacements keep the IR name so vtables and call
+		// sites share one symbol. Body is the Go stand-in.
+		if body, ok := cxxReplaceBody(fn); ok {
+			decl := f.Func().Id(name).Params(params...)
+			if ret != nil {
+				decl.Add(ret)
+			}
+			decl.Block(body...)
+			continue
+		}
+		if fn.Blocks == nil && hasRuntimeDef(name) {
+			continue
+		}
+
 		decl := f.Func().Id(name).Params(params...)
 		if ret != nil {
 			decl.Add(ret)
-		}
-		if body, ok := cxxReplaceBody(name); ok {
-			decl.Block(body...)
-			continue
 		}
 		if fn.Blocks == nil {
 			decl.Block(jen.Panic(jen.Lit(unsatisfiedMsg(fn.Name()))))

@@ -1,6 +1,11 @@
 package leaven
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lewtec/leaven/internal/llir/ir"
+	"github.com/lewtec/leaven/internal/llir/ir/types"
+)
 
 func TestParseCxxOstreamOps(t *testing.T) {
 	cases := []struct {
@@ -122,11 +127,13 @@ func TestParseCxxNewDelete(t *testing.T) {
 }
 
 func TestCxxReplaceBodyGotoMustJump(t *testing.T) {
-	body, ok := cxxReplaceBody("_ZNK13StatementGoto9must_jumpEv")
+	gotoFn := ir.NewFunc("_ZNK13StatementGoto9must_jumpEv", types.NewInt(1))
+	body, ok := cxxReplaceBody(gotoFn)
 	if !ok || len(body) != 1 {
 		t.Fatalf("ok=%v n=%d", ok, len(body))
 	}
-	if _, ok := cxxReplaceBody("_ZNK5Block9must_jumpEv"); ok {
+	blockFn := ir.NewFunc("_ZNK5Block9must_jumpEv", types.NewInt(1))
+	if _, ok := cxxReplaceBody(blockFn); ok {
 		t.Fatal("Block::must_jump stays IR")
 	}
 }

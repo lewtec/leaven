@@ -206,12 +206,6 @@ func namedRef(name string) (*jen.Statement, bool) {
 	if ref, ok := libcLookup(name); ok {
 		return ref.code(), true
 	}
-	if c, ok := cxxIONamed(name); ok {
-		return c, true
-	}
-	if c, ok := cxxTreeNamed(name); ok {
-		return c, true
-	}
 	if c := rustRuntime(name); c != nil {
 		return c, true
 	}
@@ -235,6 +229,7 @@ func hasRuntimeDef(name string) bool {
 		isLibcxxStringErase(name) || isLibcxxStringAppendCStr(name) ||
 		isLibcxxStringAssignCStr(name) || isLibcxxStringPushBack(name) ||
 		isLibcxxStringInsertCStr(name) || isStdToString(name) {
+		// These are emitted as trampolines in writeModule (cxxReplaceBody).
 		return true
 	}
 	return llvmCallHandled(name)

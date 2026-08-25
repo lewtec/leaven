@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/dave/jennifer/jen"
+	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
 	"github.com/lewtec/leaven/internal/llir/ir/value"
@@ -43,7 +44,11 @@ func TestLibcLookupDarwinSuffix(t *testing.T) {
 	if _, ok := libcLookup("__assert_rtn"); !ok {
 		t.Fatal("__assert_rtn")
 	}
-	if _, ok := libcLookup("_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_"); !ok {
+	substr := "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_"
+	if _, ok := libcLookup(substr); ok {
+		t.Fatal("C++ names are trampolines, not libcLookup")
+	}
+	if _, ok := cxxReplaceBody(ir.NewFunc(substr, types.Void)); !ok {
 		t.Fatal("string substr ctor")
 	}
 }

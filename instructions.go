@@ -1818,135 +1818,6 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 				args[i] = libcCallArg(name, i, a, args[i])
 			}
 			typedPtr = libcReturnsTypedPtr(name)
-		} else if cxxNoopDtor(llvmName) {
-			return nil, nil
-		} else if c, adj, retPtr, ok := cxxTreeCall(llvmName, args); ok {
-			callee = c
-			args = adj
-			typedPtr = retPtr
-		} else if isLibcxxStringInsertCStr(llvmName) && len(inst.Args) >= 3 &&
-			!isPtrish(inst.Args[1].Type()) {
-			callee = Sym(libc.StdStringInsertCStr).code()
-			n := jen.Lit(int64(-1))
-			if len(inst.Args) >= 4 && !isPtrish(inst.Args[3].Type()) {
-				n = jen.Int64().Call(jen.Add(args[3]))
-			}
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				jen.Int64().Call(jen.Add(args[1])),
-				ptrArg(inst.Args, args, 2),
-				n,
-			}
-		} else if isLibcxxStringPushBack(llvmName) && len(inst.Args) >= 2 &&
-			!isPtrish(inst.Args[1].Type()) {
-			callee = Sym(libc.StdStringPushBack).code()
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				jen.Byte().Call(args[1]),
-			}
-		} else if isLibcxxStringAssignCStr(llvmName) && len(inst.Args) >= 2 &&
-			(len(inst.Args) < 3 || !isPtrish(inst.Args[2].Type())) {
-			callee = Sym(libc.StdStringAssignCStr).code()
-			n := jen.Lit(int64(-1))
-			if len(inst.Args) >= 3 {
-				n = jen.Int64().Call(jen.Add(args[2]))
-			}
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				ptrArg(inst.Args, args, 1),
-				n,
-			}
-		} else if isLibcxxStringPlus(llvmName) && len(inst.Args) >= 3 {
-			if isLibcxxStringPlusCStrLeft(llvmName) {
-				callee = Sym(libc.StdStringPlusCStrLeft).code()
-			} else {
-				callee = Sym(libc.StdStringPlusCStrRight).code()
-			}
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				ptrArg(inst.Args, args, 1),
-				ptrArg(inst.Args, args, 2),
-			}
-		} else if isLibcxxStringAppendCStr(llvmName) && len(inst.Args) >= 2 &&
-			(len(inst.Args) < 3 || !isPtrish(inst.Args[2].Type())) {
-			callee = Sym(libc.StdStringAppendCStr).code()
-			n := jen.Lit(int64(-1))
-			if len(inst.Args) >= 3 {
-				n = jen.Int64().Call(jen.Add(args[2]))
-			}
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				ptrArg(inst.Args, args, 1),
-				n,
-			}
-		} else if isLibcxxStringErase(llvmName) && len(inst.Args) >= 2 {
-			callee = Sym(libc.StdStringErase).code()
-			n := jen.Lit(int64(-1))
-			if len(inst.Args) >= 3 {
-				n = jen.Int64().Call(jen.Add(args[2]))
-			}
-			args = []jen.Code{
-				ptrArg(inst.Args, args, 0),
-				jen.Int64().Call(jen.Add(args[1])),
-				n,
-			}
-		} else if isLibcxxStringCompareCStr(llvmName) && len(inst.Args) >= 2 {
-			callee = Sym(libc.StdStringCompareCStr).code()
-			switch len(inst.Args) {
-			case 2:
-				// compare(const char*)
-				args = []jen.Code{
-					ptrArg(inst.Args, args, 0), jen.Lit(int64(0)), jen.Lit(int64(-1)),
-					ptrArg(inst.Args, args, 1), jen.Lit(int64(-1)),
-				}
-			case 4:
-				// compare(pos, n, const char*)
-				args = []jen.Code{
-					ptrArg(inst.Args, args, 0),
-					jen.Int64().Call(jen.Add(args[1])),
-					jen.Int64().Call(jen.Add(args[2])),
-					ptrArg(inst.Args, args, 3),
-					jen.Lit(int64(-1)),
-				}
-			default:
-				// compare(pos, n, const char*, n2)
-				args = []jen.Code{
-					ptrArg(inst.Args, args, 0),
-					jen.Int64().Call(jen.Add(args[1])),
-					jen.Int64().Call(jen.Add(args[2])),
-					ptrArg(inst.Args, args, 3),
-					jen.Int64().Call(jen.Add(args[4])),
-				}
-			}
-		} else if isLibcxxStringEqCStr(llvmName) && len(inst.Args) >= 2 &&
-			isPtrish(inst.Args[0].Type()) && isPtrish(inst.Args[1].Type()) {
-			callee = Sym(libc.StdStringEqCStr).code()
-			args = []jen.Code{ptrArg(inst.Args, args, 0), ptrArg(inst.Args, args, 1)}
-		} else if signed, ok := stdToStringKind(llvmName); ok && len(inst.Args) >= 2 {
-			// sret string, then the integer.
-			if signed {
-				callee = Sym(libc.StdToStringI).code()
-				args = []jen.Code{
-					ptrArg(inst.Args, args, 0),
-					jen.Int64().Call(jen.Add(args[1])),
-				}
-			} else {
-				callee = Sym(libc.StdToString).code()
-				args = []jen.Code{
-					ptrArg(inst.Args, args, 0),
-					jen.Uint64().Call(jen.Add(args[1])),
-				}
-			}
-		} else if c, adj, retPtr, ok := cxxIOCallIR(llvmName, inst.Args, args); ok {
-			callee = c
-			args = adj
-			typedPtr = retPtr
-		} else if n, ok := parseCxx(llvmName); ok && (n.ident == "__throw_bad_cast" || n.ident == "throw_bad_cast") {
-			// Inlined getline path if failbit was not seen. Short text
-			// so CI does not omit the panic line.
-			return one(jen.Panic(jen.Lit("std::bad_cast"))), nil
-		} else if n, ok := parseCxx(llvmName); ok && n.ident == "widen" && n.isClass("ctype") {
-			return one(assign(VariableName(inst), Sym(libc.CtypeWiden).Call(args...))), nil
 		} else if strings.Contains(llvmName, "alloc_error_handler") ||
 			strings.Contains(llvmName, "__rust_alloc_error") {
 			return one(jen.Panic(jen.Lit("allocation error"))), nil
@@ -1962,10 +1833,6 @@ func translateCall(inst *ir.InstCall) ([]jen.Code, error) {
 			return one(assign(VariableName(inst), Sym(libc.RustRealloc).Call(args...))), nil
 		} else if strings.Contains(llvmName, "__rust_no_alloc_shim") {
 			return nil, nil
-		} else if n, ok := parseCxx(llvmName); ok && n.recv == "" && (n.ident == "new" || n.ident == "new[]") {
-			return one(assign(VariableName(inst), Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), nil
-		} else if n, ok := parseCxx(llvmName); ok && n.recv == "" && (n.ident == "delete" || n.ident == "delete[]") {
-			return one(Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))), nil
 		} else if _, ok := inst.Callee.(*ir.Func); ok {
 			callee = jen.Id(VariableName(inst.Callee.(value.Named)))
 			if c, ok := namedRef(llvmName); ok {
@@ -2710,20 +2577,193 @@ func isGetline(name string) bool {
 	return ok && n.std && n.ident == "getline"
 }
 
-// cxxReplaceBody is a Go stand-in for an IR function. Virtual calls
-// go through the vtable, so we keep the symbol and swap the body.
-func cxxReplaceBody(name string) ([]jen.Code, bool) {
-	n, ok := parseCxx(name)
-	if !ok {
-		return nil, false
+func isCxxMangled(name string) bool {
+	return strings.HasPrefix(name, "_Z") || strings.HasPrefix(name, "__Z")
+}
+
+func fnParamName(fn *ir.Func, i int) string {
+	if i >= len(fn.Params) {
+		return fmt.Sprintf("a%d", i)
 	}
-	// StatementGoto::must_jump is test.not_equals(0). Csmith always
-	// builds that test as ExpressionVariable, whose not_equals is
-	// false. The IR virtual-calls a dead vptr (Darwin seed 42, +0x70).
-	if n.ident == "must_jump" && n.isClass("StatementGoto") {
+	if fn.Blocks == nil {
+		return fmt.Sprintf("a%d", i)
+	}
+	return VariableName(fn.Params[i])
+}
+
+func fnParamIDs(fn *ir.Func) ([]value.Value, []jen.Code) {
+	ir := make([]value.Value, len(fn.Params))
+	args := make([]jen.Code, len(fn.Params))
+	for i, p := range fn.Params {
+		ir[i] = p
+		args[i] = jen.Id(fnParamName(fn, i))
+	}
+	return ir, args
+}
+
+func cxxForward(fn *ir.Func, callee *jen.Statement, args []jen.Code, typedPtr bool) []jen.Code {
+	call := jen.Add(callee).Call(args...)
+	rt := fn.Sig.RetType
+	if rt == nil || types.Equal(rt, types.Void) {
+		return []jen.Code{call}
+	}
+	if typedPtr {
+		if isTaggedPointerType(rt) {
+			return one(jen.Return(emitAddr(call)))
+		}
+		if _, ok := rt.(*types.PointerType); ok {
+			return one(jen.Return(emitPtr(call)))
+		}
+	}
+	return one(jen.Return(call))
+}
+
+// cxxReplaceBody is the Go stand-in for an IR function. Call sites and
+// vtables keep the IR name; only the body is swapped.
+func cxxReplaceBody(fn *ir.Func) ([]jen.Code, bool) {
+	name := fn.Name()
+	if name == "" {
+		name = VariableName(fn)
+	}
+	n, ok := parseCxx(name)
+	ir, args := fnParamIDs(fn)
+	if ok && n.ident == "must_jump" && n.isClass("StatementGoto") {
 		return one(jen.Return(jen.False())), true
 	}
+	if cxxNoopDtor(name) {
+		if fn.Sig != nil && fn.Sig.RetType != nil && !types.Equal(fn.Sig.RetType, types.Void) {
+			return one(jen.Return(jen.Nil())), true
+		}
+		return []jen.Code{}, true
+	}
+	if ok && (n.ident == "__throw_bad_cast" || n.ident == "throw_bad_cast") {
+		return one(jen.Panic(jen.Lit("std::bad_cast"))), true
+	}
+	if ok && n.recv == "" && (n.ident == "new" || n.ident == "new[]") && len(args) >= 1 {
+		return one(jen.Return(Sym(libc.RustAlloc).Call(args[0], jen.Lit(1)))), true
+	}
+	if ok && n.recv == "" && (n.ident == "delete" || n.ident == "delete[]") && len(args) >= 1 {
+		return []jen.Code{Sym(libc.RustDealloc).Call(args[0], jen.Lit(0), jen.Lit(1))}, true
+	}
+	if ok && n.ident == "widen" && n.isClass("ctype") {
+		return cxxForward(fn, Sym(libc.CtypeWiden).code(), args, false), true
+	}
+	if c, adj, ok := cxxStringCall(name, ir, args); ok {
+		return cxxForward(fn, c, adj, false), true
+	}
+	if signed, ok := stdToStringKind(name); ok && len(args) >= 2 {
+		callee := Sym(libc.StdToString).code()
+		v := jen.Uint64().Call(jen.Add(args[1]))
+		if signed {
+			callee = Sym(libc.StdToStringI).code()
+			v = jen.Int64().Call(jen.Add(args[1]))
+		}
+		return []jen.Code{callee.Call(ptrArg(ir, args, 0), v)}, true
+	}
+	if c, adj, retPtr, ok := cxxTreeCall(name, args); ok {
+		return cxxForward(fn, c, adj, retPtr), true
+	}
+	if c, adj, retPtr, ok := cxxIOCallIR(name, ir, args); ok {
+		return cxxForward(fn, c, adj, retPtr), true
+	}
+	if isCxxMangled(name) {
+		if ref, ok := libraryFunctions[name]; ok {
+			return cxxForward(fn, ref.code(), cxxPassthrough(fn), libcReturnsTypedPtr(name)), true
+		}
+	}
 	return nil, false
+}
+
+func cxxPassthrough(fn *ir.Func) []jen.Code {
+	ir, args := fnParamIDs(fn)
+	out := make([]jen.Code, len(args))
+	for i := range args {
+		if i < len(fn.Params) && isPtrish(fn.Params[i].Typ) {
+			out[i] = ptrArg(ir, args, i)
+		} else {
+			out[i] = args[i]
+		}
+	}
+	return out
+}
+
+func cxxStringCall(name string, ir []value.Value, args []jen.Code) (*jen.Statement, []jen.Code, bool) {
+	if isLibcxxStringInsertCStr(name) && len(ir) >= 3 && !isPtrish(ir[1].Type()) {
+		n := jen.Lit(int64(-1))
+		if len(ir) >= 4 && !isPtrish(ir[3].Type()) {
+			n = jen.Int64().Call(jen.Add(args[3]))
+		}
+		return Sym(libc.StdStringInsertCStr).code(), []jen.Code{
+			ptrArg(ir, args, 0), jen.Int64().Call(jen.Add(args[1])), ptrArg(ir, args, 2), n,
+		}, true
+	}
+	if isLibcxxStringPushBack(name) && len(ir) >= 2 && !isPtrish(ir[1].Type()) {
+		return Sym(libc.StdStringPushBack).code(), []jen.Code{
+			ptrArg(ir, args, 0), jen.Byte().Call(args[1]),
+		}, true
+	}
+	if isLibcxxStringAssignCStr(name) && len(ir) >= 2 && (len(ir) < 3 || !isPtrish(ir[2].Type())) {
+		n := jen.Lit(int64(-1))
+		if len(ir) >= 3 {
+			n = jen.Int64().Call(jen.Add(args[2]))
+		}
+		return Sym(libc.StdStringAssignCStr).code(), []jen.Code{
+			ptrArg(ir, args, 0), ptrArg(ir, args, 1), n,
+		}, true
+	}
+	if isLibcxxStringPlus(name) && len(ir) >= 3 {
+		callee := Sym(libc.StdStringPlusCStrRight).code()
+		if isLibcxxStringPlusCStrLeft(name) {
+			callee = Sym(libc.StdStringPlusCStrLeft).code()
+		}
+		return callee, []jen.Code{
+			ptrArg(ir, args, 0), ptrArg(ir, args, 1), ptrArg(ir, args, 2),
+		}, true
+	}
+	if isLibcxxStringAppendCStr(name) && len(ir) >= 2 && (len(ir) < 3 || !isPtrish(ir[2].Type())) {
+		n := jen.Lit(int64(-1))
+		if len(ir) >= 3 {
+			n = jen.Int64().Call(jen.Add(args[2]))
+		}
+		return Sym(libc.StdStringAppendCStr).code(), []jen.Code{
+			ptrArg(ir, args, 0), ptrArg(ir, args, 1), n,
+		}, true
+	}
+	if isLibcxxStringErase(name) && len(ir) >= 2 {
+		n := jen.Lit(int64(-1))
+		if len(ir) >= 3 {
+			n = jen.Int64().Call(jen.Add(args[2]))
+		}
+		return Sym(libc.StdStringErase).code(), []jen.Code{
+			ptrArg(ir, args, 0), jen.Int64().Call(jen.Add(args[1])), n,
+		}, true
+	}
+	if isLibcxxStringCompareCStr(name) && len(ir) >= 2 {
+		switch len(ir) {
+		case 2:
+			return Sym(libc.StdStringCompareCStr).code(), []jen.Code{
+				ptrArg(ir, args, 0), jen.Lit(int64(0)), jen.Lit(int64(-1)),
+				ptrArg(ir, args, 1), jen.Lit(int64(-1)),
+			}, true
+		case 4:
+			return Sym(libc.StdStringCompareCStr).code(), []jen.Code{
+				ptrArg(ir, args, 0), jen.Int64().Call(jen.Add(args[1])),
+				jen.Int64().Call(jen.Add(args[2])), ptrArg(ir, args, 3), jen.Lit(int64(-1)),
+			}, true
+		default:
+			return Sym(libc.StdStringCompareCStr).code(), []jen.Code{
+				ptrArg(ir, args, 0), jen.Int64().Call(jen.Add(args[1])),
+				jen.Int64().Call(jen.Add(args[2])), ptrArg(ir, args, 3),
+				jen.Int64().Call(jen.Add(args[4])),
+			}, true
+		}
+	}
+	if isLibcxxStringEqCStr(name) && len(ir) >= 2 && isPtrish(ir[0].Type()) && isPtrish(ir[1].Type()) {
+		return Sym(libc.StdStringEqCStr).code(), []jen.Code{
+			ptrArg(ir, args, 0), ptrArg(ir, args, 1),
+		}, true
+	}
+	return nil, nil, false
 }
 
 func isStdToString(name string) bool {
@@ -2902,6 +2942,9 @@ func libcCanon(name string) string {
 // libcLookup maps LLVM names to libc. Darwin symbols may be
 // realpath$DARWIN_EXTSN; after sanitizeIdent they are realpath_DARWIN_EXTSN.
 func libcLookup(name string) (goRef, bool) {
+	if isCxxMangled(name) {
+		return goRef{}, false
+	}
 	ref, ok := libraryFunctions[libcCanon(name)]
 	return ref, ok
 }
