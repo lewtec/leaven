@@ -761,6 +761,15 @@ func tailBytes(b []byte, n int) string {
 // clipEnds keeps the panic line (start) and the caller (end). tailBytes
 // alone dropped the first ~800 bytes of csmith go-run panics.
 func clipEnds(b []byte, n int) string {
+	for _, m := range []string{"panic:", "fatal error:", "runtime error:", "signal SIG"} {
+		if i := bytes.Index(b, []byte(m)); i >= 0 {
+			rest := b[i:]
+			if len(rest) > n {
+				rest = rest[:n]
+			}
+			return string(rest)
+		}
+	}
 	if len(b) <= n {
 		return string(b)
 	}

@@ -2630,6 +2630,14 @@ func cxxReplaceBody(fn *ir.Func) ([]jen.Code, bool) {
 	if ok && n.ident == "must_jump" && n.isClass("StatementGoto") {
 		return one(jen.Return(jen.False())), true
 	}
+	// These dtors `delete &ref` on Expression/Block/Assign. Darwin
+	// seed 42 prints the C program then SEGVs here in Finalization
+	// (vptr 0). Leak until process exit.
+	if n.dtor && n.isClass("StatementFor", "StatementIf", "StatementAssign",
+		"StatementGoto", "StatementBreak", "StatementContinue",
+		"StatementReturn", "StatementArrayOp", "StatementExpr") {
+		return []jen.Code{}, true
+	}
 	if cxxNoopDtor(name) {
 		if fn.Sig != nil && fn.Sig.RetType != nil && !types.Equal(fn.Sig.RetType, types.Void) {
 			return one(jen.Return(jen.Nil())), true
