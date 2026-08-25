@@ -69,11 +69,14 @@ func testAssimilateCsmith(t *testing.T) {
 	ll := filepath.Join(build, "csmith.ll")
 	emitIRFromCompileCommands(t, build, ll, link)
 	// Seed 1 is the small smoke case. Seed 42 emits ~50× more C (multi-func,
-	// deep blocks, bitfields, pointer chains) — still the generator binary,
-	// but exercises more of its IR paths under leaven.
+	// deep blocks, bitfields, pointer chains). 7, 100, and 12345 are extra
+	// generator-stdout matches so a single lucky seed cannot hide drift.
 	for _, args := range [][]string{
 		{"-s", "1"},
+		{"-s", "7"},
 		{"-s", "42"},
+		{"-s", "100"},
+		{"-s", "12345"},
 	} {
 		args := args
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
