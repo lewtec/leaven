@@ -4,11 +4,11 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "libc.LocaleCtor"
+        "libc.LocaleCtor",
+        "func _ZNSt6localeC1Ev"
       ],
       "not_contains": [
-        "unsatisfied: _ZNSt6localeC1Ev",
-        "func _ZNSt6localeC1Ev"
+        "unsatisfied: _ZNSt6localeC1Ev"
       ]
     }
   ],

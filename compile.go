@@ -110,6 +110,13 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			fixMalloc(fn)
 		}
 
+		// C++ trampolines before TypeSpec so llvm.* metadata params
+		// (noalias.scope.decl) are still skipped by hasRuntimeDef.
+		replace, replaceOK := cxxReplaceBody(fn)
+		if !replaceOK && fn.Blocks == nil && hasRuntimeDef(name) {
+			continue
+		}
+
 		// Only package main gets a Go program entry point from C main.
 		isGoMain := name == "main" && packageName == "main"
 
@@ -145,17 +152,12 @@ func writeModule(f *jen.File, m *ir.Module, packageName string) error {
 			}
 		}
 
-		// C++ replacements keep the IR name so vtables and call
-		// sites share one symbol. Body is the Go stand-in.
-		if body, ok := cxxReplaceBody(fn); ok {
+		if replaceOK {
 			decl := f.Func().Id(name).Params(params...)
 			if ret != nil {
 				decl.Add(ret)
 			}
-			decl.Block(body...)
-			continue
-		}
-		if fn.Blocks == nil && hasRuntimeDef(name) {
+			decl.Block(replace...)
 			continue
 		}
 

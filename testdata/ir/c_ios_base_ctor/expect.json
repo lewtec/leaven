@@ -4,11 +4,11 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "libc.IosBaseCtor"
+        "libc.IosBaseCtor",
+        "func _ZNSt8ios_baseC2Ev"
       ],
       "not_contains": [
-        "unsatisfied: _ZNSt8ios_baseC2Ev",
-        "func _ZNSt8ios_baseC2Ev"
+        "unsatisfied: _ZNSt8ios_baseC2Ev"
       ]
     }
   ],

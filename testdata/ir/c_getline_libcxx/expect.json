@@ -4,11 +4,11 @@
       "name": "package-p",
       "package": "p",
       "contains": [
-        "libc.IstreamGetline"
+        "libc.IstreamGetline",
+        "func _ZNSt3__17getline"
       ],
       "not_contains": [
-        "unsatisfied: _ZNSt3__17getline",
-        "func _ZNSt3__17getline"
+        "unsatisfied: _ZNSt3__17getline"
       ]
     }
   ]
