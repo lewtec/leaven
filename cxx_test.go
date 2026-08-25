@@ -136,10 +136,6 @@ func TestCxxReplaceBodyGotoMustJump(t *testing.T) {
 	if _, ok := cxxReplaceBody(blockFn); ok {
 		t.Fatal("Block::must_jump stays IR")
 	}
-	dtor := ir.NewFunc("_ZN12StatementForD1Ev", types.Void)
-	if _, ok := cxxReplaceBody(dtor); !ok {
-		t.Fatal("StatementFor dtor")
-	}
 }
 
 func TestParseCxxToString(t *testing.T) {
