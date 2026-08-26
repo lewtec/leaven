@@ -2,3 +2,6 @@ platform.info
 
 # Upstream trees JIT-placed by workspaced core:place. Do not commit.
 /testdata/projects/
+
+# GoReleaser
+/dist/

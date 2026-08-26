@@ -12,14 +12,22 @@ import (
 	"github.com/lewtec/leaven"
 )
 
+// Set via goreleaser ldflags: -X main.version={{ .Version }}
+var version = "dev"
+
 func main() {
 	packageName := flag.String("package", "main", "Go package name for generated code")
+	printVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: leaven [flags] [input-file.ll]\n")
 		fmt.Fprintf(os.Stderr, "With no file (or -), read LLVM IR from stdin and write Go to stdout.\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *printVersion {
+		fmt.Println(version)
+		return
+	}
 	if flag.NArg() > 1 {
 		flag.Usage()
 		os.Exit(1)

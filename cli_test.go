@@ -33,3 +33,14 @@ func TestCLIDashStdin(t *testing.T) {
 		t.Fatalf("stdout missing package clause:\n%s\nstderr:\n%s", stdout.Bytes(), stderr.Bytes())
 	}
 }
+
+func TestCLIVersion(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/leaven", "-version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("leaven -version: %v\n%s", err, out)
+	}
+	if got := string(bytes.TrimSpace(out)); got != "dev" {
+		t.Fatalf("version = %q, want dev", got)
+	}
+}

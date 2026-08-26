@@ -23,6 +23,8 @@
 "conda:cmake" = { version = "4.4.1", os = ["linux", "macos", "windows/x64"] }
 "conda:ninja" = { version = "1.13.2", os = ["linux", "macos", "windows/x64"] }
 go = "1.26.5"
+goreleaser = "2.17.0"
+svu = "3.3.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
 "github:lucasew/workspaced" = "0.14.3"
 
@@ -62,3 +64,22 @@ fi
 [tasks."test:assimilate"]
 description = "Native cmake/cargo vs leaven (places testdata/projects if needed)"
 run = "go test -count=1 -timeout 30m -run TestAssimilate -v ."
+
+[tasks.ci]
+description = "IR fixtures + build check"
+depends = ["test"]
+run = "go build -o /dev/null ./cmd/leaven"
+
+[tasks.release]
+description = "Tag and release with GoReleaser (svu + goreleaser)"
+depends = ["ci"]
+usage = '''
+arg "<version>" help="New version" {
+  choices "next" "major" "minor" "patch"
+  default "next"
+}
+'''
+run = '''
+git tag $(svu ${usage_version})
+goreleaser release --clean
+'''
