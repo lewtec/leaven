@@ -57,29 +57,36 @@ go install github.com/lewtec/leaven/cmd/leaven@latest
 	$ cat strcmp.go
 	package main
 
-	import "unsafe"
+	import (
+		"unsafe"
 
-	func strcmp(l *byte, r *byte) int32 {
-		var l_addr, r_addr **byte
-		var v0, v2, v4, v7, incdec_ptr, v8, incdec_ptr4, v9, v11 *byte
+		"github.com/lewtec/leaven/libc"
+	)
+
+	func strcmp(l unsafe.Pointer, r unsafe.Pointer) int32 {
 		var cmp, tobool, v6 bool
-		var v1, v3, v5, v10, v12 byte
 		var conv, conv1, conv3, conv5, conv6, sub int32
-
+		var v1, v3, v5, v10, v12 byte
+		var v0, v2, v4, v7, incdec_ptr, v8, incdec_ptr4, v9, v11 unsafe.Pointer
+		var l_addr, r_addr unsafe.Pointer
 		_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = l_addr, r_addr, v0, v1, conv, v2, v3, conv1, cmp, v4, v5, conv3, tobool, v6, v7, incdec_ptr, v8, incdec_ptr4, v9, v10, conv5, v11, v12, conv6, sub
 
-		l_addr = new(*byte)
-		r_addr = new(*byte)
-		*l_addr = l
-		*r_addr = r
+		l_addr_mem := libc.Alloca[unsafe.Pointer](1, int64(8))
+		l_addr = libc.Ptr(l_addr_mem)
+		defer libc.AllocaFree(libc.As[byte](libc.Ptr(l_addr_mem)))
+		r_addr_mem := libc.Alloca[unsafe.Pointer](1, int64(8))
+		r_addr = libc.Ptr(r_addr_mem)
+		defer libc.AllocaFree(libc.As[byte](libc.Ptr(r_addr_mem)))
+		*libc.As[unsafe.Pointer](l_addr) = l
+		*libc.As[unsafe.Pointer](r_addr) = r
 		goto for_cond
 
 	for_cond:
-		v0 = *l_addr
-		v1 = *v0
+		v0 = *libc.As[unsafe.Pointer](l_addr)
+		v1 = *libc.As[byte](v0)
 		conv = int32(int8(v1))
-		v2 = *r_addr
-		v3 = *v2
+		v2 = *libc.As[unsafe.Pointer](r_addr)
+		v3 = *libc.As[byte](v2)
 		conv1 = int32(int8(v3))
 		cmp = conv == conv1
 		if cmp {
@@ -90,8 +97,8 @@ go install github.com/lewtec/leaven/cmd/leaven@latest
 		}
 
 	land_rhs:
-		v4 = *l_addr
-		v5 = *v4
+		v4 = *libc.As[unsafe.Pointer](l_addr)
+		v5 = *libc.As[byte](v4)
 		conv3 = int32(int8(v5))
 		tobool = conv3 != 0
 		v6 = tobool
@@ -108,20 +115,20 @@ go install github.com/lewtec/leaven/cmd/leaven@latest
 		goto for_inc
 
 	for_inc:
-		v7 = *l_addr
-		incdec_ptr = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(v7)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-		*l_addr = incdec_ptr
-		v8 = *r_addr
-		incdec_ptr4 = (*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(v8)) + 1*unsafe.Sizeof(*(*byte)(nil))))
-		*r_addr = incdec_ptr4
+		v7 = *libc.As[unsafe.Pointer](l_addr)
+		incdec_ptr = libc.Ptr(libc.AddPointer[byte](libc.As[byte](v7), int(1)*1))
+		*libc.As[unsafe.Pointer](l_addr) = incdec_ptr
+		v8 = *libc.As[unsafe.Pointer](r_addr)
+		incdec_ptr4 = libc.Ptr(libc.AddPointer[byte](libc.As[byte](v8), int(1)*1))
+		*libc.As[unsafe.Pointer](r_addr) = incdec_ptr4
 		goto for_cond
 
 	for_end:
-		v9 = *l_addr
-		v10 = *v9
+		v9 = *libc.As[unsafe.Pointer](l_addr)
+		v10 = *libc.As[byte](v9)
 		conv5 = int32(uint32(v10))
-		v11 = *r_addr
-		v12 = *v11
+		v11 = *libc.As[unsafe.Pointer](r_addr)
+		v12 = *libc.As[byte](v11)
 		conv6 = int32(uint32(v12))
 		sub = conv5 - conv6
 		return sub
