@@ -1,0 +1,62 @@
+name: Autorelease
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      new_version:
+        description: 'New tag version'
+        type: choice
+        default: 'patch'
+        options:
+          - patch
+          - minor
+          - major
+  schedule:
+    - cron: '0 2 * * 6' # saturday 2am
+
+jobs:
+  autorelease:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+      pull-requests: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup git config
+        run: |
+          git config user.name actions-bot
+          git config user.email actions-bot@users.noreply.github.com
+
+      - name: Cache workspaced sources
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/workspaced/sources
+          key: workspaced-src-${{ runner.os }}-${{ hashFiles('workspaced.lock.json') }}
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: CI
+        run: mise run ci
+
+      - name: Release
+        if: github.event.inputs.new_version != '' && github.event_name != 'pull_request'
+        env:
+          NEW_VERSION: ${{ github.event.inputs.new_version }}
+        run: mise release "$NEW_VERSION"
