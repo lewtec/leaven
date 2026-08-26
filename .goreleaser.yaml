@@ -56,8 +56,6 @@ snapshot:
   version_template: "{{ .Tag }}-next"
 
 release:
-  header: |
-    ![Leaven](https://github.com/lewtec/leaven/blob/master/logo.png?raw=true)
   footer: >-
 
     ---
