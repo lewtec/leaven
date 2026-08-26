@@ -136,5 +136,5 @@ mise release          # next (svu) + goreleaser (needs GITHUB_TOKEN)
 mise release patch    # or major | minor | next
 ```
 
-CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Push runs the test matrix. `workflow_dispatch` with patch/minor/major runs that same matrix, then tags and publishes if every cell passed.
+CI: [`.github/workflows/autorelease.yml`](.github/workflows/autorelease.yml). Push/PR runs `mise run ci`. `workflow_dispatch` with patch/minor/major runs that same job, then `mise release` if CI passed.
 

@@ -66,8 +66,8 @@ description = "Native cmake/cargo vs leaven (places testdata/projects if needed)
 run = "go test -count=1 -timeout 30m -run TestAssimilate -v ."
 
 [tasks.ci]
-description = "IR fixtures + build check"
-depends = ["test"]
+description = "IR fixtures, csmith smoke, assimilate, build"
+depends = ["test", "test:csmith", "test:assimilate"]
 run = "go build -o /dev/null ./cmd/leaven"
 
 [tasks.release]
