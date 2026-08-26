@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="Leaven" width="280">
+</p>
+
 # Leaven: Compile LLVM IR to Go
 
 Leaven translates LLVM intermediate representation to Go. 
@@ -22,6 +26,18 @@ It is 64-bit only (amd64, arm64, and other 8-byte-pointer hosts).
 
 The transpiler at github.com/andybalholm/c2go produces much better results
 (but it is not as automatic).
+
+## Install
+
+Download the archive for your OS/arch from [GitHub Releases](https://github.com/lewtec/leaven/releases), extract `leaven`, put it on `PATH`.
+
+Builds cover the same targets as CI: linux, darwin, and windows, amd64 and arm64.
+
+From source:
+
+```bash
+go install github.com/lewtec/leaven/cmd/leaven@latest
+```
 
 ## Usage Example
 (Translating `strcmp` from musl libc.)
@@ -110,4 +126,15 @@ The transpiler at github.com/andybalholm/c2go produces much better results
 		sub = conv5 - conv6
 		return sub
 	}
+
+## Release
+
+[GoReleaser](https://goreleaser.com) + [svu](https://github.com/caarlos0/svu). Archives and checksums only (no Homebrew, Docker, or packages). Tags have no `v` prefix ([`.svu.yml`](.svu.yml)).
+
+```bash
+mise release          # next (svu) + goreleaser (needs GITHUB_TOKEN)
+mise release patch    # or major | minor | next
+```
+
+CI: [`.github/workflows/autorelease.yml`](.github/workflows/autorelease.yml) `workflow_dispatch` with patch/minor/major runs `mise release <bump>`.
 

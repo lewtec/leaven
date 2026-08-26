@@ -1,0 +1,37 @@
+name: Autorelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_version:
+        description: "New tag version"
+        type: choice
+        default: "patch"
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  autorelease:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup git config
+        run: |
+          git config user.name actions-bot
+          git config user.email actions-bot@users.noreply.github.com
+
+      - name: Set up tools (mise)
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ inputs.new_version }}
+        run: mise release "$NEW_VERSION"
