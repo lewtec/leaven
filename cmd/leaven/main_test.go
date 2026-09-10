@@ -9,44 +9,44 @@ import (
 )
 
 func TestParseCLIFile(t *testing.T) {
-	a, err := cmd.Parse[args]("--package", "foo", "in.ll")
+	app, err := cmd.Parse[cmd.App[args]]("--package", "foo", "in.ll")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := a.Package.Value(); got != "foo" {
+	if got := app.Args.Package.Value(); got != "foo" {
 		t.Fatalf("package = %q, want foo", got)
 	}
-	if got := a.Input.Value(); got != "in.ll" {
+	if got := app.Args.Input.Value(); got != "in.ll" {
 		t.Fatalf("input = %q, want in.ll", got)
 	}
 }
 
 func TestParseCLIDash(t *testing.T) {
-	a, err := cmd.Parse[args]("-")
+	app, err := cmd.Parse[cmd.App[args]]("-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := a.Input.Value(); got != "-" {
+	if got := app.Args.Input.Value(); got != "-" {
 		t.Fatalf("input = %q, want -", got)
 	}
 }
 
 func TestParseCLIVersionFlag(t *testing.T) {
-	a, err := cmd.Parse[args]("--version")
+	app, err := cmd.Parse[cmd.App[args]]("--version")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.version.Value() {
-		t.Fatal("version flag unset")
+	if !app.WantVersion() {
+		t.Fatal("WantVersion() = false")
 	}
 }
 
 func TestParseCLIPackageDefault(t *testing.T) {
-	a, err := cmd.Parse[args]()
+	app, err := cmd.Parse[cmd.App[args]]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := a.Package.Value(); got != "main" {
+	if got := app.Args.Package.Value(); got != "main" {
 		t.Fatalf("package = %q, want main", got)
 	}
 }
@@ -64,14 +64,14 @@ func TestDescription(t *testing.T) {
 }
 
 func TestParseCLIUnknownFlag(t *testing.T) {
-	_, err := cmd.Parse[args]("--nope")
+	_, err := cmd.Parse[cmd.App[args]]("--nope")
 	if !errors.Is(err, cmd.ErrUnknownFlag) {
 		t.Fatalf("err = %v, want ErrUnknownFlag", err)
 	}
 }
 
 func TestParseCLITwoFiles(t *testing.T) {
-	_, err := cmd.Parse[args]("a.ll", "b.ll")
+	_, err := cmd.Parse[cmd.App[args]]("a.ll", "b.ll")
 	if !errors.Is(err, cmd.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want ErrInvalidArgument", err)
 	}

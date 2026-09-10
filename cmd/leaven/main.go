@@ -2,23 +2,18 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 
 	"github.com/lewtec/leaven"
 	"github.com/lewtec/lewkit/x/cmd"
 	"github.com/lewtec/lewkit/x/io/atomic"
-	"github.com/lewtec/lewkit/x/release"
 )
 
 type args struct {
-	help    cmd.Flag      `short:"h" long:"help" help:"show help"`
-	version cmd.Flag      `long:"version" help:"print version"`
 	Package cmd.StringArg `long:"package" short:"p" help:"Go package name for generated code" default:"main"`
 	Input   cmd.StringArg `help:"LLVM IR file; omit or - for stdin"`
 }
@@ -28,36 +23,23 @@ func (args) Description() string {
 }
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-	if err := run(ctx); err != nil {
+	if err := run(); err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context) error {
-	a, err := cmd.Parse[args](os.Args[1:]...)
+func run() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	app, err := cmd.Parse[cmd.App[args]](os.Args[1:]...)
 	if err != nil {
 		return err
 	}
-	return a.Run(ctx)
+	return app.Run(ctx)
 }
 
 func (a *args) Run(ctx context.Context) error {
-	switch {
-	case a.help.Value():
-		text, err := cmd.Usage[args](filepath.Base(os.Args[0]))
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprint(os.Stdout, text)
-		return err
-	case a.version.Value():
-		_, err := fmt.Fprintln(os.Stdout, release.Version())
-		return err
-	}
-
 	c := &leaven.Command{Package: a.Package.Value()}
 	path := a.Input.Value()
 	if path == "" || path == "-" {
