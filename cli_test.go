@@ -22,13 +22,13 @@ func TestCLIStdinStdout(t *testing.T) {
 }
 
 func TestCLIDashStdin(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/leaven", "--input", "-")
+	cmd := exec.Command("go", "run", "./cmd/leaven", "-")
 	cmd.Stdin = bytes.NewReader(testdataIR(t))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("leaven --input -: %v\n%s", err, stderr.Bytes())
+		t.Fatalf("leaven -: %v\n%s", err, stderr.Bytes())
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("package main")) {
 		t.Fatalf("stdout missing package clause:\n%s\nstderr:\n%s", stdout.Bytes(), stderr.Bytes())
@@ -36,7 +36,7 @@ func TestCLIDashStdin(t *testing.T) {
 }
 
 func TestCLIVersion(t *testing.T) {
-	for _, args := range [][]string{{"--version"}, {"version"}} {
+	for _, args := range [][]string{{"--version"}} {
 		cmd := exec.Command("go", append([]string{"run", "./cmd/leaven"}, args...)...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -62,7 +62,7 @@ func TestCLIHelp(t *testing.T) {
 		"Usage:",
 		"--package",
 		"(default: main)",
-		"--input",
+		"Arguments:",
 		"--version",
 	} {
 		if !strings.Contains(got, want) {
