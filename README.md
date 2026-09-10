@@ -51,7 +51,7 @@ go install github.com/lewtec/leaven/cmd/leaven@latest
 		return *(unsigned char *)l - *(unsigned char *)r;
 	}
 	$ clang -S -emit-llvm -fno-discard-value-names strcmp.c
-	$ go run ./cmd/leaven strcmp.ll
+	$ go run ./cmd/leaven --input strcmp.ll
 	$ clang -S -emit-llvm -fno-discard-value-names -o - strcmp.c | go run ./cmd/leaven > strcmp.go
 	$ goimports -w strcmp.go
 	$ cat strcmp.go
