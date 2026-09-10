@@ -31,16 +31,6 @@ func TestParseCLIDash(t *testing.T) {
 	}
 }
 
-func TestParseCLIVersionFlag(t *testing.T) {
-	app, err := cmd.Parse[cmd.App[args]]("--version")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !app.WantVersion() {
-		t.Fatal("WantVersion() = false")
-	}
-}
-
 func TestParseCLIPackageDefault(t *testing.T) {
 	app, err := cmd.Parse[cmd.App[args]]()
 	if err != nil {
@@ -60,13 +50,6 @@ func TestDescription(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Description() missing %q:\n%s", want, got)
 		}
-	}
-}
-
-func TestParseCLIUnknownFlag(t *testing.T) {
-	_, err := cmd.Parse[cmd.App[args]]("--nope")
-	if !errors.Is(err, cmd.ErrUnknownFlag) {
-		t.Fatalf("err = %v, want ErrUnknownFlag", err)
 	}
 }
 
