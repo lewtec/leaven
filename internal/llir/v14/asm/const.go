@@ -3,11 +3,11 @@ package asm
 import (
 	"fmt"
 
-	"github.com/lewtec/leaven/internal/llir/v14/ll/ast"
 	"github.com/lewtec/leaven/internal/llir/internal/enc"
 	"github.com/lewtec/leaven/internal/llir/ir"
 	"github.com/lewtec/leaven/internal/llir/ir/constant"
 	"github.com/lewtec/leaven/internal/llir/ir/types"
+	"github.com/lewtec/leaven/internal/llir/v14/ll/ast"
 	"github.com/pkg/errors"
 )
 
@@ -231,7 +231,7 @@ func (gen *generator) irBlockAddressConst(t types.Type, old *ast.BlockAddressCon
 	funcName := globalIdent(old.Func())
 	v, ok := gen.new.globals[funcName]
 	if !ok {
-		return nil, errors.Errorf("unable to locate global identifier %q", funcName)
+		return nil, errors.Errorf("unable to locate global identifier %q", funcName.Ident())
 	}
 	f, ok := v.(*ir.Func)
 	if !ok {

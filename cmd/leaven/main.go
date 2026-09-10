@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +15,6 @@ import (
 type args struct {
 	Package cmd.StringArg `long:"package" short:"p" help:"Go package name for generated code" default:"main"`
 	Input   cmd.StringArg `long:"input" short:"i" help:"LLVM IR file; omit or - for stdin"`
-	file    string
 }
 
 func (args) Description() string {
@@ -33,61 +31,15 @@ func main() {
 }
 
 func run(ctx context.Context, argv []string) error {
-	app, input, err := parseCLI(argv)
+	app, err := cmd.Parse[cmd.App[args]](argv...)
 	if err != nil {
 		return err
 	}
-	app.Args.file = input
 	return app.Run(ctx)
 }
 
-func parseCLI(argv []string) (cmd.App[args], string, error) {
-	app, err := cmd.Parse[cmd.App[args]](argv...)
-	if err == nil {
-		return app, "", nil
-	}
-	if !errors.Is(err, cmd.ErrUnknownCommand) {
-		return app, "", err
-	}
-	name := unknownCommandName(err)
-	if name == "" {
-		return app, "", err
-	}
-	app, err = cmd.Parse[cmd.App[args]](dropToken(argv, name)...)
-	if err != nil {
-		return app, "", err
-	}
-	return app, name, nil
-}
-
-func unknownCommandName(err error) string {
-	s, ok := strings.CutPrefix(err.Error(), "unknown command: ")
-	if !ok {
-		return ""
-	}
-	return s
-}
-
-func dropToken(argv []string, tok string) []string {
-	for i, a := range argv {
-		if a == tok {
-			out := make([]string, 0, len(argv)-1)
-			out = append(out, argv[:i]...)
-			return append(out, argv[i+1:]...)
-		}
-	}
-	return argv
-}
-
-func (a *args) path() string {
-	if v := a.Input.Value(); v != "" {
-		return v
-	}
-	return a.file
-}
-
 func (a *args) Run(ctx context.Context) error {
-	name, in, out, closer, err := openIO(a.path())
+	name, in, out, closer, err := openIO(a.Input.Value())
 	if err != nil {
 		return err
 	}
