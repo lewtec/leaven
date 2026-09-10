@@ -2,52 +2,98 @@ package main
 
 import (
 	"context"
-	"flag"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 
 	"github.com/lewtec/leaven"
+	"github.com/lewtec/lewkit/x/cmd"
 )
 
-// Set via goreleaser ldflags: -X main.version={{ .Version }}
-var version = "dev"
+type args struct {
+	Package cmd.StringArg `long:"package" short:"p" help:"Go package name for generated code"`
+	Input   cmd.StringArg `long:"input" short:"i" help:"LLVM IR file; omit or - for stdin"`
+	file    string
+}
 
 func main() {
-	packageName := flag.String("package", "main", "Go package name for generated code")
-	printVersion := flag.Bool("version", false, "print version and exit")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: leaven [flags] [input-file.ll]\n")
-		fmt.Fprintf(os.Stderr, "With no file (or -), read LLVM IR from stdin and write Go to stdout.\n")
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-	if *printVersion {
-		fmt.Println(version)
-		return
-	}
-	if flag.NArg() > 1 {
-		flag.Usage()
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
 
-	name, in, out, closer, err := openIO(flag.Arg(0))
+func run(argv []string) error {
+	app, input, err := parseCLI(argv)
 	if err != nil {
-		log.Fatal(err)
+		return err
+	}
+	app.Args.file = input
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	return app.Run(ctx)
+}
+
+func parseCLI(argv []string) (cmd.App[args], string, error) {
+	app, err := cmd.Parse[cmd.App[args]](argv...)
+	if err == nil {
+		return app, "", nil
+	}
+	if !errors.Is(err, cmd.ErrUnknownCommand) {
+		return app, "", err
+	}
+	name := unknownCommandName(err)
+	if name == "" {
+		return app, "", err
+	}
+	app, err = cmd.Parse[cmd.App[args]](dropToken(argv, name)...)
+	if err != nil {
+		return app, "", err
+	}
+	return app, name, nil
+}
+
+func unknownCommandName(err error) string {
+	s, ok := strings.CutPrefix(err.Error(), "unknown command: ")
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func dropToken(argv []string, tok string) []string {
+	for i, a := range argv {
+		if a == tok {
+			out := make([]string, 0, len(argv)-1)
+			out = append(out, argv[:i]...)
+			return append(out, argv[i+1:]...)
+		}
+	}
+	return argv
+}
+
+func (a *args) path() string {
+	if v := a.Input.Value(); v != "" {
+		return v
+	}
+	return a.file
+}
+
+func (a *args) Run(ctx context.Context) error {
+	name, in, out, closer, err := openIO(a.path())
+	if err != nil {
+		return err
 	}
 	defer closer()
-
-	cmd := &leaven.Command{
-		Package: *packageName,
+	c := &leaven.Command{
+		Package: a.Package.Value(),
 		Name:    name,
 		Input:   in,
 		Output:  out,
 	}
-	if err := cmd.Run(context.Background()); err != nil {
-		log.Fatal(err)
-	}
+	return c.Run(ctx)
 }
 
 // openIO uses stdin/stdout when path is empty or "-"; otherwise path → path with .go suffix.
