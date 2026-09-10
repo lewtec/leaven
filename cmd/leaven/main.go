@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/lewtec/leaven"
 	"github.com/lewtec/lewkit/x/cmd"
-	"github.com/lewtec/lewkit/x/io/atomic"
 )
 
 type args struct {
@@ -51,9 +49,11 @@ func (a *args) Run(ctx context.Context) error {
 		return err
 	}
 	defer f.Close()
-	c.Name, c.Input = path, f
-	return atomic.WriteFileFunction(strings.TrimSuffix(path, ".ll")+".go", func(w io.Writer) error {
-		c.Output = w
-		return c.Run(ctx)
-	})
+	out, err := os.Create(strings.TrimSuffix(path, ".ll") + ".go")
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	c.Name, c.Input, c.Output = path, f, out
+	return c.Run(ctx)
 }
