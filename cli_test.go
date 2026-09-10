@@ -56,7 +56,15 @@ func TestCLIHelp(t *testing.T) {
 		t.Fatalf("leaven --help: %v\n%s", err, out)
 	}
 	got := string(out)
-	for _, want := range []string{"Usage:", "--package", "--input", "--version"} {
+	for _, want := range []string{
+		"Transpile LLVM IR to Go.",
+		"With no file (or -), read LLVM IR from stdin and write Go to stdout.",
+		"Usage:",
+		"--package",
+		"(default: main)",
+		"--input",
+		"--version",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("leaven --help missing %q:\n%s", want, got)
 		}
