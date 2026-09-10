@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lewtec/lewkit/x/cmd"
@@ -60,6 +61,28 @@ func TestParseCLIVersionCommand(t *testing.T) {
 	}
 	if !app.WantVersion() {
 		t.Fatal("WantVersion() = false")
+	}
+}
+
+func TestParseCLIPackageDefault(t *testing.T) {
+	app, _, err := parseCLI(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.Args.Package.Value(); got != "main" {
+		t.Fatalf("package = %q, want main", got)
+	}
+}
+
+func TestDescription(t *testing.T) {
+	got := args{}.Description()
+	for _, want := range []string{
+		"Transpile LLVM IR to Go.",
+		"With no file (or -), read LLVM IR from stdin and write Go to stdout.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Description() missing %q:\n%s", want, got)
+		}
 	}
 }
 

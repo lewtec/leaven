@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/lewtec/leaven"
@@ -13,26 +14,30 @@ import (
 )
 
 type args struct {
-	Package cmd.StringArg `long:"package" short:"p" help:"Go package name for generated code"`
+	Package cmd.StringArg `long:"package" short:"p" help:"Go package name for generated code" default:"main"`
 	Input   cmd.StringArg `long:"input" short:"i" help:"LLVM IR file; omit or - for stdin"`
 	file    string
 }
 
+func (args) Description() string {
+	return "Transpile LLVM IR to Go.\n\nWith no file (or -), read LLVM IR from stdin and write Go to stdout."
+}
+
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(argv []string) error {
+func run(ctx context.Context, argv []string) error {
 	app, input, err := parseCLI(argv)
 	if err != nil {
 		return err
 	}
 	app.Args.file = input
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	return app.Run(ctx)
 }
 

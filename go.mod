@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/dave/jennifer v1.7.1
 	github.com/ianlancetaylor/demangle v0.0.0-20260724033716-83e58baca724
-	github.com/lewtec/lewkit v0.0.0-20260910013007-48dd615c43ee
+	github.com/lewtec/lewkit v0.0.0-20260910175706-181ec3baf2ba
 	github.com/mewmew/float v0.0.0-20201204173432-505706aa38fa
 	github.com/pkg/errors v0.9.1
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba
