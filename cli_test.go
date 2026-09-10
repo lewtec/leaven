@@ -3,6 +3,7 @@ package leaven
 import (
 	"bytes"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -35,12 +36,29 @@ func TestCLIDashStdin(t *testing.T) {
 }
 
 func TestCLIVersion(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/leaven", "-version")
+	for _, args := range [][]string{{"--version"}, {"version"}} {
+		cmd := exec.Command("go", append([]string{"run", "./cmd/leaven"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("leaven %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		got := string(bytes.TrimSpace(out))
+		if !strings.HasPrefix(got, "dev") {
+			t.Fatalf("leaven %s version = %q, want prefix dev", strings.Join(args, " "), got)
+		}
+	}
+}
+
+func TestCLIHelp(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/leaven", "--help")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("leaven -version: %v\n%s", err, out)
+		t.Fatalf("leaven --help: %v\n%s", err, out)
 	}
-	if got := string(bytes.TrimSpace(out)); got != "dev" {
-		t.Fatalf("version = %q, want dev", got)
+	got := string(out)
+	for _, want := range []string{"Usage:", "--package", "--input", "--version"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("leaven --help missing %q:\n%s", want, got)
+		}
 	}
 }
