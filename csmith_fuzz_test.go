@@ -306,7 +306,7 @@ func runCsmithCase(t *testing.T, tools csmithTools, seed uint64) {
 	}
 
 	// 4. Transpile with leaven
-	leaven := exec.Command("go", "run", "./cmd/leaven", "--input", llFile)
+	leaven := exec.Command("go", "run", "./cmd/leaven", llFile)
 	if out, err := leaven.CombinedOutput(); err != nil {
 		t.Fatalf("leaven seed=%d: %v\n%s\n(source kept under temp dir; re-run with -count=1 -v)", seed, err, out)
 	}
